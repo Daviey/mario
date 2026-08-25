@@ -316,29 +316,37 @@ func TestSnapshotFields(t *testing.T) {
 
 func TestTitleLOpensBoardOffline(t *testing.T) {
 	// Integration through gameIO: 'l' on the title screen opens the board
-	// (OFFLINE without credentials) and never starts the game.
+	// (OFFLINE without credentials) and never starts the game. Both cases
+	// must work: the pixel-font hint reads "L LEADERBOARD", so players
+	// using shift or caps-lock send uppercase.
 	t.Setenv("SUPABASE_URL", "")
-	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
-	io.feed([]byte("l"))
-	for range 100 {
-		time.Sleep(1 * time.Millisecond) // Let fetchInto goroutine run
-		g.Update(io.poll())
-		ui := io.uiTick(g)
-		if ui != nil && ui.Mode == render.UIBoard && !ui.Loading {
-			if g.State != engine.StateTitle {
-				t.Fatalf("game left title: %v", g.State)
+	for _, key := range []byte{'l', 'L'} {
+		g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+		io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+		io.feed([]byte{key})
+		opened := false
+		for range 100 {
+			time.Sleep(1 * time.Millisecond) // Let fetchInto goroutine run
+			g.Update(io.poll())
+			ui := io.uiTick(g)
+			if ui != nil && ui.Mode == render.UIBoard && !ui.Loading {
+				if g.State != engine.StateTitle {
+					t.Fatalf("%q: game left title: %v", key, g.State)
+				}
+				if ui.Loading {
+					t.Error("offline board stuck LOADING")
+				}
+				if ui.Status != "OFFLINE" {
+					t.Errorf("status = %q, want OFFLINE", ui.Status)
+				}
+				opened = true
+				break
 			}
-			if ui.Loading {
-				t.Error("offline board stuck LOADING")
-			}
-			if ui.Status != "OFFLINE" {
-				t.Errorf("status = %q, want OFFLINE", ui.Status)
-			}
-			return
+		}
+		if !opened {
+			t.Fatalf("%q never opened the board", key)
 		}
 	}
-	t.Fatal("'l' never opened the board")
 }
 
 func TestBoardRClosesAndRestarts(t *testing.T) {

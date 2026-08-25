@@ -2,7 +2,7 @@ package main
 
 // The in-game leaderboard UI state machine: game-over flows into a
 // submit prompt, pixel-font name entry, then the board screen (also
-// reachable from the title screen with 'l'). Network calls run off the
+// reachable from the title screen with 'l'/'L'). Network calls run off the
 // tick loop; submit/fetch are injectable for tests.
 
 import (
@@ -185,9 +185,10 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// Title-screen 'l' opens the board.
+	// Title-screen 'l'/'L' opens the board. Both cases: the hint renders
+	// as "L LEADERBOARD" and shift/caps-lock make case unpredictable.
 	if u.mode == render.UIOff && g.State == engine.StateTitle && len(u.noted) > 0 {
-		if bytesContain(u.noted, 'l') {
+		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
 			u.noted = nil
 			u.mode = render.UIBoard
 			u.player, _ = loadPlayer()
