@@ -30,10 +30,11 @@ build:
 	$(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(BINARY) .
 
 # One target per GOOS/GOARCH pair; dist/mario-<os>-<arch>[.exe].
+# POSIX sh only (no bashisms): GitHub runners use dash as /bin/sh.
 $(TARGETS):
 	@mkdir -p $(DIST)
-	@os=$$(cut -d/ -f1 <<< "$@"); arch=$$(cut -d/ -f2 <<< "$@"); \
-	suffix=""; [ "$$os" = "windows" ] && suffix=".exe"; \
+	@ref=$@; os=$${ref%/*}; arch=$${ref#*/}; \
+	suffix=""; if [ "$$os" = "windows" ]; then suffix=".exe"; fi; \
 	echo "BUILD $(DIST)/$(BINARY)-$$os-$$arch$$suffix"; \
 	$(GOFLAGS) GOOS=$$os GOARCH=$$arch go build -ldflags '$(LDFLAGS)' \
 		-o $(DIST)/$(BINARY)-$$os-$$arch$$suffix .
