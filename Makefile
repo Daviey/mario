@@ -49,7 +49,9 @@ web:
 	@mkdir -p $(DIST)/web
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(DIST)/web/mario.wasm .
 	cp web/index.html $(WEBDIST)/
-	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
+	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
+		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \
+		cp "$$wasm_exec" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
 	@echo "static site in $(WEBDIST) — drop it on GitHub Pages (or any static host)"
 
 web-serve: web
