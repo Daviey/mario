@@ -123,3 +123,11 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **CI runners use dash as `/bin/sh`** — Makefile recipes must stay POSIX (no `<<<`/bashisms): they pass locally on NixOS bash and die only in Actions. The runner's toolcache Go also lacks `$(go env GOROOT)/lib/wasm/wasm_exec.js` (hence the `find` in `make web`), and `dist/mario-*` already matches `mario-web.zip` — never list it twice in `gh release create`.
 - **Re-running a release run re-executes `gh release create`** — delete the tag's release first or it fails on existing assets. Reruns use the tag commit's workflow file; the `pages` (`workflow_run`) job always uses the default-branch file.
 - Live Supabase details: project `jdmgfpzxcdpyylhwdbkz` (direct IPv6 `db.<ref>.supabase.co` reachable from this host; pooler tenant lookup fails); schema changes go through the migration file + direct DB apply.
+
+
+## Agent Maintenance & Self-Correction
+
+<critical>
+- **Continuous Documentation**: Agents MUST evaluate whether `AGENTS.md` requires an update during the Cleanup phase of any task.
+- **Update Threshold**: Do NOT routinely update `AGENTS.md` for trivial bug fixes, standard feature additions, or localized refactors. ONLY update it if you have introduced a new architectural pattern, changed an interface/API contract described here, or if you need to remove deprecated/obsolete information.
+</critical>
