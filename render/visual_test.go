@@ -44,30 +44,32 @@ func TestVisualDump(t *testing.T) {
 		t.Skip("visual dump")
 	}
 	rc := runeColors(testPal)
-	f := NewFrame(80, 36, testPal.Sky)
+	f := NewFrame(120, 54, testPal.Sky)
 
 	// Sky dressing.
 	f.DrawSprite(sprCloud, rc, 8, 2, false, 1)
-	f.DrawSprite(sprHill, rc, 34, 10, false, 1)
-	f.DrawSprite(sprBush, rc, 46, 12, false, 1)
-	drawFlagTop(f, testPal, 26, 6)
-	drawFlagPole(f, testPal, 26, 10)
-
-	// Tile parade.
-	drawQuestion(f, testPal, 2, 14, true)
-	drawUsed(f, testPal, 8, 14)
-	drawBrick(f, testPal, 14, 18, 0)
-	drawBrick(f, testPal, 18, 18, 1)
-	drawPipe(f, testPal, 24, 18, 0, true)
-	drawPipe(f, testPal, 28, 18, 1, true)
-	drawPipe(f, testPal, 24, 20, 0, false)
-	drawPipe(f, testPal, 28, 20, 1, false)
-	for i := 0; i < 12; i++ { // ground strip under everything
-		drawGround(f, testPal, 2+i*4, 26, i, 13, true)
+	drawFlagTop(f, testPal, 26, 4)
+	for ty := 5; ty <= 6; ty++ {
+		drawFlagPole(f, testPal, 26, ty*Pix)
 	}
-	drawCastle(f, testPal, 56, 10)
 
-	// Sprite parade along the bottom.
+	// Tile parade at rows 14-19, standing on a ground strip at 44.
+	drawQuestion(f, testPal, 2, 14, true)
+	drawUsed(f, testPal, 9, 14)
+	drawBrick(f, testPal, 16, 14, 0)
+	drawBrick(f, testPal, 23, 14, 1)
+	drawPipe(f, testPal, 30, 14, 0, true)
+	drawPipe(f, testPal, 36, 14, 1, true)
+	drawPipe(f, testPal, 30, 20, 0, false)
+	drawPipe(f, testPal, 36, 20, 1, false)
+	drawCastle(f, testPal, 56, 20)
+	f.DrawSprite(sprHill, rc, 40, 44-sprH(sprHill), false, 1)
+	f.DrawSprite(sprBush, rc, 46, 44-sprH(sprBush), false, 1)
+	for i := range 20 { // ground strip under everything
+		drawGround(f, testPal, 2+i*Pix, 44, i, 13, true)
+	}
+
+	// Sprite parade standing on the ground line.
 	x := 2
 	for _, a := range []struct {
 		art  []string
@@ -76,8 +78,9 @@ func TestVisualDump(t *testing.T) {
 		{sprMarioSmall, false}, {sprMarioSuper, false}, {sprGoomba, false},
 		{sprKoopa, false}, {sprShell, false}, {sprMushroom, false},
 		{sprCoin, false}, {sprCoinEdge, false}, {sprMarioSuper, true}, {sprKoopa, true},
+		{sprCoinPop, false}, {sprSparkle, false},
 	} {
-		f.DrawSprite(a.art, rc, x, 35-sprH(a.art), a.flip, 1)
+		f.DrawSprite(a.art, rc, x, 44-sprH(a.art), a.flip, 1)
 		x += sprW(a.art) + 3
 	}
 	t.Log("\n" + dumpFrame(f))

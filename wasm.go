@@ -59,7 +59,7 @@ func main() {
 	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 
 	// Live viewport: the page reports how many world pixels it can show;
-	// tiles = pixels/4. Never below the playable minimum.
+	// tiles = pixels/Pix. Never below the playable minimum.
 	js.Global().Set("marioSize", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		w := args[0].Int() / render.Pix
 		h := (args[1].Int() - render.HudBandPx - render.StatusBandPx) / render.Pix

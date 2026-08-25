@@ -442,11 +442,11 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 			}
 		}
 		if HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
-			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf((engine.GroundTop-1)*Pix+1), false, 1)
+			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprHill)), false, 1)
 		}
 		if w, ok := BushAt(tx); ok && g.Level.At(tx, engine.GroundTop).Solid() {
 			_ = w
-			f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-2), false, 1)
+			f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
 		}
 	}
 }
@@ -493,7 +493,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 			x := tx*Pix - ox
 			y := ty*Pix - oy
 			if g.BumpActive(tx, ty) {
-				y -= 2 // bump nudges the block up half a tile
+				y -= Pix / 2 // bump nudges the block up half a tile
 			}
 			switch t {
 			case engine.Ground:
@@ -537,7 +537,7 @@ func drawCoinItems(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 		}
 		cx := int(math.Round((c.Pos.X + engine.CoinSize/2 - camX) * Pix))
 		cy := int(math.Round((c.Pos.Y + engine.CoinSize/2 - camY) * Pix))
-		f.DrawSprite(art, rc, cx-sprW(art)/2, cy-2, false, 1)
+		f.DrawSprite(art, rc, cx-sprW(art)/2, cy-sprH(art)/2, false, 1)
 	}
 }
 
@@ -548,7 +548,7 @@ func drawMushrooms(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX
 		}
 		cx := int(math.Round((m.Pos.X + engine.MushroomW/2 - camX) * Pix))
 		bottom := int(math.Round((m.Pos.Y + engine.MushroomH - camY) * Pix))
-		f.DrawSprite(sprMushroom, rc, cx-2, bottom-sprH(sprMushroom), false, 1)
+		f.DrawSprite(sprMushroom, rc, cx-sprW(sprMushroom)/2, bottom-sprH(sprMushroom), false, 1)
 	}
 }
 
@@ -581,16 +581,16 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 		bottom := int(math.Round((e.Pos.Y + e.H - camY) * Pix))
 		switch e.State {
 		case engine.EnemySquashed, engine.EnemyFlipped:
-			f.Fill(cx-2, bottom-1, 5, 1, p.GoombaFlat)
+			f.Fill(cx-3, bottom-2, 6, 2, p.GoombaFlat)
 		case engine.EnemyShell, engine.EnemyShellMoving:
 			art := sprShell
 			if e.State == engine.EnemyShellMoving {
 				// motion streaks behind the shell
-				dx := -e.Dir * 3
-				f.Set(cx+dx, bottom-2, p.White)
-				f.Set(cx+dx+e.Dir, bottom-2, p.White)
+				dx := -e.Dir * 4
+				f.Set(cx+dx, bottom-3, p.White)
+				f.Set(cx+dx+e.Dir, bottom-3, p.White)
 			}
-			f.DrawSprite(art, rc, cx-2, bottom-sprH(art), e.Dir < 0, 1)
+			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		default:
 			art := sprGoomba
 			if e.Kind == engine.KindKoopa {
@@ -652,8 +652,7 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 	// Bottom-anchored cascade: the cast stands ON the ground line and
 	// every text element stacks above it, so no viewport height can
 	// overlap or bury anything. Ground occupies the last 2 tile rows.
-	groundTop := f.H - 2*Pix
-	castY := groundTop - 10 // mario sprite top; feet on the last sky row
+	castY := titleCastY(f) // mario sprite top; feet on the last sky row
 	if full {
 		for _, e := range titleTextEls(f) {
 			if e.blink && g.Tick%40 >= 28 {
@@ -664,8 +663,9 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 	}
 	// Mario and the goomba flank the centre, facing each other.
 	cx := f.W / 2
-	f.DrawSprite(sprMarioSmall, rc2, cx-17, castY, false, 2)
-	f.DrawSprite(sprGoomba, rc2, cx+8, castY+2, true, 2)
+	f.DrawSprite(sprMarioSmall, rc2, cx-2*sprW(sprMarioSmall)-6, castY, false, 2)
+	f.DrawSprite(sprGoomba, rc2, cx+7, castY+2*(sprH(sprMarioSmall)-sprH(sprGoomba)), true, 2)
+
 }
 
 // titleInk picks a title text color from the palette.
@@ -702,8 +702,8 @@ type titleText struct {
 // elements; titleTextBands turns them into the keep-clear rects for the
 // title cloud filter in drawDecorations.
 func titleTextEls(f *Frame) []titleText {
-	groundTop := f.H - 2*Pix
-	castY := groundTop - 10
+	castY := titleCastY(f)
+	castH := 2 * sprH(sprMarioSmall)
 	var els []titleText
 	add := func(s string, y, scale int, ink titleInk, blink bool) {
 		els = append(els, titleText{s: s, y: y, scale: scale, ink: ink, blink: blink})
@@ -715,11 +715,17 @@ func titleTextEls(f *Frame) []titleText {
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false)
 		}
 	}
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+11, f.H-5), 1, inkGold, true)
-	if hintY := castY + 17; hintY+5 <= f.H-5 {
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1, inkGold, true)
+	if hintY := castY + castH + 7; hintY+5 <= f.H-5 {
 		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false)
 	}
 	return els
+}
+
+// titleCastY is the top of the ×2-scaled title cast; its feet stand on the
+// ground line (last 2 tile rows are ground).
+func titleCastY(f *Frame) int {
+	return f.H - 2*Pix - 2*sprH(sprMarioSmall)
 }
 
 // titleTextBands returns the pixel rects covered by full-mode title text.

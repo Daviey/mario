@@ -56,15 +56,15 @@ func TestSkyBackground(t *testing.T) {
 func TestGroundPixels(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
-	// Camera clamped to Y=6: ground top (world 13) at pixel row 28.
-	if got := worldPx(s, 10, 28); got != testPal.GroundLight {
+	// Camera clamped to Y=6: ground top (world 13) at pixel row 42.
+	if got := worldPx(s, 10, 42); got != testPal.GroundLight {
 		t.Errorf("ground top pixel = %+v, want sunlit", got)
 	}
-	if got := worldPx(s, 10, 29); got != testPal.GroundMid {
+	if got := worldPx(s, 10, 44); got != testPal.GroundMid {
 		t.Errorf("soil pixel = %+v", got)
 	}
-	// Deep ground row (world 14, pixel row 32) has no sunlit stripe.
-	if got := worldPx(s, 10, 32); got == testPal.GroundLight {
+	// Deep ground row (world 14, pixel row 48) has no sunlit stripe.
+	if got := worldPx(s, 10, 48); got == testPal.GroundLight {
 		t.Error("deep ground row painted sunlit")
 	}
 }
@@ -72,29 +72,29 @@ func TestGroundPixels(t *testing.T) {
 func TestQuestionAndUsedPixels(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal) // Tick 0: bright body phase
-	// Question at world (6,9): pixel cols 24..27, rows 12..15.
-	if got := worldPx(s, 25, 14); got != testPal.QuestionBG {
+	// Question at world (6,9): pixel cols 36..41, rows 18..23.
+	if got := worldPx(s, 37, 20); got != testPal.QuestionBG {
 		t.Errorf("question block body = %+v", got)
 	}
-	if got := worldPx(s, 25, 12); got != testPal.QuestionMark {
+	if got := worldPx(s, 38, 18); got != testPal.QuestionMark {
 		t.Errorf("'?' pixel = %+v, want always-bright mark", got)
 	}
-	if got := worldPx(s, 24, 13); got != testPal.QuestionMark {
+	if got := worldPx(s, 36, 19); got != testPal.QuestionMark {
 		t.Errorf("'?' curl pixel = %+v, want always-bright mark", got)
 	}
 	// Dim phase: the body deepens but the mark stays bright.
 	g.Tick = 24
 	s = Render(g, testPal)
-	if got := worldPx(s, 25, 14); got != testPal.QuestionDim {
+	if got := worldPx(s, 37, 20); got != testPal.QuestionDim {
 		t.Errorf("dim body = %+v", got)
 	}
-	if got := worldPx(s, 25, 12); got != testPal.QuestionMark {
+	if got := worldPx(s, 38, 18); got != testPal.QuestionMark {
 		t.Errorf("'?' pixel in dim phase = %+v, mark must never dim", got)
 	}
 	// A used block is solid dull brown.
 	g.Level.Set(8, 9, engine.Used)
 	s = Render(g, testPal)
-	if got := worldPx(s, 33, 13); got != testPal.UsedBG {
+	if got := worldPx(s, 49, 20); got != testPal.UsedBG {
 		t.Errorf("used block = %+v", got)
 	}
 }
@@ -102,28 +102,28 @@ func TestQuestionAndUsedPixels(t *testing.T) {
 func TestPipeShading(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
-	// Pipe at world x=10, lip at row 11 -> rim pixel rows 20-21.
-	if got := worldPx(s, 41, 20); got != testPal.GreenLight {
+	// Pipe at world x=10, lip at row 11 -> rim pixel rows 30-31.
+	if got := worldPx(s, 63, 30); got != testPal.GreenLight {
 		t.Errorf("pipe rim = %+v, want lit green", got)
 	}
-	if got := worldPx(s, 47, 21); got != testPal.GreenDark {
+	if got := worldPx(s, 70, 31); got != testPal.GreenDark {
 		t.Errorf("pipe rim shadow = %+v", got)
 	}
 	// The shaft starts inside the lip tile: no sky band under the rim.
-	if got := worldPx(s, 41, 22); got != testPal.GreenLight {
+	if got := worldPx(s, 61, 32); got != testPal.GreenLight {
 		t.Errorf("shaft under rim = %+v, want lit green (no gap)", got)
 	}
 	// Body continues the shaft, inset 1px per side so the rim overhangs.
-	if got := worldPx(s, 40, 24); got != testPal.Sky {
+	if got := worldPx(s, 60, 36); got != testPal.Sky {
 		t.Errorf("pipe inset column = %+v, want sky", got)
 	}
-	if got := worldPx(s, 41, 24); got != testPal.GreenLight {
+	if got := worldPx(s, 61, 36); got != testPal.GreenLight {
 		t.Errorf("pipe body lit edge = %+v", got)
 	}
-	if got := worldPx(s, 46, 24); got != testPal.GreenDark {
+	if got := worldPx(s, 69, 36); got != testPal.GreenDark {
 		t.Errorf("pipe body shaded edge = %+v", got)
 	}
-	if got := worldPx(s, 47, 24); got != testPal.Sky {
+	if got := worldPx(s, 71, 36); got != testPal.Sky {
 		t.Errorf("pipe inset column = %+v, want sky", got)
 	}
 }
@@ -147,7 +147,7 @@ func TestCloudsNeverBehindBlocks(t *testing.T) {
 	g.State = engine.StatePlaying
 	s := Render(g, testPal)
 	for x := 0; x < s.W; x++ {
-		for y := 12; y <= 15; y++ {
+		for y := 18; y <= 23; y++ {
 			if got := worldPx(s, x, y); got == testPal.Cloud {
 				t.Fatalf("cloud pixel at (%d,%d) behind the brick row", x, y)
 			}
@@ -158,26 +158,26 @@ func TestCloudsNeverBehindBlocks(t *testing.T) {
 func TestPlayerPixels(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
-	// Small player at world (2,12): center px 10, sprite rows 23..27.
-	if got := worldPx(s, 10, 23); got != testPal.Player {
+	// Small player at world (2,12): center px 14, sprite rows 35..41.
+	if got := worldPx(s, 13, 35); got != testPal.Player {
 		t.Errorf("player cap pixel = %+v, want red", got)
 	}
-	if got := worldPx(s, 10, 26); got != testPal.Overall {
+	if got := worldPx(s, 14, 39); got != testPal.Overall {
 		t.Errorf("player overalls pixel = %+v, want blue", got)
 	}
-	if worldPx(s, 10, 22) == testPal.Player {
+	if worldPx(s, 13, 34) == testPal.Player {
 		t.Error("small player sprite too tall")
 	}
 
-	// Super player spans two tiles (rows 20..27).
+	// Super player spans two tiles (rows 29..41).
 	g.Player.Super = true
 	g.Player.W, g.Player.H = engine.SuperW, engine.SuperH
 	g.Player.Pos.Y -= engine.SuperH - engine.SmallH
 	s = Render(g, testPal)
-	if got := worldPx(s, 10, 20); got != testPal.Player {
+	if got := worldPx(s, 13, 29); got != testPal.Player {
 		t.Errorf("super cap pixel = %+v", got)
 	}
-	if worldPx(s, 10, 19) == testPal.Player {
+	if worldPx(s, 13, 28) == testPal.Player {
 		t.Error("super player sprite too tall")
 	}
 }
@@ -185,12 +185,12 @@ func TestPlayerPixels(t *testing.T) {
 func TestEnemyPixels(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
-	// Goomba at world (14,12): center px 58, rows 24..27.
-	if got := worldPx(s, 58, 25); got != testPal.Goomba {
+	// Goomba at world (14,12): center px 87, rows 36..41.
+	if got := worldPx(s, 87, 37); got != testPal.Goomba {
 		t.Errorf("goomba body pixel = %+v", got)
 	}
-	// Koopa at world (17,12): head skin at rows 23.
-	if got := worldPx(s, 69, 23); got != testPal.KoopaSkin {
+	// Koopa at world (17,12): head skin at row 34.
+	if got := worldPx(s, 105, 34); got != testPal.KoopaSkin {
 		t.Errorf("koopa head pixel = %+v", got)
 	}
 	// Shell state draws a green dome.
@@ -198,7 +198,7 @@ func TestEnemyPixels(t *testing.T) {
 	g.Enemies[1].H = engine.GoombaH
 	g.Enemies[1].Pos.Y = 13 - engine.GoombaH
 	s = Render(g, testPal)
-	if got := worldPx(s, 70, 25); got != testPal.Green {
+	if got := worldPx(s, 104, 38); got != testPal.Green {
 		t.Errorf("shell dome = %+v", got)
 	}
 }
@@ -207,13 +207,13 @@ func TestCoinPixels(t *testing.T) {
 	g := newGame(t)
 	g.Tick = 0 // full-face spin frame
 	s := Render(g, testPal)
-	// Coin at world (5,8): pixel cols 21..23, rows 8..11.
-	if got := worldPx(s, 21, 9); got != testPal.Coin {
+	// Coin at world (5.2,8.2): pixel cols 31..34, rows 12..17.
+	if got := worldPx(s, 31, 13); got != testPal.Coin {
 		t.Errorf("coin pixel = %+v, want gold", got)
 	}
 	g.Tick = 8 // edge-on frame
 	s = Render(g, testPal)
-	if got := worldPx(s, 22, 8); got != testPal.GoldLight {
+	if got := worldPx(s, 33, 12); got != testPal.GoldLight {
 		t.Errorf("coin edge pixel = %+v, want highlight", got)
 	}
 }
@@ -222,7 +222,7 @@ func TestMushroomPixels(t *testing.T) {
 	g := newGame(t)
 	g.Mushrooms = append(g.Mushrooms, &engine.Mushroom{Pos: engine.Vec{X: 5, Y: 12.1}})
 	s := Render(g, testPal)
-	if got := worldPx(s, 22, 24); got != testPal.Player {
+	if got := worldPx(s, 32, 37); got != testPal.Player {
 		t.Errorf("mushroom cap = %+v, want red", got)
 	}
 }
@@ -235,13 +235,13 @@ func TestParticlePixels(t *testing.T) {
 		&engine.Particle{Pos: engine.Vec{X: 9, Y: 6.5}, Life: 10, Kind: engine.ParticleSparkle},
 	)
 	s := Render(g, testPal)
-	if got := worldPx(s, 20, 2); got != testPal.Coin {
+	if got := worldPx(s, 31, 3); got != testPal.Coin {
 		t.Errorf("coin pop pixel = %+v", got)
 	}
-	if got := worldPx(s, 28, 2); got != testPal.BrickDark {
+	if got := worldPx(s, 42, 3); got != testPal.BrickDark {
 		t.Errorf("debris pixel = %+v", got)
 	}
-	if got := worldPx(s, 37, 2); got != testPal.White {
+	if got := worldPx(s, 55, 2); got != testPal.White {
 		t.Errorf("sparkle pixel = %+v", got)
 	}
 }
@@ -250,11 +250,11 @@ func TestInvincibleFlicker(t *testing.T) {
 	g := newGame(t)
 	g.Player.Invincible = 100
 	g.Tick = 0 // (0/3)%2 == 0 -> hidden
-	if got := worldPx(Render(g, testPal), 10, 23); got == testPal.Player {
+	if got := worldPx(Render(g, testPal), 13, 35); got == testPal.Player {
 		t.Error("flicker off-tick shows player")
 	}
 	g.Tick = 3
-	if got := worldPx(Render(g, testPal), 10, 23); got != testPal.Player {
+	if got := worldPx(Render(g, testPal), 13, 35); got != testPal.Player {
 		t.Error("flicker on-tick hides player")
 	}
 }
@@ -266,8 +266,8 @@ func TestBumpLiftsBlock(t *testing.T) {
 		g.Update(engine.Input{Up: true})
 		if g.BumpActive(6, 9) {
 			s := Render(g, testPal)
-			// The block is lifted two pixels: row 10 is block, not sky.
-			if got := worldPx(s, 26, 10); got == testPal.Sky {
+			// The block is lifted half a tile: row 15 is block, not sky.
+			if got := worldPx(s, 38, 15); got == testPal.Sky {
 				t.Error("bumping block not lifted")
 			}
 			return
@@ -285,10 +285,9 @@ func TestCameraScrollAndVerticalFollow(t *testing.T) {
 	}
 	s := Render(g, testPal)
 	// Ground is everywhere: it must still fill the bottom of the view.
-	if got := worldPx(s, s.W-2, 29); got != testPal.GroundMid {
+	if got := worldPx(s, s.W-2, 44); got != testPal.GroundMid {
 		t.Errorf("ground missing after scroll: %+v", got)
 	}
-
 	// Vertical follow: jumping raises the camera off the bottom clamp.
 	g2 := newGame(t)
 	for i := 0; i < 30; i++ {
@@ -308,7 +307,7 @@ func TestDecorationsDrawn(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
 	white := false
-	for y := 0; y < 12; y++ {
+	for y := 0; y < 18; y++ {
 		for x := 0; x < s.W; x++ {
 			if worldPx(s, x, y) == testPal.Cloud {
 				white = true
@@ -333,12 +332,12 @@ func TestCastlePixels(t *testing.T) {
 		t.Fatalf("camera did not reach the castle: %f", g.CameraX)
 	}
 	s := Render(g, testPal)
-	ox := int(g.CameraX * Pix)
+
 	// Keep brick and door land inside the pixel view.
-	if got := worldPx(s, 74*Pix+1-ox, 21); got != testPal.BrickLight {
+	if got := worldPx(s, 86, 30); got != testPal.BrickLight {
 		t.Errorf("castle brick = %+v", got)
 	}
-	if got := worldPx(s, 61, 25); got != testPal.Door {
+	if got := worldPx(s, 92, 36); got != testPal.Door {
 		t.Errorf("castle door = %+v", got)
 	}
 }
@@ -348,7 +347,7 @@ func TestOverlayPixelText(t *testing.T) {
 	g.Paused = true
 	s := Render(g, testPal)
 	bg := false
-	for y := 14; y < 22; y++ {
+	for y := 20; y < 34; y++ {
 		for x := 0; x < s.W; x++ {
 			if worldPx(s, x, y) == testPal.OverlayBG {
 				bg = true
@@ -362,8 +361,8 @@ func TestOverlayPixelText(t *testing.T) {
 	g.Paused = false
 	g.State = engine.StateTitle
 	s = Render(g, testPal)
-	// Title at pixel row 3: the 'M' glyph's solid rows are FlagRed.
-	if got := worldPx(s, 24, 5); got != testPal.FlagRed {
+	// Title logo at pixel row 4: the 'M' glyph's solid rows are FlagRed.
+	if got := worldPx(s, 41, 5); got != testPal.FlagRed {
 		t.Errorf("title MARIO art missing: %+v", got)
 	}
 	// The title band (rows 2..12) must contain only title pixels: no

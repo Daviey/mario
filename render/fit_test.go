@@ -149,8 +149,8 @@ func TestTitleTextNeverOverlapsCast(t *testing.T) {
 		g := engine.NewGame([]*engine.Level{l}, 30, viewH)
 		f := RenderPixels(g, testPal)
 		groundTop := f.H - 2*Pix
-		// Cast band: rows between (groundTop-10) and groundTop-1.
-		castTop := groundTop - 10
+		// Cast band: the rows the ×2 title cast sprites occupy.
+		castTop := groundTop - 2*sprH(sprMarioSmall)
 		// The logo (FlagRed, scale 2) must end above the cast band.
 		logoBottom := -1
 		for y := castTop - 1; y >= 0; y-- {
