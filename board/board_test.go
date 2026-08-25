@@ -191,8 +191,8 @@ func TestSanitizeDisplayName(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"DAVE", "DAVE"},
 		{"dave", "DAVE"},             // lowercased to the documented charset
-		{"A\x1b[31mX", "A31MX"},         // ESC sequence stripped
-		{"<b>x</b>", "BXB"},           // markup stripped (angle brackets dropped)
+		{"A\x1b[31mX", "A31MX"},      // ESC sequence stripped
+		{"<b>x</b>", "BXB"},          // markup stripped (angle brackets dropped)
 		{"a\u202Eb", "AB"},           // bidi override stripped
 		{"123456789012", "12345678"}, // clamped to 8 runes
 		{"\x01\x02\x03", "-"},        // nothing left -> placeholder
