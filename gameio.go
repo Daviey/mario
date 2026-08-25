@@ -32,8 +32,16 @@ func (io *gameIO) feed(b []byte) {
 	io.mapper.Feed(b)
 }
 
-// poll returns this tick's game input.
-func (io *gameIO) poll() engine.Input { return io.mapper.Poll() }
+// poll returns this tick's game input. A restart requested from the
+// board screen is injected as the same edge a mapped 'r' press would
+// produce — the native and wasm loops both go through here.
+func (io *gameIO) poll() engine.Input {
+	in := io.mapper.Poll()
+	if io.ui.takeRestart() {
+		in.Restart = true
+	}
+	return in
+}
 
 // uiTick advances the leaderboard UI and returns its render snapshot.
 func (io *gameIO) uiTick(g *engine.Game) *render.ScoreUI { return io.ui.tick(g) }
