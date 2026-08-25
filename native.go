@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -63,19 +64,26 @@ func main() {
 		return
 	}
 
-	score, err := run(levels, *width, trueColor)
+	score, stdin, err := run(levels, *width, trueColor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
-	if err := maybeSubmit(os.Stdout, os.Stdin, score); err != nil {
+	in := io.Reader(os.Stdin)
+	if stdin != nil {
+		in = stdin // keystrokes owned by the game's stdin pump
+	}
+	if err := maybeSubmit(os.Stdout, in, score); err != nil {
 		// Submission problems never cost the player their game.
 		fmt.Fprintf(os.Stdout, "score submission skipped: %v\n", err)
 	}
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
+// The second return value is where post-game keystrokes arrive: the stdin
+// pump that owns fd 0 for the whole process forwards them there once play
+// ends, so the submit prompt never races the game's input reader.
+func run(levels []*engine.Level, width int, trueColor bool) (int, io.Reader, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -84,11 +92,11 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 
 	if !isTTY(os.Stdin) {
-		return 0, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
+		return 0, nil, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
 	}
 	restore, err := rawMode()
 	if err != nil {
-		return 0, fmt.Errorf("cannot set raw mode: %w", err)
+		return 0, nil, fmt.Errorf("cannot set raw mode: %w", err)
 	}
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
@@ -136,25 +144,71 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	g := engine.NewGame(levels, viewW, viewH)
 
 	mapper := input.NewMapper()
-	go func() {
-		buf := make([]byte, 64)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				mapper.Feed(buf[:n])
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	// One goroutine owns fd 0 from here until process exit. During play it
+	// feeds the mapper; afterwards it forwards bytes to the submit prompt.
+	// Without the handoff, the reader and maybeSubmit both block in read(2)
+	// on the same fd and the kernel hands each keystroke to a random one —
+	// half the time the prompt never sees the answer and looks frozen.
+	promptR, promptW, err := os.Pipe()
+	if err != nil {
+		return 0, nil, fmt.Errorf("prompt pipe: %w", err)
+	}
+	pump := &stdinPump{toGame: true, game: mapper.Feed, prompt: promptW}
+	go pump.loop(os.Stdin)
 
 	// Differential rendering: each frame only the changed cells are sent,
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.
 	st := newStream(os.Stdout, render.NewPalette(trueColor))
 	play(g, mapper, st)
-	return g.Score, nil
+	pump.switchToPrompt()
+	return g.Score, promptR, nil
+}
+
+// stdinPump routes raw terminal bytes to exactly one consumer at a time:
+// the game mapper during play, the submit prompt afterwards — fd 0 has a
+// single owner for the life of the process.
+type stdinPump struct {
+	mu     sync.Mutex
+	toGame bool
+	game   func([]byte)
+	prompt io.Writer
+}
+
+// loop reads f until EOF or error, delivering every chunk through route.
+func (p *stdinPump) loop(f *os.File) {
+	buf := make([]byte, 64)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			p.route(buf[:n])
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// route delivers one chunk of bytes to the active consumer. The copy keeps
+// the sink from retaining the loop's reused buffer.
+func (p *stdinPump) route(b []byte) {
+	cp := append([]byte(nil), b...)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.toGame {
+		p.game(cp)
+	} else if p.prompt != nil {
+		_, _ = p.prompt.Write(cp)
+	}
+}
+
+// switchToPrompt flips the destination for post-game keystrokes. Bytes
+// already in flight to the mapper are at most one chunk of late key
+// repeats, which the mapper discards once nothing polls it.
+func (p *stdinPump) switchToPrompt() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.toGame = false
 }
 
 // trueColorSupported sniffs the environment for terminals that render
