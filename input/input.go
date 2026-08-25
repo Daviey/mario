@@ -1,12 +1,13 @@
 // Package input maps raw terminal bytes to engine.Input.
 //
-// It supports two key-reporting regimes transparently:
-//
 //   - Legacy: plain keydown bytes only (no release events). Held keys are
 //     inferred from OS key-repeat: a key counts as held while repeats keep
 //     arriving, and expires after holdWindow ticks of silence.
 //   - Kitty keyboard protocol: CSI-u sequences with explicit press/repeat/
-//     release events. Releases clear the key immediately.
+//     release events. Releases clear the key immediately. The runner pushes
+//     flags 1|2|8 so every key — including plain letters and space —
+//     reports release events; the legacy regime only remains for terminals
+//     without the protocol.
 package input
 
 import (
@@ -37,13 +38,15 @@ const (
 	spAny
 )
 
-const holdWindow = 30   // ~0.5s of key-repeat silence before a legacy key expires
+const holdWindow = 12   // ~0.2s of key-repeat silence before a legacy key expires
 const staleSeqPolls = 3 // quiet polls before an incomplete escape sequence is dropped
+
 type keyEvent struct {
 	k       key
 	hasKey  bool
 	special int
 	evType  int // 0 legacy press, 1 kitty press, 2 kitty repeat, 3 release
+	src     int // kitty source id: codepoint, or 0x10000|key-final; 0 = untracked
 }
 
 // Mapper converts a byte stream into per-tick engine.Input values.
@@ -51,7 +54,9 @@ type Mapper struct {
 	mu          sync.Mutex
 	now         int
 	lastSeen    [keyCount]int
+	pressedAt   [keyCount]int // tick of the newest PRESS (repeats don't refresh it)
 	sticky      [keyCount]bool
+	sources     map[int]key // kitty press sources still held, for exact releases
 	buf         []byte
 	feedAge     int // polls since the last Feed delivered bytes
 	pendQuit    bool
@@ -61,7 +66,7 @@ type Mapper struct {
 }
 
 // NewMapper returns a mapper with no keys held.
-func NewMapper() *Mapper { return &Mapper{} }
+func NewMapper() *Mapper { return &Mapper{sources: make(map[int]key)} }
 
 // Feed delivers raw bytes read from the terminal.
 func (m *Mapper) Feed(data []byte) {
@@ -91,9 +96,21 @@ func (m *Mapper) Poll() engine.Input {
 		}
 		m.buf = nil
 	}
+	left, right := m.held(kLeft), m.held(kRight)
+	if left && right {
+		// Both directions at once: the newest PRESS wins, so a fresh tap
+		// reverses instantly (SMB-style) instead of the two cancelling to
+		// a standstill — and neither a stale legacy phantom hold nor the
+		// repeat stream of a genuinely held key can outrank a newer press.
+		if m.pressedAt[kLeft] > m.pressedAt[kRight] {
+			right = false
+		} else {
+			left = false
+		}
+	}
 	in := engine.Input{
-		Left:    m.held(kLeft),
-		Right:   m.held(kRight),
+		Left:    left,
+		Right:   right,
 		Up:      m.held(kUp),
 		Down:    m.held(kDown),
 		Run:     m.held(kRun),
@@ -127,15 +144,35 @@ func (m *Mapper) drain() {
 
 func (m *Mapper) apply(ev keyEvent) {
 	if ev.evType == 3 { // release
-		if ev.hasKey && ev.k < keyCount {
-			m.sticky[ev.k] = false
-			m.lastSeen[ev.k] = 0
+		if !ev.hasKey || ev.k >= keyCount {
+			return
 		}
+		// Clear the key only when its last held source was released:
+		// arrow-right and 'd' both mean Right, and releasing one must
+		// not drop the other.
+		if ev.src != 0 {
+			if _, ok := m.sources[ev.src]; ok {
+				delete(m.sources, ev.src)
+				for _, k := range m.sources {
+					if k == ev.k {
+						return // another source still holds it
+					}
+				}
+			}
+		}
+		m.sticky[ev.k] = false
+		m.lastSeen[ev.k] = 0
 		return
 	}
 	if ev.hasKey && ev.k < keyCount {
 		if ev.evType >= 1 {
 			m.sticky[ev.k] = true
+			if ev.src != 0 {
+				m.sources[ev.src] = ev.k
+			}
+		}
+		if ev.evType != 2 { // repeats don't refresh press recency
+			m.pressedAt[ev.k] = m.now + 1
 		}
 		m.lastSeen[ev.k] = m.now + 1
 	}
@@ -200,7 +237,7 @@ func parseSeq(b []byte) (int, keyEvent, bool) {
 		default:
 			return 3, keyEvent{}, true // F1-F4 etc: consume silently
 		}
-		return 3, keyEvent{k: k, hasKey: true}, true
+		return 3, keyEvent{k: k, hasKey: true, src: 0x10000 | int(b[2])}, true
 	default: // ESC + byte: treat as the plain (alt-) key
 		if b[1] == 0 {
 			return 2, keyEvent{}, true
@@ -224,13 +261,13 @@ func csiEvent(params string, final byte) keyEvent {
 	}
 	switch final {
 	case 'A':
-		return keyEvent{k: kUp, hasKey: true, evType: evType}
+		return keyEvent{k: kUp, hasKey: true, evType: evType, src: 0x10000 | 'A'}
 	case 'B':
-		return keyEvent{k: kDown, hasKey: true, evType: evType}
+		return keyEvent{k: kDown, hasKey: true, evType: evType, src: 0x10000 | 'B'}
 	case 'C':
-		return keyEvent{k: kRight, hasKey: true, evType: evType}
+		return keyEvent{k: kRight, hasKey: true, evType: evType, src: 0x10000 | 'C'}
 	case 'D':
-		return keyEvent{k: kLeft, hasKey: true, evType: evType}
+		return keyEvent{k: kLeft, hasKey: true, evType: evType, src: 0x10000 | 'D'}
 	case 'u':
 		code := 0
 		if len(parts) > 0 {
@@ -243,6 +280,7 @@ func csiEvent(params string, final byte) keyEvent {
 		}
 		if ev, ok := mappedKey(code); ok {
 			ev.evType = evType
+			ev.src = code
 			return ev
 		}
 		if evType == 0 || evType == 1 {
