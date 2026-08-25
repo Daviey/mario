@@ -703,10 +703,10 @@ func titleTextEls(f *Frame) []titleText {
 	add := func(s string, y, scale int, ink titleInk, blink bool) {
 		els = append(els, titleText{s: s, y: y, scale: scale, ink: ink, blink: blink})
 	}
-	if castY >= 13 { // room for logo (10px) + subtitle (5px)?
-		logoY := max(2, min(f.H/12, castY-18))
+	if castY >= 13 { // room for the ×2 logo (10px) above the cast?
+		logoY := max(2, min(f.H/12, castY-10))
 		add("MARIO", logoY, 2, inkFlag, false)
-		if subY := logoY + 12; subY+5 <= castY {
+		if subY := logoY + 15; subY+5 <= castY { // clear gap below logo + its shadow
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false)
 		}
 	}

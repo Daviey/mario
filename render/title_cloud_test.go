@@ -31,9 +31,9 @@ func titleBands(f *Frame) [][4]int {
 		bands = append(bands, [4]int{x, y, min(x+w, f.W), min(y+h, f.H)})
 	}
 	if castY >= 13 {
-		logoY := max(2, min(f.H/12, castY-18))
+		logoY := max(2, min(f.H/12, castY-10))
 		add("MARIO", logoY, 2)
-		if subY := logoY + 12; subY+5 <= castY {
+		if subY := logoY + 15; subY+5 <= castY {
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1)
 		}
 	}
