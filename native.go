@@ -48,7 +48,7 @@ func main() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := client.Top(ctx, *topN)
+		rows, err := client.Top(ctx, *topN, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
@@ -199,11 +199,10 @@ func uiPreviewScreen(w *os.File, mode string, trueColor bool) error {
 		return fmt.Errorf("demo script scored 0; cannot preview")
 	}
 
-	pc, _ := loadPlayer()
 	canned := []board.Row{
-		{Name: "BIFF", Score: 32100, DeviceID: "x"},
-		{Name: "DAVE", Score: 12500, DeviceID: pc.DeviceID}, // "you"
-		{Name: "KIM", Score: 9900, DeviceID: "z"},
+		{Name: "BIFF", Score: 32100},
+		{Name: "DAVE", Score: 12500, Mine: true}, // "you"
+		{Name: "KIM", Score: 9900},
 	}
 	ui := newScoreUI(nil, func() ([]board.Row, error) { return canned, nil })
 

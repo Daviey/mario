@@ -67,7 +67,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 		defer mu.Unlock()
 		return []board.Row{
 			{Name: "BIFF", Score: 32100},
-			{Name: got.Name, Score: 999, DeviceID: got.DeviceID},
+			{Name: got.Name, Score: 999, Mine: true},
 		}, nil
 	})
 
@@ -285,17 +285,15 @@ func TestOfflineStillShowsPrompt(t *testing.T) {
 	}
 }
 
-func TestBoardRowsForMarksMine(t *testing.T) {
+func TestBoardRowsForKeepsMineFlag(t *testing.T) {
+	// mine-ness is computed by the board_rows RPC; boardRowsFor only
+	// carries it through and assigns ranks.
 	rows := boardRowsFor([]board.Row{
-		{Name: "A", DeviceID: "me"},
-		{Name: "B", DeviceID: "other"},
-		{Name: "C"}, // API may omit device_id
-	}, "me")
-	want := []bool{true, false, false}
-	for i, w := range want {
-		if rows[i].Mine != w || rows[i].Rank != i+1 {
-			t.Fatalf("row %d = %+v, want Mine=%v Rank=%d", i, rows[i], w, i+1)
-		}
+		{Name: "A", Mine: true},
+		{Name: "B"},
+	})
+	if !rows[0].Mine || rows[1].Mine || rows[0].Rank != 1 || rows[1].Rank != 2 {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
 

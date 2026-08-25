@@ -74,7 +74,7 @@ func TestSubmitWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"name": "DAVE", "score": float64(12500), "device_id": "d"}
+	want := map[string]any{"name": "DAVE", "score": float64(12500), "device_id": "d", "pow_nonce": sent["pow_nonce"]}
 	if len(sent) != len(want) {
 		t.Errorf("body = %v, want exactly %v", sent, want)
 	}
@@ -95,26 +95,48 @@ func TestSubmitError(t *testing.T) {
 	}
 }
 
-func TestTopQueryAndDecode(t *testing.T) {
+func TestTopRPCAndDecode(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) {
-		return 200, `[{"id":"a","name":"DAVE","score":12500,"created_at":"2026-08-25T12:00:00Z"}]`
+		return 200, `[{"name":"DAVE","score":12500,"mine":true,"created_at":"2026-08-25T12:00:00Z"}]`
 	})
-	rows, err := client.Top(context.Background(), 10)
+	rows, err := client.Top(context.Background(), 10, "d")
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := f.last(t).URL.Query()
-	if q.Get("order") != "score.desc" || q.Get("limit") != "10" {
-		t.Errorf("query = %v", q)
+	req := f.last(t)
+	if req.Method != http.MethodPost || req.URL.Path != "/rest/v1/rpc/board_rows" {
+		t.Fatalf("got %s %s", req.Method, req.URL.Path)
 	}
-	if len(rows) != 1 || rows[0].Name != "DAVE" || rows[0].Score != 12500 {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["p_device_id"] != "d" || args["p_limit"] != float64(10) {
+		t.Errorf("rpc args = %v", args)
+	}
+	if len(rows) != 1 || rows[0].Name != "DAVE" || rows[0].Score != 12500 || !rows[0].Mine {
 		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestTopAnonymous(t *testing.T) {
+	var body string
+	client, _ := testClient(t, func(_ *http.Request, b string) (int, string) {
+		body = b
+		return 200, `[]`
+	})
+	rows, err := client.Top(context.Background(), 5, "")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows = %+v, err = %v", rows, err)
+	}
+	if strings.Contains(body, "p_device_id") {
+		t.Errorf("anonymous view must not send p_device_id: %s", body)
 	}
 }
 
 func TestTopEmpty(t *testing.T) {
 	client, _ := testClient(t, func(*http.Request, string) (int, string) { return 200, `[]` })
-	rows, err := client.Top(context.Background(), 5)
+	rows, err := client.Top(context.Background(), 5, "")
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("rows = %+v, err = %v", rows, err)
 	}
@@ -215,7 +237,7 @@ func TestTopSanitizesNames(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL, "testkey")
-	rows, err := c.Top(context.Background(), 10)
+	rows, err := c.Top(context.Background(), 10, "")
 	if err != nil {
 		t.Fatal(err)
 	}

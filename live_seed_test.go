@@ -27,7 +27,7 @@ func TestLiveSeedOneRow(t *testing.T) {
 	if err := c.Submit(ctx, board.Entry{Name: "SEEDCHK", Score: 12300, DeviceID: pc.DeviceID}); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	rows, err := c.Top(ctx, 10)
+	rows, err := c.Top(ctx, 10, pc.DeviceID)
 	if err != nil {
 		t.Fatal(err)
 	}

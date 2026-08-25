@@ -55,9 +55,13 @@ func newScoreUI(submit func(board.Entry) error, fetch func() ([]board.Row, error
 				return client.Submit(ctx, e)
 			}
 			u.fetch = func() ([]board.Row, error) {
+				dev := ""
+				if pc, err := loadPlayer(); err == nil {
+					dev = pc.DeviceID
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 				defer cancel()
-				return client.Top(ctx, 50)
+				return client.Top(ctx, 50, dev)
 			}
 		}
 	}
@@ -130,13 +134,12 @@ func (u *scoreUI) showBoard() {
 	u.loading = true
 	u.status = ""
 	u.player, _ = loadPlayer()
-	device := u.player.DeviceID
 	fetch := u.fetch
 	u.mu.Unlock()
-	go u.fetchInto(fetch, device)
+	go u.fetchInto(fetch)
 }
 
-func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error), deviceID string) {
+func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error)) {
 	defer func() {
 		if r := recover(); r != nil {
 			u.mu.Lock()
@@ -155,12 +158,12 @@ func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error), deviceID string) 
 		u.rows = nil
 		return
 	}
-	u.rows = boardRowsFor(rows, deviceID)
+	u.rows = boardRowsFor(rows)
 }
 
 // boardRowsFor converts API rows to render rows, marking the player's own
 // entries. The board shows the top ten.
-func boardRowsFor(rows []board.Row, deviceID string) []render.ScoreRow {
+func boardRowsFor(rows []board.Row) []render.ScoreRow {
 	if len(rows) > 10 {
 		rows = rows[:10] // the board shows the top ten
 	}
@@ -170,7 +173,7 @@ func boardRowsFor(rows []board.Row, deviceID string) []render.ScoreRow {
 			Rank:  i + 1,
 			Name:  r.Name,
 			Score: r.Score,
-			Mine:  deviceID != "" && r.DeviceID == deviceID,
+			Mine:  r.Mine,
 		})
 	}
 	return out
@@ -194,8 +197,8 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 			} else {
 				u.loading = true
 				u.status = ""
-				fetch, device := u.fetch, u.player.DeviceID
-				go u.fetchInto(fetch, device)
+				fetch := u.fetch
+				go u.fetchInto(fetch)
 			}
 			return u.snapshotLocked(g)
 		}
@@ -302,7 +305,7 @@ func (u *scoreUI) submitLocked() {
 		}
 		u.mu.Unlock()
 		if fetch != nil {
-			u.fetchInto(fetch, player.DeviceID)
+			u.fetchInto(fetch)
 		}
 	}()
 }

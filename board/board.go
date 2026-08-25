@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -53,24 +52,28 @@ func FromEnv() (*Client, error) {
 	return New(u, k), nil
 }
 
-// Entry is a score submission from a player.
+// Entry is a score submission from a player. PowNonce is filled in by
+// Submit (the server's proof-of-work gate rejects rows without a valid one).
 type Entry struct {
 	Name     string `json:"name"`
 	Score    int    `json:"score"`
 	DeviceID string `json:"device_id"`
+	PowNonce string `json:"pow_nonce"`
 }
 
-// Row is a scores table row.
+// Row is a leaderboard entry as served by the board_rows RPC. The raw
+// device_id never leaves the database; mine-ness arrives precomputed.
 type Row struct {
-	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Score     int       `json:"score"`
-	DeviceID  string    `json:"device_id"`
+	Mine      bool      `json:"mine"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Submit inserts a score row.
+// Submit inserts a score row, solving the server's proof-of-work gate
+// first (~0.1s of hashing; invisible next to the network round trip).
 func (c *Client) Submit(ctx context.Context, e Entry) error {
+	e.PowNonce = solvePow(e.DeviceID, e.Score)
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -80,18 +83,23 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 	return err
 }
 
-// Top returns the n best scores, highest first.
-func (c *Client) Top(ctx context.Context, n int) ([]Row, error) {
-	q := url.Values{}
-	q.Set("select", "id,name,score,device_id,created_at")
-	q.Set("order", "score.desc")
-	q.Set("limit", strconv.Itoa(n))
-	body, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)
+// Top returns the n best scores, highest first. Rows belonging to
+// deviceID arrive flagged Mine; "" gives the anonymous view.
+func (c *Client) Top(ctx context.Context, n int, deviceID string) ([]Row, error) {
+	args := map[string]any{"p_limit": n}
+	if deviceID != "" {
+		args["p_device_id"] = deviceID
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	out, err := c.do(ctx, http.MethodPost, "/rest/v1/rpc/board_rows", nil, body)
 	if err != nil {
 		return nil, err
 	}
 	var rows []Row
-	if err := json.Unmarshal(body, &rows); err != nil {
+	if err := json.Unmarshal(out, &rows); err != nil {
 		return nil, fmt.Errorf("decode scores: %w", err)
 	}
 	for i, r := range rows {

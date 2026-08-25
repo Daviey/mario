@@ -67,7 +67,7 @@ func TestLiveUISubmit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := client.Top(context.Background(), 50)
+	rows, err := client.Top(context.Background(), 50, "")
 	if err != nil {
 		t.Fatal(err)
 	}
