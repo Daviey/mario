@@ -18,44 +18,26 @@ import (
 	"mario/render"
 )
 
-// -basic       force 16-color ANSI output instead of truecolor
-// -scores N    print the top N verified leaderboard scores and exit
-// -replay FILE replay a recorded run headless and print the outcome
-// -verify-pending  verify pending score submissions (service key)
+// Flags:
+//
+//	-demo        run a headless scripted demo and exit
+//	-level FILE  play a custom ASCII level file instead of the built-ins
+//	-width N     viewport width in tiles (0 = terminal width)
+//	-basic       force 16-color ANSI output instead of truecolor
+//	-scores N    print the top N leaderboard scores and exit
 func main() {
 	demo := flag.Bool("demo", false, "run a headless scripted demo and exit")
 	demoTicks := flag.Int("demoticks", 6000, "demo length in ticks (with -demo)")
-	demoRecPath := flag.String("demo-recording", "", "with -demo: write the recording to this JSON file")
 	levelPath := flag.String("level", "", "play a custom ASCII level file")
 	width := flag.Int("width", 0, "viewport width in tiles (0 = terminal width)")
 	basic := flag.Bool("basic", false, "force 16-color ANSI output instead of truecolor")
 	topN := flag.Int("scores", 0, "print the top N leaderboard scores and exit")
-	replayPath := flag.String("replay", "", "replay a recorded run headless and print the outcome")
-	verify := flag.Bool("verify-pending", false, "verify pending submissions (needs the service role key)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
 	board.LoadDotEnv(".env")
 
-	switch {
-	case *verify:
-		client, err := verifyClient()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
-			os.Exit(1)
-		}
-		if err := verifyPending(context.Background(), client, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	case *replayPath != "":
-		if err := replayFile(*replayPath, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	case *topN > 0:
+	if *topN > 0 {
 		client, err := board.FromEnv()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
@@ -77,50 +59,23 @@ func main() {
 	}
 
 	if *demo {
-		rec := runDemo(os.Stdout, levels, trueColor, *demoTicks)
-		if *demoRecPath != "" {
-			if err := writeRecording(*demoRecPath, rec); err != nil {
-				fmt.Fprintf(os.Stderr, "mario: %v\n", err)
-				os.Exit(1)
-			}
-		}
+		runDemo(os.Stdout, levels, trueColor, *demoTicks)
 		return
 	}
 
-	res, err := run(levels, *width, trueColor)
+	score, err := run(levels, *width, trueColor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
-	if err := maybeSubmit(os.Stdout, os.Stdin, res, *levelPath == ""); err != nil {
+	if err := maybeSubmit(os.Stdout, os.Stdin, score); err != nil {
 		// Submission problems never cost the player their game.
 		fmt.Fprintf(os.Stdout, "score submission skipped: %v\n", err)
 	}
 }
 
-// verifyClient builds the service-role client: SUPABASE_SERVICE_KEY when
-// present (GitHub Action secret), falling back to SUPABASE_KEY for local
-// testing with the key in .env.
-func verifyClient() (*board.Client, error) {
-	if key := os.Getenv("SUPABASE_SERVICE_KEY"); key != "" {
-		if u := os.Getenv("SUPABASE_URL"); u != "" {
-			return board.New(u, key), nil
-		}
-	}
-	return board.FromEnv()
-}
-
-// runResult is what a finished interactive session leaves behind.
-type runResult struct {
-	rec      *recorder
-	score    int
-	coins    int
-	state    engine.State
-	levelIdx int
-}
-
-// run plays the game on the real terminal.
-func run(levels []*engine.Level, width int, trueColor bool) (*runResult, error) {
+// run plays the game on the real terminal and returns the final score.
+func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -129,11 +84,11 @@ func run(levels []*engine.Level, width int, trueColor bool) (*runResult, error) 
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 
 	if !isTTY(os.Stdin) {
-		return nil, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
+		return 0, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
 	}
 	restore, err := rawMode()
 	if err != nil {
-		return nil, fmt.Errorf("cannot set raw mode: %w", err)
+		return 0, fmt.Errorf("cannot set raw mode: %w", err)
 	}
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
@@ -198,31 +153,24 @@ func run(levels []*engine.Level, width int, trueColor bool) (*runResult, error) 
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.
 	st := newStream(os.Stdout, render.NewPalette(trueColor))
-	res := &runResult{
-		rec:      play(g, mapper, st),
-		score:    g.Score,
-		coins:    g.CoinCount,
-		state:    g.State,
-		levelIdx: g.LevelIndex(),
-	}
-	return res, nil
+	play(g, mapper, st)
+	return g.Score, nil
 }
 
 // trueColorSupported sniffs the environment for terminals that render
 // 24-bit color sequences.
 func trueColorSupported() bool {
-	ct := os.Getenv("COLORTERM")
-	if strings.Contains(ct, "truecolor") || strings.Contains(ct, "24bit") {
+	term := os.Getenv("TERM")
+	if strings.Contains(term, "truecolor") || strings.Contains(term, "direct") {
 		return true
 	}
-	if os.Getenv("WT_SESSION") != "" {
-		return true // Windows Terminal
+	if os.Getenv("COLORTERM") != "" {
+		return true
 	}
-	term := os.Getenv("TERM")
-	for _, t := range []string{"ghostty", "kitty", "alacritty", "wezterm", "contour", "foot", "xterm-256color"} {
-		if strings.Contains(term, t) {
-			return true
-		}
+	// Ghostty and WezTerm advertise truecolor capability without either
+	// variable naming it directly.
+	if term == "ghostty" || term == "xterm-ghostty" || term == "wezterm" {
+		return true
 	}
 	return false
 }

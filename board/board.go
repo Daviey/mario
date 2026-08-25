@@ -1,11 +1,7 @@
 // Package board talks to the Supabase-hosted high score table over its
-// PostgREST API. Two keys are involved:
-//
-//   - the publishable key (SUPABASE_KEY): embedded in every client. RLS
-//     limits it to inserting unverified rows and reading verified ones.
-//   - the service role key (SUPABASE_SERVICE_KEY): never shipped. Only the
-//     verifier (-verify-pending, GitHub Action) uses it to fetch pending
-//     rows and flip or delete them.
+// PostgREST API. The publishable key (SUPABASE_URL/SUPABASE_KEY, typically
+// in .env) is embedded in every client; RLS limits it to inserting and
+// reading score rows. Scores are client-attested — no verification layer.
 package board
 
 import (
@@ -25,7 +21,7 @@ import (
 // Client is a configured PostgREST endpoint.
 type Client struct {
 	BaseURL string // e.g. https://xyz.supabase.co
-	Key     string // publishable or service role key
+	Key     string // publishable key
 	HTTP    *http.Client
 }
 
@@ -45,28 +41,20 @@ func FromEnv() (*Client, error) {
 
 // Entry is a score submission from a player.
 type Entry struct {
-	Name          string          `json:"name"`
-	Score         int             `json:"score"`
-	Seed          int64           `json:"seed"`
-	Replay        json.RawMessage `json:"replay"`
-	EngineVersion string          `json:"engine_version"`
-	DeviceID      string          `json:"device_id"`
+	Name     string `json:"name"`
+	Score    int    `json:"score"`
+	DeviceID string `json:"device_id"`
 }
 
 // Row is a scores table row.
 type Row struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Score         int             `json:"score"`
-	Seed          int64           `json:"seed"`
-	Replay        json.RawMessage `json:"replay"`
-	EngineVersion string          `json:"engine_version"`
-	DeviceID      string          `json:"device_id"`
-	Verified      bool            `json:"verified"`
-	CreatedAt     time.Time       `json:"created_at"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Score     int       `json:"score"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
-// Submit inserts an unverified score row.
+// Submit inserts a score row.
 func (c *Client) Submit(ctx context.Context, e Entry) error {
 	body, err := json.Marshal(e)
 	if err != nil {
@@ -77,11 +65,10 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 	return err
 }
 
-// Top returns the n best verified scores, highest first.
+// Top returns the n best scores, highest first.
 func (c *Client) Top(ctx context.Context, n int) ([]Row, error) {
 	q := url.Values{}
 	q.Set("select", "id,name,score,created_at")
-	q.Set("verified", "eq.true")
 	q.Set("order", "score.desc")
 	q.Set("limit", strconv.Itoa(n))
 	body, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)
@@ -93,44 +80,6 @@ func (c *Client) Top(ctx context.Context, n int) ([]Row, error) {
 		return nil, fmt.Errorf("decode scores: %w", err)
 	}
 	return rows, nil
-}
-
-// Pending returns unverified rows, oldest first. Requires the service key.
-func (c *Client) Pending(ctx context.Context, limit int) ([]Row, error) {
-	q := url.Values{}
-	q.Set("select", "*")
-	q.Set("verified", "eq.false")
-	q.Set("order", "created_at.asc")
-	q.Set("limit", strconv.Itoa(limit))
-	body, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)
-	if err != nil {
-		return nil, err
-	}
-	var rows []Row
-	if err := json.Unmarshal(body, &rows); err != nil {
-		return nil, fmt.Errorf("decode pending: %w", err)
-	}
-	return rows, nil
-}
-
-// SetVerified flips a row's verified flag. Requires the service key.
-func (c *Client) SetVerified(ctx context.Context, id string, verified bool) error {
-	body, err := json.Marshal(map[string]bool{"verified": verified})
-	if err != nil {
-		return err
-	}
-	q := url.Values{"id": {"eq." + id}}
-	_, err = c.do(ctx, http.MethodPatch, "/rest/v1/scores", q, body,
-		"Prefer", "return=minimal")
-	return err
-}
-
-// Delete removes a row. Requires the service key.
-func (c *Client) Delete(ctx context.Context, id string) error {
-	q := url.Values{"id": {"eq." + id}}
-	_, err := c.do(ctx, http.MethodDelete, "/rest/v1/scores", q, nil,
-		"Prefer", "return=minimal")
-	return err
 }
 
 func (c *Client) do(ctx context.Context, method, path string, q url.Values, body []byte, hdr ...string) ([]byte, error) {
