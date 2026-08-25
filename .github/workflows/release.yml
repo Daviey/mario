@@ -1,0 +1,60 @@
+# On tag push (v*): test, cross-compile every platform binary, publish a
+# GitHub Release with binaries + SHA256SUMS + a web zip, and deploy the
+# static web build to GitHub Pages.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Pages deployments must not overlap.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: make test
+
+      - name: Build all platform binaries
+        run: make release
+
+      - name: Build web bundle
+        run: make web
+
+      - name: Zip web bundle
+        run: cd dist/web && zip -r ../mario-web.zip .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/mario-* dist/SHA256SUMS dist/mario-web.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --repo "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
