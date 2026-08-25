@@ -74,14 +74,14 @@ func (u *scoreUI) capturing() bool {
 func (u *scoreUI) feedKeys(b []byte) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	
+
 	// Terminals and the web build send multi-byte sequences for arrows and
 	// key releases. If processed raw, the leading 0x1b instantly dismisses
 	// the UI screens. Drop any chunk that looks like an escape sequence.
 	if len(b) > 1 && b[0] == 0x1b && (b[1] == '[' || b[1] == 'O') {
 		return
 	}
-	
+
 	u.keys = append(u.keys, b...)
 }
 
