@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"mario/engine"
@@ -28,6 +29,39 @@ func TestRunDemo(t *testing.T) {
 	runDemo(&buf2, engine.DefaultLevels(), true, 6000)
 	if buf.String() != buf2.String() {
 		t.Error("demo output is not deterministic")
+	}
+}
+
+func TestStdinPumpHandoff(t *testing.T) {
+	// Post-game keystrokes must reach the submit prompt — never the game's
+	// input mapper — once play ends. The prompt reads through the same
+	// os.Pipe run() wires into maybeSubmit.
+	var mu sync.Mutex
+	var gameGot []string
+	game := func(b []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		gameGot = append(gameGot, string(b))
+	}
+	promptR, promptW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &stdinPump{toGame: true, game: game, prompt: promptW}
+
+	p.route([]byte("d")) // during play: game keys go to the mapper
+	p.switchToPrompt()
+	p.route([]byte("n\n")) // after play: the answer goes to the prompt
+
+	buf := make([]byte, 8)
+	n, rerr := promptR.Read(buf)
+	if rerr != nil || string(buf[:n]) != "n\n" {
+		t.Fatalf("prompt received %q (err %v); want %q", buf[:n], rerr, "n\n")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(gameGot) != 1 || gameGot[0] != "d" {
+		t.Fatalf("game sink received %q; want only the pre-handoff bytes", gameGot)
 	}
 }
 
