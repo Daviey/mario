@@ -56,7 +56,9 @@ type Mapper struct {
 	lastSeen    [keyCount]int
 	pressedAt   [keyCount]int // tick of the newest PRESS (repeats don't refresh it)
 	sticky      [keyCount]bool
-	sources     map[int]key // kitty press sources still held, for exact releases
+	latched     [keyCount]bool // press edges awaiting their first Poll
+	win         [keyCount]int  // per-key expiry window; 0 = holdWindow (adaptive on repeats)
+	sources     map[int]key    // kitty press sources still held, for exact releases
 	buf         []byte
 	feedAge     int // polls since the last Feed delivered bytes
 	pendQuit    bool
@@ -120,15 +122,23 @@ func (m *Mapper) Poll() engine.Input {
 		AnyKey:  m.pendAny,
 	}
 	m.pendQuit, m.pendPause, m.pendRestart, m.pendAny = false, false, false, false
+	m.latched = [keyCount]bool{} // each press edge is visible to exactly one Poll
 	return in
 }
 
 func (m *Mapper) held(k key) bool {
-	if m.sticky[k] {
+	if m.sticky[k] || m.latched[k] {
 		return true
 	}
 	ls := m.lastSeen[k]
-	return ls > 0 && m.now-ls <= holdWindow
+	if ls == 0 {
+		return false
+	}
+	w := m.win[k]
+	if w == 0 {
+		w = holdWindow
+	}
+	return m.now-ls <= w
 }
 
 func (m *Mapper) drain() {
@@ -174,6 +184,25 @@ func (m *Mapper) apply(ev keyEvent) {
 		if ev.evType != 2 { // repeats don't refresh press recency
 			m.pressedAt[ev.k] = m.now + 1
 		}
+		// Adaptive hold window: the first keydown gets the full grace
+		// (an OS repeat delay of ~500ms must not drop a held key), but
+		// once a key repeats, silence expires it on the measured repeat
+		// cadence so a released key stops far sooner.
+		if prev := m.lastSeen[ev.k]; prev > 0 {
+			if d := m.now - prev + 1; d > 0 {
+				w := 3 * d
+				if w < 3 {
+					w = 3
+				}
+				if w > holdWindow {
+					w = holdWindow
+				}
+				m.win[ev.k] = w
+			}
+		}
+		// Latch the press edge: if a frame hitch lets the release land
+		// before the next Poll, the press must still be visible once.
+		m.latched[ev.k] = true
 		m.lastSeen[ev.k] = m.now + 1
 	}
 	if ev.evType == 0 || ev.evType == 1 { // edges fire on press only

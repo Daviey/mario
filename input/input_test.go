@@ -414,3 +414,50 @@ func TestFreshPressBeatsOngoingRepeats(t *testing.T) {
 		t.Fatalf("fresh left lost to right's repeat stream: %+v", in)
 	}
 }
+
+func TestPressReleaseInSameTickStillRegisters(t *testing.T) {
+	// A frame hitch can deliver a whole tap between two polls; the
+	// release then clears the key before any Poll ever sampled the
+	// press, and the tap would vanish. Press edges must be latched for
+	// exactly one Poll.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[97;1:1u\x1b[97;1:3u")) // 'a' tap in one chunk
+	if in := m.Poll(); !in.Left {
+		t.Fatalf("collapsed tap invisible to Poll: %+v", in)
+	}
+	if in := m.Poll(); in.Left {
+		t.Error("collapsed tap leaked into a second Poll")
+	}
+	m2 := NewMapper()
+	m2.Feed([]byte("\x1b[32;1:1u\x1b[32;1:3u")) // space tap = jump
+	if in := m2.Poll(); !in.Up {
+		t.Fatalf("collapsed jump tap invisible to Poll: %+v", in)
+	}
+	if in := m2.Poll(); in.Up {
+		t.Error("collapsed jump tap leaked into a second Poll")
+	}
+}
+
+func TestRepeatCadenceTightensExpiry(t *testing.T) {
+	// First keydown gets the full grace window (the ~500ms OS repeat
+	// delay must not drop a held key). Once repeats establish a
+	// cadence, silence must expire the key on that cadence instead of
+	// the full window.
+	m := NewMapper()
+	m.Feed([]byte{'d'})
+	m.Poll()
+	m.Poll()
+	m.Feed([]byte{'d'}) // repeat 2 ticks later -> window ~6 ticks
+	for i := 1; i <= 7; i++ {
+		if !m.Poll().Right {
+			t.Fatalf("key expired too early, poll %d after repeat", i)
+		}
+	}
+	// The old fixed window (12) would still hold here (through poll
+	// 13); the measured cadence must have tightened expiry to 6.
+	for i := 8; i <= 11; i++ {
+		if m.Poll().Right {
+			t.Fatalf("still held at poll %d after repeat; repeat cadence did not tighten expiry", i)
+		}
+	}
+}
