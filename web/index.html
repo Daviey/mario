@@ -63,7 +63,7 @@
 <div id="stage">
   <canvas id="game"></canvas>
   <div id="loader" role="status">
-    <canvas id="boot" width="160" height="48"></canvas>
+    <canvas id="boot" width="160" height="56"></canvas>
     <div class="meta" aria-live="polite">
       <span class="phase" id="phase">downloading</span>
       <span class="pct" id="pct">0%</span>
@@ -203,42 +203,47 @@
   const isBush   = (t) => t < 88 && t % 13 === 5;
 
   let cam = 0, frac = 0, frame = 0, loaderDone = false;
-  const camTarget = () => frac * (FLAG_T*TILE - MARIO_X);
+  // End with the pole at Mario's right edge — he grabs it, like the game.
+  const camTarget = () => frac * (FLAG_T*TILE - MARIO_X - 12);
   const renderScene = () => {
-    px(0, 0, 160, 48, PC.sky);
+    px(0, 0, 160, 56, PC.sky);
     const bright = RM ? true : frame % 48 < 24; // game flash cadence
     // Clouds first (sky dressing), drifting at 0.4× parallax.
     for (let k = 0; k < 3; k++) {
       const span = 184;
       const x = ((k*73 - cam*0.4) % span + span) % span - 12;
-      if (isHill(t)) drawArt(sprHill, x, 37, 1);
-      if (isBush(t)) drawArt(sprBush, x, 38, 1);
+      // Clouds only on open sky: keep the flagpole clear (cloudBlocked).
+      const fx0 = FLAG_T*4 - cam;
+      if (fx0 > x - 16 && fx0 < x + 20) continue;
+      drawArt(sprCloud, x, 22 + (k % 2)*5, 1);
+    }
     const cx = Math.floor(cam);
     const t0 = Math.floor(cx / 4) - 2, t1 = Math.floor((cx + 160) / 4) + 2;
     for (let t = t0; t <= t1; t++) {
       if (t < 0 || t >= WORLD_T) continue;
       const x = t*4 - cx;
-      tileGround(x, 40, t, 10, true);
-      tileGround(x, 44, t, 11, false);
-      if (isHill(t)) drawArt(sprHill, x, 28, 1);
-      if (isBush(t)) drawArt(sprBush, x, 32, 1);
-      if (isQ(t)) tileQ(x, 24, bright);
-      else if (isBrick(t)) tileBrick(x, 24, t);
-      if (isPipeL(t)) { tilePipeLip(x, 32); pipeShaft(x, 36, 4); }
+      tileGround(x, 48, t, 10, true);
+      tileGround(x, 52, t, 11, false);
+      if (isHill(t)) drawArt(sprHill, x, 45, 1);
+      if (isBush(t)) drawArt(sprBush, x, 46, 1);
+      if (isQ(t)) tileQ(x, 32, bright);
+      else if (isBrick(t)) tileBrick(x, 32, t);
+      if (isPipeL(t)) { tilePipeLip(x, 40); pipeShaft(x, 44, 4); }
     }
-    // Flagpole: pole tiles rows 12..40, finial + pennant above (drawFlagTop).
+    // Flagpole: pole rows 24..48, finial + pennant above (drawFlagTop),
+    // clear of the title band (logo + subtitle end at row 21).
     const fx = FLAG_T*4 - cx;
     if (fx > -8 && fx < 168) {
-      for (let ty = 3; ty < 10; ty++) px(fx + 1, ty*4, 1, 4, PC.pole);
-      px(fx + 1, 8, 1, 1, PC.pipeL);
-      px(fx + 1, 9, 1, 3, PC.pole);
-      px(fx, 9, 1, 1, PC.flag); px(fx - 1, 10, 1, 1, PC.flag); px(fx, 10, 1, 1, PC.flag);
-      px(fx - 2, 11, 1, 1, PC.flag); px(fx - 1, 11, 1, 1, PC.flag); px(fx, 11, 1, 1, PC.flag);
+      for (let ty = 6; ty < 12; ty++) px(fx + 1, ty*4, 1, 4, PC.pole);
+      px(fx + 1, 24, 1, 1, PC.pipeL);
+      px(fx + 1, 25, 1, 3, PC.pole);
+      px(fx, 25, 1, 1, PC.flag); px(fx - 1, 26, 1, 1, PC.flag); px(fx, 26, 1, 1, PC.flag);
+      px(fx - 2, 27, 1, 1, PC.flag); px(fx - 1, 27, 1, 1, PC.flag); px(fx, 27, 1, 1, PC.flag);
     }
     // Mario, feet on the ground line; 1px run bob until the pole.
     const running = frac < 1 && !loaderDone;
     const bob = running && !RM && ((frame >> 3) & 1) ? 1 : 0;
-    drawArt(sprMario, MARIO_X, 30 - bob, 2);
+    drawArt(sprMario, MARIO_X, 38 - bob, 2);
     // Title cascade, exactly like the in-game title screen.
     centerShadow('MARIO', 2, PC.flag, 2);
     centerShadow('SUPER CLI EDITION', 16, PC.white, 1);
@@ -253,7 +258,7 @@
   const sizeBoot = () => { // integer scale, like the game canvas
     const k = Math.max(2, Math.floor(Math.min(640, innerWidth * 0.92) / 160));
     boot.style.width = 160*k + 'px';
-    boot.style.height = 48*k + 'px';
+    boot.style.height = 56*k + 'px';
   };
   sizeBoot();
   window.addEventListener('resize', sizeBoot);
