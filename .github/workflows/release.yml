@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/mario-* dist/SHA256SUMS dist/mario-web.zip \
+            dist/mario-* dist/SHA256SUMS \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --repo "$GITHUB_REPOSITORY"
