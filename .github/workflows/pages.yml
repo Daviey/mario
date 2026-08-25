@@ -1,6 +1,8 @@
 # Deploy the web build to GitHub Pages after a release run completes.
 # Runs from the default branch (workflow_run context) because the
 # github-pages environment's deployment protection rules reject tag refs.
+# deploy-pages only sees artifacts from its own run, so the release run's
+# artifact is downloaded and re-uploaded here before deploying.
 name: pages
 
 on:
@@ -10,6 +12,7 @@ on:
 
 permissions:
   actions: read
+  contents: read
   pages: write
   id-token: write
 
@@ -25,13 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: github-pages
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
+
+      - name: Unpack site bundle
+        run: |
+          mkdir site
+          tar -xf github-pages/artifact.tar -C site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
 
       - id: deployment
         uses: actions/deploy-pages@v4
