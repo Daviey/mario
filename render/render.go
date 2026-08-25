@@ -594,15 +594,28 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 		drawBannerPx(f, mid-2, "PAUSED", p.OverlayFG, p.OverlayBG, p)
 	case g.State == engine.StateTitle:
 		rc2 := runeColors(p)
-		// Bottom-anchored layout so any viewport height keeps its shape:
-		// the ground occupies the last two tile rows.
-		drawCenterPx(f, f.H/12, "MARIO", p.FlagRed, 2)
-		drawCenterPx(f, f.H*4/9, "SUPER CLI EDITION", p.White, 1)
+		// Bottom-anchored cascade: the cast stands ON the ground line and
+		// every text element stacks above it, so no viewport height can
+		// overlap or bury anything. Ground occupies the last 2 tile rows.
+		groundTop := f.H - 2*Pix
+		castY := groundTop - 10 // mario sprite top; feet on the last sky row
+		showText := castY >= 13 // room for logo (10px) + subtitle (5px)?
+		logoY := 2
+		if showText {
+			logoY = max(2, min(f.H/12, castY-18))
+			drawCenterShadowPx(f, logoY, "MARIO", p.FlagRed, 2, p.Dark)
+			if subY := logoY + 12; subY+5 <= castY {
+				sub := pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2)
+				drawCenterShadowPx(f, subY, sub, p.White, 1, p.Dark)
+			}
+		}
+		// Mario and the goomba flank the centre, facing each other.
 		cx := f.W / 2
-		f.DrawSprite(sprMarioSmall, rc2, cx-20, f.H-15, false, 2)
-		f.DrawSprite(sprGoomba, rc2, cx+12, f.H-13, true, 2)
+		f.DrawSprite(sprMarioSmall, rc2, cx-17, castY, false, 2)
+		f.DrawSprite(sprGoomba, rc2, cx+8, castY+2, true, 2)
 		if g.Tick%40 < 28 {
-			drawCenterPx(f, f.H-5, "PRESS ANY KEY", p.GoldLight, 1)
+			blink := pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2)
+			drawCenterShadowPx(f, min(castY+11, f.H-5), blink, p.GoldLight, 1, p.Dark)
 		}
 	case g.State == engine.StateLevelClear:
 		drawBannerPx(f, mid-2, "LEVEL CLEAR!", p.OverlayFG, p.OverlayBG, p)

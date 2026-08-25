@@ -101,6 +101,28 @@ func drawCenterPx(f *Frame, y int, s string, c Color, scale int) {
 	drawTextPx(f, (f.W-textWidthPx(s, scale))/2, y, s, c, scale)
 }
 
+// drawCenterShadowPx draws centered text with a 1px dark drop shadow so it
+// stays readable over clouds and other light art.
+func drawCenterShadowPx(f *Frame, y int, s string, c Color, scale int, shadow Color) {
+	x := (f.W - textWidthPx(s, scale)) / 2
+	if x < 0 {
+		x = 0
+	}
+	drawTextPx(f, x+scale, y+scale, s, shadow, scale)
+	drawTextPx(f, x, y, s, c, scale)
+}
+
+// pickTextPx returns the first candidate that fits maxW pixels, preferring
+// earlier (richer) entries; the last entry is used even if it overflows.
+func pickTextPx(candidates []string, maxW int) string {
+	for _, c := range candidates {
+		if textWidthPx(c, 1) <= maxW {
+			return c
+		}
+	}
+	return candidates[len(candidates)-1]
+}
+
 func toUpper(r rune) rune {
 	if r >= 'a' && r <= 'z' {
 		return r - 32

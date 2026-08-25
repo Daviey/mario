@@ -51,13 +51,27 @@ func (f *Frame) RGBBytes() []byte {
 
 func drawHudPx(f *Frame, g *engine.Game, p *Palette) {
 	f.Fill(0, 0, f.W, HudBandPx, p.HUDBG)
-	hud := fmt.Sprintf("SCORE %06d  COINS x%02d  %s  TIME %03d  LIVES x%d",
-		g.Score, g.CoinCount, strings.ToUpper(g.LevelName()), g.Time, g.Lives)
+	world := strings.ToUpper(g.LevelName())
+	full := fmt.Sprintf("SCORE %06d  COINS x%02d  %s  TIME %03d  LIVES x%d",
+		g.Score, g.CoinCount, world, g.Time, g.Lives)
+	mid := fmt.Sprintf("SCORE %06d  COINS x%02d  TIME %03d  LIVES x%d",
+		g.Score, g.CoinCount, g.Time, g.Lives)
+	compact := fmt.Sprintf("%06d  x%02d  %03d  x%d",
+		g.Score, g.CoinCount, g.Time, g.Lives)
+	hud := pickTextPx([]string{full, mid, compact, fmt.Sprintf("%06d", g.Score)}, f.W-4)
 	drawTextPx(f, 2, 1, hud, p.Text, 1)
 }
 
 func drawStatusPx(f *Frame, p *Palette) {
 	y := f.H - StatusBandPx
 	f.Fill(0, y, f.W, StatusBandPx, p.StatusBG)
-	drawCenterPx(f, y+1, "A/D MOVE  W JUMP  X RUN  P PAUSE  Q QUIT", p.TextDim, 1)
+	text := pickTextPx([]string{
+		"A/D MOVE  W JUMP  X RUN  P PAUSE  Q QUIT",
+		"A/D MOVE  W JUMP  X RUN",
+		"Q QUIT",
+		"",
+	}, f.W-2)
+	if text != "" {
+		drawCenterPx(f, y+1, text, p.TextDim, 1)
+	}
 }
