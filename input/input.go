@@ -38,8 +38,9 @@ const (
 	spAny
 )
 
-const holdWindow = 12   // ~0.2s of key-repeat silence before a legacy key expires
-const staleSeqPolls = 3 // quiet polls before an incomplete escape sequence is dropped
+const holdWindow = 12    // ~0.2s of key-repeat silence before a legacy key expires
+const maxHoldWindow = 52 // upper bound for calibrated grace and cadence windows (~0.9s)
+const staleSeqPolls = 3  // quiet polls before an incomplete escape sequence is dropped
 
 type keyEvent struct {
 	k       key
@@ -51,20 +52,24 @@ type keyEvent struct {
 
 // Mapper converts a byte stream into per-tick engine.Input values.
 type Mapper struct {
-	mu          sync.Mutex
-	now         int
-	lastSeen    [keyCount]int
-	pressedAt   [keyCount]int // tick of the newest PRESS (repeats don't refresh it)
-	sticky      [keyCount]bool
-	latched     [keyCount]bool // press edges awaiting their first Poll
-	win         [keyCount]int  // per-key expiry window; 0 = holdWindow (adaptive on repeats)
-	sources     map[int]key    // kitty press sources still held, for exact releases
-	buf         []byte
-	feedAge     int // polls since the last Feed delivered bytes
-	pendQuit    bool
-	pendPause   bool
-	pendRestart bool
-	pendAny     bool
+	mu           sync.Mutex
+	now          int
+	lastSeen     [keyCount]int
+	pressedAt    [keyCount]int // tick of the newest PRESS (repeats don't refresh it)
+	sticky       [keyCount]bool
+	latched      [keyCount]bool // press edges awaiting their first Poll
+	win          [keyCount]int  // per-key expiry window; 0 = holdWindow
+	sawRepeat    [keyCount]bool // this keypress received repeat bytes
+	heldHabit    [keyCount]bool // last keypress of this key was a hold (repeats seen)
+	osDelay      int            // measured keydown→first-repeat delay, in ticks (0 = uncalibrated)
+	pendingDelay int            // delay candidate from the newest resumed keypress
+	sources      map[int]key    // kitty press sources still held, for exact releases
+	buf          []byte
+	feedAge      int // polls since the last Feed delivered bytes
+	pendQuit     bool
+	pendPause    bool
+	pendRestart  bool
+	pendAny      bool
 }
 
 // NewMapper returns a mapper with no keys held.
@@ -87,6 +92,14 @@ func (m *Mapper) Poll() engine.Input {
 	defer m.mu.Unlock()
 	m.now++
 	m.feedAge++
+	// Silent expiry closes a keypress: whether it ends as "this key is
+	// usually held" is exactly whether repeats arrived while it was live.
+	// That habit decides the grace the NEXT keydown of that key gets.
+	for k := key(0); k < keyCount; k++ {
+		if m.lastSeen[k] > 0 && !m.sticky[k] && !m.live(k) {
+			m.heldHabit[k] = m.sawRepeat[k]
+		}
+	}
 	// An escape sequence that never completed (bytes lost or split by a
 	// slow link) would otherwise swallow every following key, because any
 	// letter can parse as the sequence's final byte. Flush it once it has
@@ -127,7 +140,13 @@ func (m *Mapper) Poll() engine.Input {
 }
 
 func (m *Mapper) held(k key) bool {
-	if m.sticky[k] || m.latched[k] {
+	return m.latched[k] || m.live(k)
+}
+
+// live reports the key physically held right now, ignoring the one-tick
+// press latch.
+func (m *Mapper) live(k key) bool {
+	if m.sticky[k] {
 		return true
 	}
 	ls := m.lastSeen[k]
@@ -139,6 +158,29 @@ func (m *Mapper) held(k key) bool {
 		w = holdWindow
 	}
 	return m.now-ls <= w
+}
+
+// graceFor returns the silence window a FRESH keydown of k gets before it
+// is considered released. On keydown-only terminals a tap and the start of
+// a hold are byte-identical for the OS repeat delay (~500ms): any window
+// that covers the delay overruns taps, any shorter one stutters holds. The
+// escape: calibrate the delay once from a real hold (osDelay), remember
+// per key whether its last press was held (heldHabit), and give held keys
+// a grace covering the delay. Repeats then collapse the window onto the
+// measured cadence, so releasing still stops fast. Jump (kUp) never gets
+// the long grace — a phantom Up eats retap edges, the missed-jump bug.
+func (m *Mapper) graceFor(k key) int {
+	if k == kUp {
+		return holdWindow
+	}
+	g := m.osDelay + 2
+	if !m.heldHabit[k] || g <= holdWindow {
+		return holdWindow
+	}
+	if g > maxHoldWindow {
+		return maxHoldWindow
+	}
+	return g
 }
 
 func (m *Mapper) drain() {
@@ -184,21 +226,41 @@ func (m *Mapper) apply(ev keyEvent) {
 		if ev.evType != 2 { // repeats don't refresh press recency
 			m.pressedAt[ev.k] = m.now + 1
 		}
-		// Adaptive hold window: the first keydown gets the full grace
-		// (an OS repeat delay of ~500ms must not drop a held key), but
-		// once a key repeats, silence expires it on the measured repeat
-		// cadence so a released key stops far sooner.
-		if prev := m.lastSeen[ev.k]; prev > 0 {
-			if d := m.now - prev + 1; d > 0 {
-				w := 3 * d
-				if w < 3 {
-					w = 3
+		if m.live(ev.k) {
+			// Continuing byte of a live keypress (an OS repeat): the
+			// press is proven a hold, and silence should now expire it
+			// on the observed cadence.
+			if !m.sawRepeat[ev.k] {
+				m.sawRepeat[ev.k] = true
+				// First repeat of a resumed press carries the measured
+				// keydown→repeat delay for the whole terminal.
+				if m.pendingDelay > holdWindow && m.pendingDelay > m.osDelay {
+					m.osDelay = m.pendingDelay
 				}
-				if w > holdWindow {
-					w = holdWindow
-				}
-				m.win[ev.k] = w
 			}
+			if prev := m.lastSeen[ev.k]; prev > 0 {
+				if d := m.now - prev + 1; d > 0 {
+					w := 3 * d
+					if w < 3 {
+						w = 3
+					}
+					if w > maxHoldWindow {
+						w = maxHoldWindow
+					}
+					m.win[ev.k] = w
+				}
+			}
+		} else {
+			// Fresh or resumed keypress. A resumed one (byte after the
+			// previous press expired) is either the first OS repeat of a
+			// hold or a quick retap — indistinguishable, so only stage
+			// the gap as a delay candidate; it is adopted when repeats
+			// actually follow.
+			if prev := m.lastSeen[ev.k]; prev > 0 {
+				m.pendingDelay = m.now - prev + 1
+			}
+			m.sawRepeat[ev.k] = false
+			m.win[ev.k] = m.graceFor(ev.k)
 		}
 		// Latch the press edge: if a frame hitch lets the release land
 		// before the next Poll, the press must still be visible once.

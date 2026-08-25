@@ -461,3 +461,86 @@ func TestRepeatCadenceTightensExpiry(t *testing.T) {
 		}
 	}
 }
+
+// calibrateHold simulates the legacy-terminal lifecycle of one held key:
+// keydown, silence past the initial grace, the OS repeat stream after the
+// repeat delay, then release. Afterwards the terminal's repeat delay is
+// calibrated and the key has a held habit.
+func calibrateHold(m *Mapper, b byte, delayTicks int) {
+	m.Feed([]byte{b})
+	for range delayTicks + 2 {
+		m.Poll() // initial grace expires; the OS delay passes in silence
+	}
+	m.Feed([]byte{b}) // first repeat (resumed press): delay candidate
+	m.Feed([]byte{b}) // cadence byte: candidate adopted, sawRepeat set
+	for range 10 {
+		m.Poll()
+	}
+	m.Feed([]byte{b}) // repeat stream continues
+	m.Feed([]byte{b})
+	for range 40 {
+		m.Poll() // release: silence expires the press on its cadence
+	}
+}
+
+func countHeldRight(m *Mapper, max int) int {
+	n := 0
+	for i := 0; i < max; i++ {
+		if !m.Poll().Right {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+func TestHeldKeyStopsStutteringAfterCalibration(t *testing.T) {
+	// On a keydown-only terminal every fresh hold used to expire during
+	// the ~500ms OS repeat delay and come back with the first repeat:
+	// a stutter on every keydown. After one calibration hold, the next
+	// keydown must survive the measured delay in silence.
+	m := NewMapper()
+	calibrateHold(m, 'd', 20) // 20-tick (~333ms) repeat delay
+	m.Feed([]byte{'d'})       // fresh keydown of a calibrated held key
+	held := countHeldRight(m, 40)
+	if held < 18 {
+		t.Errorf("fresh keydown of a calibrated held key survived only %d silent ticks — hold stutters", held)
+	}
+	if held > 26 {
+		t.Errorf("calibrated grace runaway: held %d ticks", held)
+	}
+}
+
+func TestTapsStaySharpAfterHolds(t *testing.T) {
+	// The first tap after a hold may inherit the long grace (a tap and
+	// a hold are byte-identical), but its silent expiry must reset the
+	// habit so the NEXT tap is precise again.
+	m := NewMapper()
+	calibrateHold(m, 'd', 20)
+	m.Feed([]byte{'d'})
+	for range 40 {
+		m.Poll() // habit resets when this press expires silently
+	}
+	m.Feed([]byte{'d'}) // second tap: short grace again
+	if held := countHeldRight(m, 40); held > holdWindow+1 {
+		t.Errorf("tap after habit reset held %d ticks, want <= %d", held, holdWindow+1)
+	}
+}
+
+func TestJumpKeyNeverGetsLongGrace(t *testing.T) {
+	// A long phantom Up eats retap edges (the missed-jump bug), so jump
+	// never inherits the calibrated grace even after held jumps.
+	m := NewMapper()
+	calibrateHold(m, ' ', 20) // calibrate via a held jump key
+	m.Feed([]byte{' '})
+	n := 0
+	for i := 0; i < 40; i++ {
+		if !m.Poll().Up {
+			break
+		}
+		n++
+	}
+	if n > holdWindow+1 {
+		t.Errorf("jump key inherited the calibrated grace: held %d ticks, want <= %d", n, holdWindow+1)
+	}
+}
