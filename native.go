@@ -148,11 +148,16 @@ func run(levels []*engine.Level, width int, trueColor bool) (*runResult, error) 
 		os.Exit(0)
 	}()
 
-	// Best-effort: kitty keyboard protocol (release events), alt screen,
-	// hidden cursor, window title. Unsupported terminals ignore these.
+	// Best-effort: kitty keyboard protocol, alt screen, hidden cursor,
+	// window title. Unsupported terminals ignore these. Flags 1|2|8 =
+	// disambiguate + event types + report ALL keys as escape codes, so
+	// even plain letters and space get press/repeat/release events —
+	// without them every letter tap phantom-holds for the legacy repeat
+	// window (overrun moves, eaten jumps, mushy left-right). Terminals
+	// without the protocol keep the plain-byte fallback.
 	// The leading pop heals any mode left over by a previous run that was
 	// killed without cleanup, before we push our own entry.
-	os.Stdout.WriteString("\x1b[<u\x1b[>3u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
+	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
 
 	viewW := width
 	if viewW <= 0 {

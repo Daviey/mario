@@ -321,3 +321,96 @@ func TestTildeSequencesAreSilent(t *testing.T) {
 		t.Errorf("CSI ~ produced events: %+v", in)
 	}
 }
+
+func TestKittyLetterPressAndRelease(t *testing.T) {
+	// With kitty flags 1|2|8 pushed, plain letters arrive as CSI-u with
+	// release events. Without releases a single tap phantom-holds for the
+	// whole legacy window — the "one keypress moves 3 spaces" overrun.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[97;1:1u")) // 'a' press
+	if in := m.Poll(); !in.Left {
+		t.Fatalf("kitty 'a' press -> %+v, want left", in)
+	}
+	m.Feed([]byte("\x1b[97;1:3u")) // 'a' release
+	if in := m.Poll(); in.Left {
+		t.Errorf("kitty 'a' release not honored: %+v", in)
+	}
+}
+
+func TestKittySpaceReleaseClearsUp(t *testing.T) {
+	// Jump: the release must drop Up, otherwise the next tap's rising
+	// edge (Up && !prevUp) is eaten and the jump is missed.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[32;1:1u")) // space press
+	if in := m.Poll(); !in.Up {
+		t.Fatalf("kitty space press -> %+v, want up", in)
+	}
+	m.Feed([]byte("\x1b[32;1:3u")) // space release
+	if in := m.Poll(); in.Up {
+		t.Errorf("kitty space release left Up held: %+v", in)
+	}
+}
+
+func TestOppositeKeysNewestPressWins(t *testing.T) {
+	// Quick left-right: a fresh tap must win over the opposite key still
+	// inside its hold window, instead of both cancelling to a standstill.
+	m := NewMapper()
+	m.Feed([]byte{'d'})
+	m.Poll()
+	m.Feed([]byte{'a'})
+	for i := range 3 {
+		in := m.Poll()
+		if in.Left && !in.Right {
+			return // reversed immediately
+		}
+		if !in.Left || in.Right {
+			t.Fatalf("poll %d: fresh left did not take over from phantom right: %+v", i, in)
+		}
+	}
+}
+
+func TestKittyReleaseOneSourceKeepsOtherHeld(t *testing.T) {
+	// Arrow-right and 'd' both mean Right. With all keys reporting
+	// release events, releasing one must not drop the other.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[1;1:1C"))   // right arrow press
+	m.Feed([]byte("\x1b[100;1:1u")) // 'd' press
+	if in := m.Poll(); !in.Right {
+		t.Fatalf("both right sources pressed -> %+v, want right", in)
+	}
+	m.Feed([]byte("\x1b[1;1:3C")) // right arrow release; 'd' still held
+	if in := m.Poll(); !in.Right {
+		t.Errorf("arrow release dropped the still-held 'd': %+v", in)
+	}
+	m.Feed([]byte("\x1b[100;1:3u")) // 'd' release: nothing holds right now
+	if in := m.Poll(); in.Right {
+		t.Errorf("last right source released but Right still held: %+v", in)
+	}
+}
+
+func TestUntrackedReleaseStillClears(t *testing.T) {
+	// A release whose press we never tracked (e.g. pressed before the
+	// protocol push took effect) falls back to clearing the key outright.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[1;1:1C")) // right arrow press
+	m.Poll()
+	m.Feed([]byte("\x1b[100;1:3u")) // untracked 'd' release
+	if in := m.Poll(); in.Right {
+		t.Errorf("untracked release did not clear right: %+v", in)
+	}
+}
+
+func TestFreshPressBeatsOngoingRepeats(t *testing.T) {
+	// A genuinely held key streams repeat events; those repeats must not
+	// outrank a NEWER press of the opposite direction.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[100;1:1u")) // 'd' press
+	for range 5 {
+		m.Feed([]byte("\x1b[100;1:2u")) // 'd' repeat
+		m.Poll()
+	}
+	m.Feed([]byte("\x1b[97;1:1u")) // fresh 'a' press
+	if in := m.Poll(); !in.Left || in.Right {
+		t.Fatalf("fresh left lost to right's repeat stream: %+v", in)
+	}
+}
