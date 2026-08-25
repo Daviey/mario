@@ -51,7 +51,7 @@ make release      # cross-compile linux/amd64+arm64, darwin/amd64+arm64, windows
 make web          # GOOS=js GOARCH=wasm → dist/web/ (mario.wasm + index.html + wasm_exec.js)
 make web-serve    # serve dist/web at http://127.0.0.1:8417/
 
-CGO_ENABLED=0 go test -run TestMaybeDecline -v .     # single test
+CGO_ENABLED=0 go test -run TestGameOverAutoAsksAndSubmits -v .   # single test
 LIVE=1 go test -run TestLiveUISubmit -v .            # real-backend E2E (see Testing)
 ./mario -scores 10                                   # print leaderboard
 ./mario -ui-preview board                            # headless UI screens: ask|entry|board|title-board
