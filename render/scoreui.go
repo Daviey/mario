@@ -107,7 +107,15 @@ func drawBoardPx(f *Frame, ui *ScoreUI, p *Palette, onTitle bool, tick int) {
 		// Below the header, above the cast sprites (castY = f.H-18).
 		top = 6
 	}
-	drawCenterShadowPx(f, top, "LEADERBOARD", p.GoldLight, 1, p.Dark)
+	if !ui.Loading && len(ui.Rows) > 0 {
+		// Solid band from just above the header through the last row:
+		// sprites and clouds must never bleed through board text.
+		fit := max(0, (f.H-20-(top+8))/7)
+		f.Fill(0, top-1, f.W, fit*7+10, p.Dark)
+		drawCenterPx(f, top, "LEADERBOARD", p.GoldLight, 1)
+	} else {
+		drawCenterShadowPx(f, top, "LEADERBOARD", p.GoldLight, 1, p.Dark)
+	}
 	if ui.Loading {
 		if tick%40 < 28 {
 			drawCenterShadowPx(f, top+8, "LOADING", p.White, 1, p.Dark)
@@ -119,9 +127,6 @@ func drawBoardPx(f *Frame, ui *ScoreUI, p *Palette, onTitle bool, tick int) {
 	} else {
 		// Rows run from top+8 down to the footer at f.H-6.
 		fit := max(0, (f.H-20-(top+8))/7)
-		// Solid band behind the rows: sprites and clouds must never bleed
-		// through score text.
-		f.Fill(0, top+6, f.W, fit*7+3, p.Dark)
 		for i, r := range ui.Rows {
 			if i >= fit {
 				break

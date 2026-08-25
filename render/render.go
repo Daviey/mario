@@ -302,32 +302,6 @@ func cloudBlocked(g *engine.Game, tx, row int) bool {
 	if row >= 9 && tx+3 > c0 && tx < c0+5 {
 		return true
 	}
-	// On the title screen clouds also keep clear of the stacked text —
-	// white cloud art would dissolve the white SUPER CLI subtitle. A cloud
-	// is blocked when any of its actual puff pixels would land inside a
-	// text band (rect-adjacent clouds pass, so the sweep can still see
-	// the filter working).
-	if g.State == engine.StateTitle {
-		f := &Frame{W: g.ViewW * Pix, H: viewTilesOf(g) * Pix}
-		ox := int(g.CameraX * Pix)
-		oy := int(CameraY(g) * Pix)
-		x0, y0 := tx*Pix-ox, row*Pix-oy
-		for _, b := range titleTextBands(f) {
-			if x0 >= b[2] || x0+sprW(sprCloud) <= b[0] || y0 >= b[3] || y0+sprH(sprCloud) <= b[1] {
-				continue // rect clear of this band
-			}
-			for ry, art := range sprCloud {
-				for rx, r := range art {
-					if r != 'W' {
-						continue
-					}
-					if px, py := x0+rx, y0+ry; px >= b[0] && px < b[2] && py >= b[1] && py < b[3] {
-						return true
-					}
-				}
-			}
-		}
-	}
 	return false
 }
 

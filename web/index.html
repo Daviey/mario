@@ -211,8 +211,8 @@
     for (let k = 0; k < 3; k++) {
       const span = 184;
       const x = ((k*73 - cam*0.4) % span + span) % span - 12;
-      drawArt(sprCloud, x, 6 + (k % 2)*7, 1);
-    }
+      if (isHill(t)) drawArt(sprHill, x, 37, 1);
+      if (isBush(t)) drawArt(sprBush, x, 38, 1);
     const cx = Math.floor(cam);
     const t0 = Math.floor(cx / 4) - 2, t1 = Math.floor((cx + 160) / 4) + 2;
     for (let t = t0; t <= t1; t++) {
