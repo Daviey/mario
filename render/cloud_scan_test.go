@@ -15,7 +15,7 @@ func TestCloudsNeverOverlapGeometryE2E(t *testing.T) {
 		g.State = engine.StatePlaying
 		for camX := 0; camX < lv.Width-30; camX += 7 {
 			g.CameraX = float64(camX)
-			f := worldFrame(g, testPal)
+			f := worldFrame(g, testPal, nil)
 			ox := int(g.CameraX * Pix)
 			oy := int(CameraY(g) * Pix)
 			for y := 0; y < f.H; y++ {
