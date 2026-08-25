@@ -347,9 +347,8 @@ func CameraY(g *engine.Game) float64 {
 }
 
 // worldFrame renders the world (sky, decorations, tiles, HUD
-// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels. A non-nil
-// ui switches the game-over/title overlay to the leaderboard UI screens.
-func worldFrame(g *engine.Game, p *Palette, ui *ScoreUI) *Frame {
+// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels.
+func worldFrame(g *engine.Game, p *Palette) *Frame {
 	vh := viewTilesOf(g)
 	f := NewFrame(g.ViewW*Pix, vh*Pix, p.Sky)
 	rc := runeColors(p)
@@ -365,7 +364,7 @@ func worldFrame(g *engine.Game, p *Palette, ui *ScoreUI) *Frame {
 		// so the logo and cast stay unobstructed.
 		drawDecorations(f, g, p, rc, txOf, tyOf)
 		drawGroundOnly(f, g, p, camX, camY, ox, oy)
-		drawOverlayPx(f, g, p, ui)
+		drawOverlayPx(f, g, p)
 		return f
 	}
 	drawDecorations(f, g, p, rc, txOf, tyOf)
@@ -376,20 +375,26 @@ func worldFrame(g *engine.Game, p *Palette, ui *ScoreUI) *Frame {
 	drawParticlesPx(f, g, p, rc, ox, oy)
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
 	drawPlayerPx(f, g, p, rc, camX, camY)
-	drawOverlayPx(f, g, p, ui)
+	drawOverlayPx(f, g, p)
 	return f
 }
 
 // Render draws one complete frame: HUD row, world pixel grid through the
 // camera (with vertical follow), entities, particles and overlays. Screen
 // size is ViewW*Pix columns wide and (2+ViewH*Pix/2) rows tall: a fuller
+// window shows more world, never bigger sprites. An active ScoreUI
+// replaces the world with the leaderboard text screens.
 func Render(g *engine.Game, p *Palette, ui ...*ScoreUI) *Screen {
 	vh := viewTilesOf(g)
 	s := NewScreen(g.ViewW*Pix, 2+vh*Pix/2)
 	s.TrueColor = p.TrueColor
 	drawHUD(s, g, p)
 	drawStatus(s, p)
-	blit(s, worldFrame(g, p, firstUI(ui)))
+	if u := firstUI(ui); u != nil && u.Mode != UIOff {
+		drawScoreUIText(s, u, p, g.Tick)
+	} else {
+		blit(s, worldFrame(g, p))
+	}
 	return s
 }
 
@@ -615,18 +620,8 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
-func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, ui *ScoreUI) {
+func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 	mid := f.H / 2
-	if ui != nil && ui.Mode != UIOff {
-		if g.State == engine.StateTitle && ui.Mode == UIBoard {
-			drawTitlePx(f, g, p, false) // cast backdrop only
-			drawScoreUIPx(f, ui, p, true, g.Tick)
-			return
-		}
-		// Game-over/win: leaderboard UI owns the overlay.
-		drawScoreUIPx(f, ui, p, false, g.Tick)
-		return
-	}
 	switch {
 	case g.Paused:
 		drawBannerPx(f, mid-2, "PAUSED", p.OverlayFG, p.OverlayBG, p)

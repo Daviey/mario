@@ -99,6 +99,11 @@ func (u *scoreUI) quitRequested() bool {
 func (u *scoreUI) showBoard() {
 	u.mu.Lock()
 	if u.fetch == nil {
+		// Offline build (no credentials): still show the screen, with a
+		// status — never an eternal LOADING.
+		u.mode = render.UIBoard
+		u.loading = false
+		u.status = "OFFLINE"
 		u.mu.Unlock()
 		return
 	}
@@ -126,8 +131,11 @@ func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error), deviceID string) 
 }
 
 // boardRowsFor converts API rows to render rows, marking the player's own
-// entries.
+// entries. The board shows the top ten.
 func boardRowsFor(rows []board.Row, deviceID string) []render.ScoreRow {
+	if len(rows) > 10 {
+		rows = rows[:10] // the board shows the top ten
+	}
 	out := make([]render.ScoreRow, 0, len(rows))
 	for i, r := range rows {
 		out = append(out, render.ScoreRow{
@@ -150,10 +158,14 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 	if u.mode == render.UIOff && g.State == engine.StateTitle && len(u.noted) > 0 {
 		if bytesContain(u.noted, 'l') {
 			u.noted = nil
-			u.player, _ = loadPlayer()
 			u.mode = render.UIBoard
-			u.loading = true
-			if u.fetch != nil {
+			u.player, _ = loadPlayer()
+			if u.fetch == nil {
+				u.loading = false
+				u.status = "OFFLINE"
+			} else {
+				u.loading = true
+				u.status = ""
 				fetch, device := u.fetch, u.player.DeviceID
 				go u.fetchInto(fetch, device)
 			}
@@ -268,6 +280,7 @@ func (u *scoreUI) snapshotLocked(g *engine.Game) *render.ScoreUI {
 		Rows:     u.rows,
 		Loading:  u.loading,
 		Status:   u.status,
+		Title:    g.State == engine.StateTitle,
 	}
 }
 

@@ -53,6 +53,29 @@
   .phase::after { content: "_"; animation: blink 1.1s steps(1) infinite; }
   .phase.err::after { content: none; }
   @keyframes blink { 50% { opacity: 0; } }
+  /* ---- leaderboard: real DOM text over the canvas (the game pushes
+     JSON snapshots via window.marioBoard) ---- */
+  #board {
+    position: absolute; inset: 0; z-index: 4;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(13,8,3,.84);
+    pointer-events: none;
+  }
+  #board.off { display: none; }
+  #board h3 { color:#FFF3B0; letter-spacing:.35em; font-size:15px; margin:0 0 14px; font-weight:700; }
+  #board p { margin:4px 0; color:#fff; font-size:14px; }
+  #board .gold { color:#FFF3B0; }
+  #board .hint { color:#9fb6d9; font-size:12px; }
+  #board .score { font-size:16px; }
+  #board .field { font-size:16px; letter-spacing:.08em; }
+  #board table { border-collapse: collapse; margin: 2px 0 10px; }
+  #board td { padding: 1px 10px; font-size: 14px; color: #fff; font-variant-numeric: tabular-nums; }
+  #board td.rk { text-align: right; color: #9fb6d9; }
+  #board td.nm { text-align: left; min-width: 9ch; }
+  #board td.sc { text-align: right; }
+  #board tr.mine td { color: #FFF3B0; font-weight: 700; }
+  @keyframes ui-blink { 50% { opacity: 0; } }
+  #board .blink { animation: ui-blink 1.2s steps(1) infinite; }
 </style>
 </head>
 <body>
@@ -69,6 +92,7 @@
       <span class="pct" id="pct">0%</span>
     </div>
   </div>
+  <div id="board" class="off"></div>
 </div>
 <div id="note">click the game to focus · <a href="#" onclick="location.reload(); return false">restart</a></div>
 
@@ -296,6 +320,47 @@
     }
     ctx.putImageData(imgData, 0, 0);
     loaderReady(); // first painted frame = game is up
+  };
+
+  // The game pushes leaderboard UI state as JSON; render it as real DOM
+  // text (crisp browser fonts, not canvas pixels). mode "off" hides it.
+  const boardEl = document.getElementById('board');
+  const escHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const pad = (n, w) => String(n).padStart(w, '0');
+  window.marioBoard = (json) => {
+    let st;
+    try { st = JSON.parse(json); } catch { return; }
+    if (!st || st.mode === 'off') { boardEl.classList.add('off'); return; }
+    boardEl.classList.remove('off');
+    let html = '';
+    if (st.mode === 'ask') {
+      html = '<h3>GAME OVER</h3>'
+        + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
+        + '<p class="gold blink">SUBMIT TO LEADERBOARD?</p>'
+        + '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>';
+    } else if (st.mode === 'entry') {
+      const name = escHtml(st.name || '');
+      const padN = '&nbsp;'.repeat(Math.max(0, 9 - name.length));
+      html = '<h3>GAME OVER</h3>'
+        + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
+        + '<p class="gold">ENTER NAME</p>'
+        + '<p class="field">[' + name + '<span class="blink">_</span>' + padN + ']</p>'
+        + '<p class="hint">ENTER OK&nbsp;&nbsp;&nbsp;BS DEL&nbsp;&nbsp;&nbsp;ESC BACK</p>';
+    } else { // board
+      let body;
+      if (st.loading) body = '<p class="blink">LOADING...</p>';
+      else if (!st.rows || !st.rows.length) body = '<p>NO SCORES YET</p>';
+      else body = '<table>' + st.rows.map((r) =>
+        '<tr' + (r.mine ? ' class="mine"' : '') + '><td class="rk">' + r.rank
+        + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + r.score + '</td></tr>').join('') + '</table>';
+      const foot = st.status
+        ? '<p class="gold">' + escHtml(st.status) + '</p>'
+        : (st.title ? '<p class="hint blink">L CLOSE</p>'
+                    : '<p class="hint blink">R RESTART&nbsp;&nbsp;&nbsp;Q QUIT</p>');
+      html = '<h3>LEADERBOARD</h3>' + body + foot;
+    }
+    boardEl.innerHTML = html;
   };
 
   // Integer uniform scaling, like every polished pixel game: pick the

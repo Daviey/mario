@@ -44,10 +44,16 @@ release: $(TARGETS)
 		shasum -a 256 $(BINARY)-* > SHA256SUMS
 
 # Static browser build (GitHub Pages ready): the game itself compiled to
-# WASM, rendered client-side by ghostty-web. All asset paths relative.
+# WASM, rendered client-side. All asset paths relative. The Supabase URL
+# and publishable key are embedded (board.Default*) from env or .env so
+# the leaderboard works in the browser, which has no environment.
+SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env 2>/dev/null))
+SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env 2>/dev/null))
+WEBLDFLAGS := $(LDFLAGS) -X mario/board.DefaultURL=$(SUPA_URL) -X mario/board.DefaultKey=$(SUPA_KEY)
+
 web:
 	@mkdir -p $(DIST)/web
-	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(DIST)/web/mario.wasm .
+	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm .
 	cp web/index.html $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \

@@ -164,3 +164,24 @@ func TestLoadDotEnv(t *testing.T) {
 		t.Errorf("KEYONLY = %q, want empty", got)
 	}
 }
+
+func TestFromEnvFallsBackToDefaults(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("SUPABASE_KEY", "")
+	origURL, origKey := DefaultURL, DefaultKey
+	defer func() { DefaultURL, DefaultKey = origURL, origKey }()
+	DefaultURL, DefaultKey = "https://example.supabase.co", "anon-key"
+	c, err := FromEnv()
+	if err != nil {
+		t.Fatalf("FromEnv with defaults: %v", err)
+	}
+	if c.BaseURL != "https://example.supabase.co" || c.Key != "anon-key" {
+		t.Fatalf("client = %+v, want embedded defaults", c)
+	}
+	// Real environment variables always win over the embedded defaults.
+	t.Setenv("SUPABASE_URL", "https://env.supabase.co")
+	c, err = FromEnv()
+	if err != nil || c.BaseURL != "https://env.supabase.co" {
+		t.Fatalf("env should win: %+v err=%v", c, err)
+	}
+}

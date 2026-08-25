@@ -544,3 +544,15 @@ func TestJumpKeyNeverGetsLongGrace(t *testing.T) {
 		t.Errorf("jump key inherited the calibrated grace: held %d ticks, want <= %d", n, holdWindow+1)
 	}
 }
+
+func TestLeaderKeyIsNotAGameKey(t *testing.T) {
+	// 'l' opens the leaderboard UI on the title screen; it must be a
+	// mapped no-op for the game — no AnyKey edge (which would start the
+	// game), no movement, no specials.
+	m := NewMapper()
+	m.Feed([]byte("l"))
+	in := m.Poll()
+	if in.AnyKey || in.Quit || in.Pause || in.Restart || in.Left || in.Right || in.Up || in.Down || in.Run {
+		t.Errorf("'l' produced game input %+v; want none", in)
+	}
+}
