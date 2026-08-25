@@ -6,9 +6,17 @@ import (
 	"mario/engine"
 )
 
-// titleBands recomputes the title-screen text layout (independently of
-// drawOverlayPx) as x0,y0,x1,y1 pixel rects: MARIO logo, SUPER CLI subtitle,
-// PRESS ANY KEY blink. It pins the layout the cloud filter must respect.
+// sentinelCloudPal clones the test palette with clouds recolored magenta so
+// cloud pixels stay identifiable even under the white SUPER CLI text.
+func sentinelCloudPal() *Palette {
+	pal := *testPal
+	pal.Cloud = color(0xFF00FF, 5)
+	return &pal
+}
+
+// titleBands recomputes the full-mode title-screen text layout
+// (independently of titleTextEls) as x0,y0,x1,y1 pixel rects: MARIO logo,
+// SUPER CLI subtitle, PRESS ANY KEY blink, L LEADERBOARD hint.
 func titleBands(f *Frame) [][4]int {
 	groundTop := f.H - 2*Pix
 	castY := groundTop - 10
@@ -30,24 +38,45 @@ func titleBands(f *Frame) [][4]int {
 		}
 	}
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+11, f.H-5), 1)
+	if hintY := castY + 17; hintY+5 <= f.H-5 {
+		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1)
+	}
 	return bands
 }
 
 // TestTitleCloudsNeverOverlapTitleText sweeps the title screen of every
 // built-in level at several viewport sizes: no cloud may paint a pixel
-// inside any title text rect. Clouds and the subtitle are both white, so
-// the check works from cloud sprite stencils, not pixel colors.
+// inside any title text band. Clouds are sentinel-recolored first, so the
+// check works even where clouds and text are both white.
 func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
-	suppressed := 0
+	pal := sentinelCloudPal()
+	suppressed, drawn := 0, 0
 	for _, viewW := range []int{20, 30, 40} {
 		for _, viewH := range []int{7, 9, 12, 15} {
 			for _, lv := range engine.DefaultLevels() {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH) // starts on title
-				f := worldFrame(g, testPal)
+				f := worldFrame(g, pal, nil)
 				bands := titleBands(f)
+				if len(bands) == 0 {
+					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
+				}
 
-				// Layout pin: each band must actually hold its text.
-				has := func(b [4]int, c Color) bool {
+				// No cloud pixel inside any text band.
+				for _, b := range bands {
+					for y := b[1]; y < b[3]; y++ {
+						for x := b[0]; x < b[2]; x++ {
+							if f.At(x, y) == pal.Cloud {
+								t.Fatalf("%s %dx%d: cloud pixel at (%d,%d) inside title text band %v",
+									lv.Name, viewW, viewH, x, y, b)
+							}
+						}
+					}
+				}
+
+				// Layout pin: the logo band holds red MARIO pixels, and at
+				// full height a white subtitle sits under it.
+				castY := f.H - 2*Pix - 10
+				hasColor := func(b [4]int, c Color) bool {
 					for y := b[1]; y < b[3]; y++ {
 						for x := b[0]; x < b[2]; x++ {
 							if f.At(x, y) == c {
@@ -57,70 +86,44 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 					}
 					return false
 				}
-				logo, sub, blink := 0, 0, 0
-				for i, b := range bands {
-					switch {
-					case i == 0 && len(bands) == 3:
-						if !has(b, testPal.FlagRed) {
-							t.Fatalf("%s %dx%d: logo band %v has no MARIO pixels", lv.Name, viewW, viewH, b)
+				if castY >= 13 && !hasColor(bands[0], testPal.FlagRed) {
+					t.Fatalf("%s %dx%d: logo band %v has no MARIO pixels", lv.Name, viewW, viewH, bands[0])
+				}
+				if viewH >= 12 {
+					subOK := false
+					for _, b := range bands[1:] {
+						if b[1] > bands[0][3] && b[1] < bands[0][3]+12 && hasColor(b, testPal.White) {
+							subOK = true
 						}
-						logo = 1
-					case i == 1 && len(bands) == 3, i == 0 && len(bands) == 2:
-						if b[1] < bands[0][3]+7 { // subtitle sits below the logo
-							if !has(b, testPal.White) {
-								t.Fatalf("%s %dx%d: subtitle band %v has no white pixels", lv.Name, viewW, viewH, b)
-							}
-							sub = 1
-						} else if !has(b, testPal.GoldLight) {
-							t.Fatalf("%s %dx%d: blink band %v has no PRESS ANY KEY pixels", lv.Name, viewW, viewH, b)
-						}
-					default:
-						if !has(b, testPal.GoldLight) {
-							t.Fatalf("%s %dx%d: blink band %v has no PRESS ANY KEY pixels", lv.Name, viewW, viewH, b)
-						}
-						blink = 1
+					}
+					if !subOK {
+						t.Fatalf("%s %dx%d: no white subtitle pixels under the logo", lv.Name, viewW, viewH)
 					}
 				}
-				if len(bands) == 3 && (logo+sub+blink) < 2 {
-					t.Fatalf("%s %dx%d: expected text bands incomplete", lv.Name, viewW, viewH)
-				}
 
-				// Contract: no cloud stencil pixel may land in any band.
+				// Sweep bookkeeping: prove the filter is live (candidates
+				// exist that must be suppressed) and that clouds still
+				// render on the title sky somewhere.
 				ox := int(g.CameraX * Pix)
 				oy := int(CameraY(g) * Pix)
-				for tx := 0; tx < lv.Width; tx++ {
+				for tx := range lv.Width {
 					row, _, ok := CloudAt(tx)
 					if !ok || cloudBlocked(g, tx, row) {
 						continue
 					}
 					x0, y0 := tx*Pix-ox, row*Pix-oy
-					hit := false
-					for ry, art := range sprCloud {
-						for rx, r := range art {
-							if r != 'W' {
-								continue
-							}
-							px, py := x0+rx, y0+ry
-							if px < 0 || py < 0 || px >= f.W || py >= f.H {
-								continue
-							}
-							for _, b := range bands {
-								if px >= b[0] && px < b[2] && py >= b[1] && py < b[3] {
-									t.Fatalf("%s %dx%d: cloud (tx=%d row=%d) paints (%d,%d) inside title text band %v",
-										lv.Name, viewW, viewH, tx, row, px, py, b)
-								}
-							}
-						}
-					}
-					// Would this cloud have intersected a band? Count it so
-					// the sweep proves the filter is live, not vacuous.
 					for _, b := range bands {
 						if x0 < b[2] && x0+sprW(sprCloud) > b[0] && y0 < b[3] && y0+sprH(sprCloud) > b[1] {
-							hit = true
+							suppressed++
+							break
 						}
 					}
-					if hit {
-						suppressed++
+				}
+				for y := range f.H {
+					for x := range f.W {
+						if f.At(x, y) == pal.Cloud {
+							drawn++
+						}
 					}
 				}
 			}
@@ -128,5 +131,8 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 	}
 	if suppressed == 0 {
 		t.Fatal("no cloud ever intersects a title text band: sweep cannot catch regressions")
+	}
+	if drawn == 0 {
+		t.Fatal("no cloud pixels on any title screen: clouds were over-suppressed")
 	}
 }

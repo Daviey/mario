@@ -35,58 +35,24 @@
     background: #071330; text-align: center;
   }
   #note a { color: #9fb6d9; }
-  /* ---- loading screen: mario.wasm is a few MB; show honest progress ---- */
+  /* ---- loading screen: the boot screen IS a level of the game. All
+     art, palette and the 3×5 font are ports of render/*.go, so the
+     loader and the title screen read as one continuous world. ---- */
   #stage { position: relative; }
   #loader {
     position: absolute; inset: 0; z-index: 5;
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 20px;
+    justify-content: center; gap: 14px;
     background: #0b0e1a;
     transition: opacity .45s ease;
   }
   #loader.done { opacity: 0; pointer-events: none; }
-  #loader .title {
-    margin: 0 0 6px; font-size: 21px; font-weight: 700;
-    letter-spacing: 7px; color: #f8d878;
-    text-shadow: 3px 3px 0 #e4221b, 6px 6px 0 #04060f;
-  }
-  .trackwrap { position: relative; width: min(420px, 78vw); padding-top: 34px; }
-  .track {
-    position: relative; height: 26px; overflow: hidden;
-    border: 3px solid #04060f; background-color: #111a3d;
-    box-shadow: inset 0 0 0 2px #1d2c60;
-  }
-  .track::before {
-    content: ""; position: absolute; inset: 0;
-    background:
-      repeating-linear-gradient(90deg, #0a1129 0 2px, transparent 2px 27px),
-      linear-gradient(transparent 0 11px, #0a1129 11px 15px, transparent 15px);
-  }
-  .fill {
-    position: absolute; inset: 0 auto 0 0; width: 0%;
-    background-color: #c2571f;
-    background-image:
-      repeating-linear-gradient(90deg, rgba(4,6,15,.85) 0 2px, transparent 2px 27px),
-      linear-gradient(transparent 0 11px, rgba(4,6,15,.85) 11px 15px, transparent 15px);
-    box-shadow: inset 0 3px 0 #e8a33d;
-  }
-  .qb {
-    position: absolute; top: 0; left: 0%;
-    width: 22px; height: 22px; margin-left: -11px;
-    background: #e39d25; border: 3px solid #04060f;
-    box-shadow: inset 0 3px 0 #f8d878, inset 0 -3px 0 #a05a10;
-    font: 700 13px/17px ui-monospace, Menlo, monospace;
-    color: #04060f; text-align: center; user-select: none;
-    animation: bump 1.5s ease-in-out infinite;
-  }
-  .qb::after { content: "?"; }
-  @keyframes bump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  #boot { image-rendering: pixelated; display: block; }
   .meta { display: flex; gap: 16px; align-items: baseline; font-size: 13px; color: #9fb6d9; }
   .meta .pct { min-width: 4ch; text-align: right; color: #fff; font-weight: 700; }
   .phase::after { content: "_"; animation: blink 1.1s steps(1) infinite; }
   .phase.err::after { content: none; }
   @keyframes blink { 50% { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .qb { animation: none; } }
 </style>
 </head>
 <body>
@@ -97,11 +63,7 @@
 <div id="stage">
   <canvas id="game"></canvas>
   <div id="loader" role="status">
-    <div class="title">SUPER CLI MARIO</div>
-    <div class="trackwrap">
-      <div class="qb"></div>
-      <div class="track"><div class="fill"></div></div>
-    </div>
+    <canvas id="boot" width="160" height="48"></canvas>
     <div class="meta" aria-live="polite">
       <span class="phase" id="phase">downloading</span>
       <span class="pct" id="pct">0%</span>
@@ -118,31 +80,202 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   let imgData = null;
-  // Loading screen: honest progress from the wasm download; the "?"
-  // block rides the leading edge of the brick bar. Fades out on the
-  // first painted frame — the moment the game is actually playable.
+  // Loading screen: honest progress from the wasm download, drawn as the
+  // game itself. Every color, sprite, tile and glyph below is a port of
+  // the Go renderer (render/render.go, sprites.go, font.go), so the boot
+  // screen and the title screen are one continuous world: the camera
+  // scrolls right as bytes arrive, Mario runs, and he reaches the
+  // flagpole at 100%. Fades out on the first painted frame.
   const loader = document.getElementById('loader');
-  const fillEl = loader.querySelector('.fill');
-  const qbEl = loader.querySelector('.qb');
   const pctEl = document.getElementById('pct');
   const phaseEl = document.getElementById('phase');
+  const boot = document.getElementById('boot');
+  const bc = boot.getContext('2d');
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Palette — render.go NewPalette, exact hexes.
+  const PC = {
+    sky:'#5C94FC', gLight:'#F8B060', gMid:'#C84C0C', gDark:'#7C2800',
+    brickL:'#D86818', brickD:'#6B2B00', qBG:'#FC9838', qDim:'#E08018',
+    qHi:'#FFD9A0', qMark:'#FFF8E0', pipeL:'#80D010', pipeM:'#00A800',
+    pipeD:'#004400', pole:'#98E858', flag:'#E4221B', dark:'#1A0E04',
+    mario:'#FF3B30', skin:'#FFC89E', overall:'#2B5DD7', white:'#FFFFFF',
+  };
+  // Sprite art — render/sprites.go, verbatim.
+  const sprMario = ['.RRR.','RRRRR','SSDSS','RBBBR','.D.D.'];
+  const sprCloud = ['....WWWW....','..WWWWWWWW..','.WWWWWWWWWW.','..WWWWWWWW..'];
+  const sprHill  = ['...EE...','.EGGGGE.','GGGGGGGG'];
+  const sprBush  = ['.EGGE.','GGGGGG'];
+  const artMap = { R:PC.mario, S:PC.skin, D:PC.dark, B:PC.overall,
+                   W:PC.white, E:PC.pipeL, G:PC.pipeM };
+  const px = (x, y, w, h, c) => { bc.fillStyle = c; bc.fillRect(x|0, y|0, w, h); };
+  const drawArt = (art, x, y, sc) => {
+    for (let r = 0; r < art.length; r++)
+      for (let c = 0; c < art[r].length; c++) {
+        const col = artMap[art[r][c]];
+        if (col) px(x + c*sc, y + r*sc, sc, sc, col);
+      }
+  };
+
+  // 3×5 font — render/font.go font3x5, verbatim (1px tracking).
+  const FONT = {
+    A:['###','#.#','###','#.#','#.#'], B:['##.','#.#','##.','#.#','##.'],
+    C:['###','#..','#..','#..','###'], D:['##.','#.#','#.#','#.#','##.'],
+    E:['###','#..','##.','#..','###'], F:['###','#..','##.','#..','#..'],
+    G:['###','#..','#.#','#.#','###'], H:['#.#','#.#','###','#.#','#.#'],
+    I:['###','.#.','.#.','.#.','###'], J:['..#','..#','..#','#.#','###'],
+    K:['#.#','#.#','##.','#.#','#.#'], L:['#..','#..','#..','#..','###'],
+    M:['#.#','###','###','#.#','#.#'], N:['##.','#.#','#.#','#.#','#.#'],
+    O:['###','#.#','#.#','#.#','###'], P:['###','#.#','###','#..','#..'],
+    Q:['###','#.#','###','..#','..#'], R:['###','#.#','##.','#.#','#.#'],
+    S:['###','#..','###','..#','###'], T:['###','.#.','.#.','.#.','.#.'],
+    U:['#.#','#.#','#.#','#.#','###'], V:['#.#','#.#','#.#','#.#','.#.'],
+    W:['#.#','#.#','###','###','#.#'], X:['#.#','#.#','.#.','#.#','#.#'],
+    Y:['#.#','#.#','###','.#.','.#.'], Z:['###','..#','.#.','#..','###'],
+    '0':['###','#.#','#.#','#.#','###'], '1':['.#.','##.','.#.','.#.','###'],
+    '2':['###','..#','.#.','#..','###'], '3':['###','..#','.##','..#','###'],
+    '4':['#.#','#.#','###','..#','..#'], '5':['###','#..','###','..#','###'],
+    '6':['#..','#..','###','#.#','###'], '7':['###','..#','.#.','.#.','.#.'],
+    '8':['###','#.#','###','#.#','###'], '9':['###','#.#','###','..#','..#'],
+    '!':['.#.','.#.','.#.','...','.#.'], '.':['...','...','...','...','.#.'],
+    '-':['...','...','###','...','...'], '+':['...','.#.','###','.#.','...'],
+    '/':['..#','..#','.#.','#..','#..'], ':':['...','.#.','...','.#.','...'],
+    '?':['###','..#','.#.','...','.#.'], ' ':['...','...','...','...','...'],
+  };
+  const textW = (s, sc) => s.length ? (4*s.length - 1) * sc : 0;
+  const drawText = (s, x, y, c, sc) => {
+    let cx = x;
+    for (const ch of s) {
+      const g = FONT[ch] || FONT['?'];
+      for (let r = 0; r < 5; r++)
+        for (let col = 0; col < 3; col++)
+          if (g[r][col] === '#') px(cx + col*sc, y + r*sc, sc, sc, c);
+      cx += 4*sc;
+    }
+  };
+  // drawCenterShadowPx: 1px drop shadow keeps text readable over clouds.
+  const centerShadow = (s, y, c, sc) => {
+    const x = (160 - textW(s, sc)) / 2;
+    drawText(s, x + sc, y + sc, PC.dark, sc);
+    drawText(s, x, y, c, sc);
+  };
+
+  // Tiles — render/sprites.go draw*, 4px each, verbatim ports.
+  const tileGround = (x, y, tx, ty, open) => {
+    px(x, y, 4, 4, PC.gMid);
+    if (open) px(x, y, 4, 1, PC.gLight);
+    px(x + 3, y + 1, 1, 3, PC.gDark);
+    px(x + ((tx + ty) % 2) + 1, y + 2, 1, 1, PC.gDark);
+    px(x + ((tx*3 + ty) % 2), y + 3, 1, 1, PC.gDark);
+  };
+  const tileBrick = (x, y, tx) => {
+    px(x, y, 4, 4, PC.brickL);
+    px(x, y + 3, 4, 1, PC.brickD);
+    px(x + (tx % 2 ? 3 : 1), y, 1, 4, PC.brickD);
+    px(x, y, 1, 1, PC.qHi);
+  };
+  const tileQ = (x, y, bright) => {
+    px(x, y, 4, 4, bright ? PC.qBG : PC.qDim);
+    px(x, y, 1, 1, PC.qHi); px(x + 3, y, 1, 1, PC.brickD);
+    px(x, y + 3, 1, 1, PC.brickD); px(x + 3, y + 3, 1, 1, PC.brickD);
+    px(x + 1, y, 2, 1, PC.qMark); px(x, y + 1, 1, 1, PC.qMark);
+    px(x + 3, y + 1, 1, 1, PC.qMark); px(x + 1, y + 3, 1, 1, PC.qMark);
+  };
+  const pipeShaft = (x, y, h) => {
+    px(x + 1, y, 2, h, PC.pipeL);
+    px(x + 3, y, 3, h, PC.pipeM);
+    px(x + 6, y, 1, h, PC.pipeD);
+  };
+  const tilePipeLip = (x, y) => { // drawPipe lip tile: rim + shaft stub
+    px(x, y, 8, 1, PC.pipeL); px(x + 4, y, 4, 1, PC.pipeM);
+    px(x, y, 1, 1, PC.pipeM); px(x + 7, y, 1, 1, PC.pipeD);
+    px(x, y + 1, 8, 1, PC.pipeD);
+    pipeShaft(x, y + 2, 2);
+  };
+
+  // Level layout, deterministic in the tile index: 124 tiles of world,
+  // flag at 90, blocks and pipes ending well before it.
+  const TILE = 4, WORLD_T = 124, FLAG_T = 90, MARIO_X = 56;
+  const isQ      = (t) => t > 4 && t < 84 && (t % 8 === 2 || t % 8 === 3 || t % 8 === 5);
+  const isBrick  = (t) => t > 4 && t < 84 && (t % 16 >= 9 && t % 16 <= 12);
+  const isPipeL  = (t) => t > 6 && t < 80 && t % 29 === 7;
+  const isHill   = (t) => t < 88 && t % 9 === 0;
+  const isBush   = (t) => t < 88 && t % 13 === 5;
+
+  let cam = 0, frac = 0, frame = 0, loaderDone = false;
+  const camTarget = () => frac * (FLAG_T*TILE - MARIO_X);
+  const renderScene = () => {
+    px(0, 0, 160, 48, PC.sky);
+    const bright = RM ? true : frame % 48 < 24; // game flash cadence
+    // Clouds first (sky dressing), drifting at 0.4× parallax.
+    for (let k = 0; k < 3; k++) {
+      const span = 184;
+      const x = ((k*73 - cam*0.4) % span + span) % span - 12;
+      drawArt(sprCloud, x, 6 + (k % 2)*7, 1);
+    }
+    const cx = Math.floor(cam);
+    const t0 = Math.floor(cx / 4) - 2, t1 = Math.floor((cx + 160) / 4) + 2;
+    for (let t = t0; t <= t1; t++) {
+      if (t < 0 || t >= WORLD_T) continue;
+      const x = t*4 - cx;
+      tileGround(x, 40, t, 10, true);
+      tileGround(x, 44, t, 11, false);
+      if (isHill(t)) drawArt(sprHill, x, 28, 1);
+      if (isBush(t)) drawArt(sprBush, x, 32, 1);
+      if (isQ(t)) tileQ(x, 24, bright);
+      else if (isBrick(t)) tileBrick(x, 24, t);
+      if (isPipeL(t)) { tilePipeLip(x, 32); pipeShaft(x, 36, 4); }
+    }
+    // Flagpole: pole tiles rows 12..40, finial + pennant above (drawFlagTop).
+    const fx = FLAG_T*4 - cx;
+    if (fx > -8 && fx < 168) {
+      for (let ty = 3; ty < 10; ty++) px(fx + 1, ty*4, 1, 4, PC.pole);
+      px(fx + 1, 8, 1, 1, PC.pipeL);
+      px(fx + 1, 9, 1, 3, PC.pole);
+      px(fx, 9, 1, 1, PC.flag); px(fx - 1, 10, 1, 1, PC.flag); px(fx, 10, 1, 1, PC.flag);
+      px(fx - 2, 11, 1, 1, PC.flag); px(fx - 1, 11, 1, 1, PC.flag); px(fx, 11, 1, 1, PC.flag);
+    }
+    // Mario, feet on the ground line; 1px run bob until the pole.
+    const running = frac < 1 && !loaderDone;
+    const bob = running && !RM && ((frame >> 3) & 1) ? 1 : 0;
+    drawArt(sprMario, MARIO_X, 30 - bob, 2);
+    // Title cascade, exactly like the in-game title screen.
+    centerShadow('MARIO', 2, PC.flag, 2);
+    centerShadow('SUPER CLI EDITION', 16, PC.white, 1);
+  };
+  const tick = () => {
+    frame++;
+    cam += (camTarget() - cam) * 0.12;
+    if (Math.abs(camTarget() - cam) < 0.1) cam = camTarget();
+    renderScene();
+    if (!loaderDone && !RM) requestAnimationFrame(tick);
+  };
+  const sizeBoot = () => { // integer scale, like the game canvas
+    const k = Math.max(2, Math.floor(Math.min(640, innerWidth * 0.92) / 160));
+    boot.style.width = 160*k + 'px';
+    boot.style.height = 48*k + 'px';
+  };
+  sizeBoot();
+  window.addEventListener('resize', sizeBoot);
   const MB = 1048576;
   const fmt = (n) => (n / MB).toFixed(1) + ' MB';
   const setProgress = (p, label) => {
     p = Math.max(0, Math.min(100, p));
-    fillEl.style.width = p + '%';
-    qbEl.style.left = p + '%';
+    frac = p / 100;
     pctEl.textContent = Math.floor(p) + '%';
     if (label) phaseEl.textContent = label;
+    if (RM) { cam = camTarget(); renderScene(); }
   };
-  let loaderDone = false;
   const loaderReady = () => {
     if (loaderDone) return;
     loaderDone = true;
+    frac = 1; cam = camTarget();
     setProgress(100, 'ready');
+    renderScene();
     loader.classList.add('done');
     setTimeout(() => loader.remove(), 600);
   };
+  tick();
 
   // The game pushes raw RGB pixels; paint them straight into the canvas.
   // object-fit: contain + pixelated keeps square pixels, uniform scale,
@@ -244,6 +377,7 @@
     setProgress(100, 'starting');
     go.run(instance);
   } catch (e) {
+    loaderDone = true; // freeze the scene; the error text carries the news
     phaseEl.classList.add('err');
     phaseEl.style.color = '#ff7b72';
     phaseEl.textContent = 'failed to load mario.wasm: ' + e +

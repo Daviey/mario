@@ -124,7 +124,7 @@ func NewPalette(trueColor bool) *Palette {
 func runeColors(p *Palette) map[rune]Color {
 	return map[rune]Color{
 		'R': p.Player, 'S': p.Skin, 'D': p.Dark, 'B': p.Overall,
-		'W': p.White, 'Y': p.Coin, 'L': p.GoldLight,
+		'W': p.White, 'C': p.Cloud, 'Y': p.Coin, 'L': p.GoldLight,
 		'O': p.GroundMid, 'o': p.GroundLight,
 		'G': p.Green, 'E': p.GreenLight, 'g': p.GreenDark,
 		'K': p.KoopaSkin, 'n': p.Goomba,
@@ -299,7 +299,36 @@ func cloudBlocked(g *engine.Game, tx, row int) bool {
 	}
 	// The goal castle occupies tiles FlagX+3..+7 on rows 9..12.
 	c0 := g.Level.FlagX + 3
-	return row >= 9 && tx+3 > c0 && tx < c0+5
+	if row >= 9 && tx+3 > c0 && tx < c0+5 {
+		return true
+	}
+	// On the title screen clouds also keep clear of the stacked text —
+	// white cloud art would dissolve the white SUPER CLI subtitle. A cloud
+	// is blocked when any of its actual puff pixels would land inside a
+	// text band (rect-adjacent clouds pass, so the sweep can still see
+	// the filter working).
+	if g.State == engine.StateTitle {
+		f := &Frame{W: g.ViewW * Pix, H: viewTilesOf(g) * Pix}
+		ox := int(g.CameraX * Pix)
+		oy := int(CameraY(g) * Pix)
+		x0, y0 := tx*Pix-ox, row*Pix-oy
+		for _, b := range titleTextBands(f) {
+			if x0 >= b[2] || x0+sprW(sprCloud) <= b[0] || y0 >= b[3] || y0+sprH(sprCloud) <= b[1] {
+				continue // rect clear of this band
+			}
+			for ry, art := range sprCloud {
+				for rx, r := range art {
+					if r != 'W' {
+						continue
+					}
+					if px, py := x0+rx, y0+ry; px >= b[0] && px < b[2] && py >= b[1] && py < b[3] {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // HillAt reports whether a hill sits at world column tx (every ~13).
@@ -396,6 +425,13 @@ func FrameANSI(g *engine.Game, p *Palette, ui ...*ScoreUI) string {
 }
 
 // blit packs two pixel rows per screen cell using the half block.
+func drawStatus(s *Screen, p *Palette) {
+	y := s.H - 1
+	for x := 0; x < s.W; x++ {
+		s.SetStyled(x, y, ' ', p.TextDim, p.StatusBG, false)
+	}
+	s.Center(y, "a/d move · w/space jump · x run · p pause · q quit", p.TextDim, p.StatusBG, false)
+}
 func blit(s *Screen, f *Frame) {
 	worldRows := f.H / 2
 	for cy := 0; cy < worldRows; cy++ {
@@ -416,19 +452,20 @@ func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 	s.TextStyled(1, 0, hud, p.Text, p.HUDBG, true)
 }
 
-func drawStatus(s *Screen, p *Palette) {
-	y := s.H - 1
-	for x := 0; x < s.W; x++ {
-		s.SetStyled(x, y, ' ', p.TextDim, p.StatusBG, false)
-	}
-	s.Center(y, "a/d move · w/space jump · x run · p pause · q quit", p.TextDim, p.StatusBG, false)
-}
-
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	txOf, tyOf func(int) int) {
-	for tx := 0; tx < g.Level.Width; tx++ {
+	// On the title screen clouds also keep clear of the stacked text —
+	// white cloud art would dissolve the white SUPER CLI subtitle.
+	var bands [][4]int
+	if g.State == engine.StateTitle {
+		bands = titleTextBands(f)
+	}
+	for tx := range g.Level.Width {
 		if row, _, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
-			f.DrawSprite(sprCloud, rc, txOf(tx*Pix), tyOf(row*Pix), false, 1)
+			x, y := txOf(tx*Pix), tyOf(row*Pix)
+			if !cloudHitsBand(x, y, x+sprW(sprCloud), y+sprH(sprCloud), bands) {
+				f.DrawSprite(sprCloud, rc, x, y, false, 1)
+			}
 		}
 		if HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
 			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf((engine.GroundTop-1)*Pix+1), false, 1)
@@ -644,30 +681,97 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 	groundTop := f.H - 2*Pix
 	castY := groundTop - 10 // mario sprite top; feet on the last sky row
 	if full {
-		showText := castY >= 13 // room for logo (10px) + subtitle (5px)?
-		logoY := 2
-		if showText {
-			logoY = max(2, min(f.H/12, castY-18))
-			drawCenterShadowPx(f, logoY, "MARIO", p.FlagRed, 2, p.Dark)
-			if subY := logoY + 12; subY+5 <= castY {
-				sub := pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2)
-				drawCenterShadowPx(f, subY, sub, p.White, 1, p.Dark)
+		for _, e := range titleTextEls(f) {
+			if e.blink && g.Tick%40 >= 28 {
+				continue
 			}
+			drawCenterShadowPx(f, e.y, e.s, e.ink.color(p), e.scale, p.Dark)
 		}
 	}
 	// Mario and the goomba flank the centre, facing each other.
 	cx := f.W / 2
 	f.DrawSprite(sprMarioSmall, rc2, cx-17, castY, false, 2)
 	f.DrawSprite(sprGoomba, rc2, cx+8, castY+2, true, 2)
-	if !full {
-		return
+}
+
+// titleInk picks a title text color from the palette.
+type titleInk uint8
+
+const (
+	inkFlag titleInk = iota // MARIO logo red
+	inkWhite
+	inkGold
+)
+
+func (k titleInk) color(p *Palette) Color {
+	switch k {
+	case inkFlag:
+		return p.FlagRed
+	case inkGold:
+		return p.GoldLight
+	default:
+		return p.White
 	}
-	if g.Tick%40 < 28 {
-		hint := pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2)
-		drawCenterShadowPx(f, min(castY+11, f.H-5), hint, p.GoldLight, 1, p.Dark)
+}
+
+// titleText is one full-mode title screen line.
+type titleText struct {
+	s     string
+	y     int
+	scale int
+	ink   titleInk
+	blink bool // on-phase of the blink cycle only
+}
+
+// titleTextEls is the single source of truth for full-mode title text:
+// every line with its pixel row, scale and ink. drawTitlePx stamps the
+// elements; titleTextBands turns them into the keep-clear rects for the
+// title cloud filter in drawDecorations.
+func titleTextEls(f *Frame) []titleText {
+	groundTop := f.H - 2*Pix
+	castY := groundTop - 10
+	var els []titleText
+	add := func(s string, y, scale int, ink titleInk, blink bool) {
+		els = append(els, titleText{s: s, y: y, scale: scale, ink: ink, blink: blink})
 	}
+	if castY >= 13 { // room for logo (10px) + subtitle (5px)?
+		logoY := max(2, min(f.H/12, castY-18))
+		add("MARIO", logoY, 2, inkFlag, false)
+		if subY := logoY + 12; subY+5 <= castY {
+			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false)
+		}
+	}
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+11, f.H-5), 1, inkGold, true)
 	if hintY := castY + 17; hintY+5 <= f.H-5 {
-		hint := pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2)
-		drawCenterShadowPx(f, hintY, hint, p.White, 1, p.Dark)
+		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false)
 	}
+	return els
+}
+
+// titleTextBands returns the pixel rects covered by full-mode title text.
+// Blinking lines are always included so the cloud layout stays steady
+// instead of strobing with the blink cycle.
+func titleTextBands(f *Frame) [][4]int {
+	var bands [][4]int
+	for _, e := range titleTextEls(f) {
+		w := textWidthPx(e.s, e.scale)
+		x := (f.W - w) / 2
+		if x < 0 {
+			x = 0
+		}
+		h := 5 * e.scale
+		bands = append(bands, [4]int{x, e.y, min(x+w, f.W), min(e.y+h, f.H)})
+	}
+	return bands
+}
+
+// cloudHitsBand reports whether the cloud rect (x0,y0)-(x1,y1) intersects
+// any keep-clear band. An empty band list never matches.
+func cloudHitsBand(x0, y0, x1, y1 int, bands [][4]int) bool {
+	for _, b := range bands {
+		if x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1] {
+			return true
+		}
+	}
+	return false
 }

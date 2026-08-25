@@ -164,10 +164,10 @@ var sprSparkle = []string{ // 3×3 particle
 }
 
 var sprCloud = []string{ // 12×4
-	"....WWWW....",
-	"..WWWWWWWW..",
-	".WWWWWWWWWW.",
-	"..WWWWWWWW..",
+	"....CCCC....",
+	"..CCCCCCCC..",
+	".CCCCCCCCCC.",
+	"..CCCCCCCC..",
 }
 
 var sprHill = []string{ // 8×3
