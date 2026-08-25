@@ -40,7 +40,11 @@ const (
 
 const holdWindow = 12    // ~0.2s of key-repeat silence before a legacy key expires
 const maxHoldWindow = 52 // upper bound for calibrated grace and cadence windows (~0.9s)
-const staleSeqPolls = 3  // quiet polls before an incomplete escape sequence is dropped
+// defaultOSDelay is the assumed keydown→repeat delay on a terminal whose
+// real delay has not been measured yet (500-660ms covers the common
+// GNOME/niri/macOS/Windows defaults).
+const defaultOSDelay = 36
+const staleSeqPolls = 3 // quiet polls before an incomplete escape sequence is dropped
 
 type keyEvent struct {
 	k       key
@@ -160,27 +164,80 @@ func (m *Mapper) live(k key) bool {
 	return m.now-ls <= w
 }
 
+// Calibration is the mapper's learned terminal timing: the measured OS
+// key-repeat delay and the per-key hold habits. The runner persists it
+// across runs so a fresh process doesn't forget everything — otherwise the
+// first hold of each key stalls for the repeat delay every single session,
+// and a player who lets go during the stall never gets smooth holds at all.
+type Calibration struct {
+	OSDelay   int    `json:"os_delay"`   // ticks; 0 = unmeasured
+	HeldHabit []bool `json:"held_habit"` // per key: last press was a hold
+}
+
+// Calibration returns the learned state, safe to persist and hand to a
+// future mapper via ApplyCalibration.
+func (m *Mapper) Calibration() Calibration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	habit := m.heldHabit
+	return Calibration{
+		OSDelay:   m.osDelay,
+		HeldHabit: habit[:],
+	}
+}
+
+// ApplyCalibration restores persisted learning. Values are clamped to
+// sane bounds and mismatched key arrays are ignored.
+func (m *Mapper) ApplyCalibration(c Calibration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c.OSDelay < 0 {
+		c.OSDelay = 0
+	}
+	if c.OSDelay > maxHoldWindow {
+		c.OSDelay = maxHoldWindow
+	}
+	m.osDelay = c.OSDelay
+	if len(c.HeldHabit) == int(keyCount) {
+		m.heldHabit = [keyCount]bool(c.HeldHabit)
+	}
+}
+
 // graceFor returns the silence window a FRESH keydown of k gets before it
 // is considered released. On keydown-only terminals a tap and the start of
-// a hold are byte-identical for the OS repeat delay (~500ms): any window
+// a hold are byte-identical for the OS repeat delay (~500-600ms): any window
 // that covers the delay overruns taps, any shorter one stutters holds. The
 // escape: calibrate the delay once from a real hold (osDelay), remember
 // per key whether its last press was held (heldHabit), and give held keys
-// a grace covering the delay. Repeats then collapse the window onto the
+// a grace covering the delay. Repeats collapse the window onto the
 // measured cadence, so releasing still stops fast. Jump (kUp) never gets
 // the long grace — a phantom Up eats retap edges, the missed-jump bug.
 func (m *Mapper) graceFor(k key) int {
 	if k == kUp {
 		return holdWindow
 	}
-	g := m.osDelay + 2
-	if !m.heldHabit[k] || g <= holdWindow {
+	// Only keys proven to be held get the repeat-delay-covering grace —
+	// taps must not overrun after release. An unmeasured delay falls
+	// back to the common default so a learned hold habit still covers
+	// the delay even if the machine never produced a measurable gap.
+	if !m.heldHabit[k] {
 		return holdWindow
 	}
-	if g > maxHoldWindow {
+	d := m.osDelay
+	if d == 0 {
+		d = defaultOSDelay
+	}
+	return clampWindow(d + 2)
+}
+
+func clampWindow(w int) int {
+	if w < holdWindow {
+		return holdWindow
+	}
+	if w > maxHoldWindow {
 		return maxHoldWindow
 	}
-	return g
+	return w
 }
 
 func (m *Mapper) drain() {
@@ -258,8 +315,15 @@ func (m *Mapper) apply(ev keyEvent) {
 			// actually follow.
 			if prev := m.lastSeen[ev.k]; prev > 0 {
 				m.pendingDelay = m.now - prev + 1
+				// If the gap is short, this is just a jittery repeat that
+				// barely missed a collapsed cadence window. Keep the hold's
+				// repeat status intact so the habit saves correctly.
+				if m.pendingDelay > holdWindow {
+					m.sawRepeat[ev.k] = false
+				}
+			} else {
+				m.sawRepeat[ev.k] = false
 			}
-			m.sawRepeat[ev.k] = false
 			m.win[ev.k] = m.graceFor(ev.k)
 		}
 		// Latch the press edge: if a frame hitch lets the release land

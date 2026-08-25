@@ -13,10 +13,11 @@ import (
 type gameIO struct {
 	mapper *input.Mapper
 	ui     *scoreUI
+	plain  *input.PlainDecoder
 }
 
 func newGameIO(mapper *input.Mapper, ui *scoreUI) *gameIO {
-	return &gameIO{mapper: mapper, ui: ui}
+	return &gameIO{mapper: mapper, ui: ui, plain: input.NewPlainDecoder()}
 }
 
 // feed is called from the input reader goroutine.
@@ -25,11 +26,11 @@ func (io *gameIO) feed(b []byte) {
 		return
 	}
 	if io.ui.capturing() {
-		io.ui.feedKeys(b)
+		io.ui.feedKeys(io.plain.Feed(b))
 		return
 	}
-	io.ui.note(b) // for the title-screen 'l' trigger
-	io.mapper.Feed(b)
+	io.ui.note(io.plain.Feed(b)) // plain bytes: the 'l' trigger sees CSI-u keys too
+	io.mapper.Feed(b)            // the mapper speaks the kitty protocol natively
 }
 
 // poll returns this tick's game input.
