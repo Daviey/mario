@@ -328,9 +328,10 @@ func CameraY(g *engine.Game) float64 {
 	return c
 }
 
-// worldFrame renders the world (sky, decorations, tiles, entities, HUD
-// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels.
-func worldFrame(g *engine.Game, p *Palette) *Frame {
+// worldFrame renders the world (sky, decorations, tiles, HUD
+// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels. A non-nil
+// ui switches the game-over/title overlay to the leaderboard UI screens.
+func worldFrame(g *engine.Game, p *Palette, ui *ScoreUI) *Frame {
 	vh := viewTilesOf(g)
 	f := NewFrame(g.ViewW*Pix, vh*Pix, p.Sky)
 	rc := runeColors(p)
@@ -346,7 +347,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 		// so the logo and cast stay unobstructed.
 		drawDecorations(f, g, p, rc, txOf, tyOf)
 		drawGroundOnly(f, g, p, camX, camY, ox, oy)
-		drawOverlayPx(f, g, p)
+		drawOverlayPx(f, g, p, ui)
 		return f
 	}
 	drawDecorations(f, g, p, rc, txOf, tyOf)
@@ -357,26 +358,27 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	drawParticlesPx(f, g, p, rc, ox, oy)
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
 	drawPlayerPx(f, g, p, rc, camX, camY)
-	drawOverlayPx(f, g, p)
+	drawOverlayPx(f, g, p, ui)
 	return f
 }
 
 // Render draws one complete frame: HUD row, world pixel grid through the
 // camera (with vertical follow), entities, particles and overlays. Screen
 // size is ViewW*Pix columns wide and (2+ViewH*Pix/2) rows tall: a fuller
-// window shows more world, never bigger sprites.
-func Render(g *engine.Game, p *Palette) *Screen {
+func Render(g *engine.Game, p *Palette, ui ...*ScoreUI) *Screen {
 	vh := viewTilesOf(g)
 	s := NewScreen(g.ViewW*Pix, 2+vh*Pix/2)
 	s.TrueColor = p.TrueColor
 	drawHUD(s, g, p)
 	drawStatus(s, p)
-	blit(s, worldFrame(g, p))
+	blit(s, worldFrame(g, p, firstUI(ui)))
 	return s
 }
 
 // FrameANSI renders and serializes in one call.
-func FrameANSI(g *engine.Game, p *Palette) string { return Render(g, p).String() }
+func FrameANSI(g *engine.Game, p *Palette, ui ...*ScoreUI) string {
+	return Render(g, p, ui...).String()
+}
 
 // blit packs two pixel rows per screen cell using the half block.
 func blit(s *Screen, f *Frame) {
@@ -587,18 +589,46 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
-func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
+func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, ui *ScoreUI) {
 	mid := f.H / 2
+	if ui != nil && ui.Mode != UIOff {
+		if g.State == engine.StateTitle && ui.Mode == UIBoard {
+			drawTitlePx(f, g, p, false) // cast backdrop only
+			drawScoreUIPx(f, ui, p, true, g.Tick)
+			return
+		}
+		// Game-over/win: leaderboard UI owns the overlay.
+		drawScoreUIPx(f, ui, p, false, g.Tick)
+		return
+	}
 	switch {
 	case g.Paused:
 		drawBannerPx(f, mid-2, "PAUSED", p.OverlayFG, p.OverlayBG, p)
 	case g.State == engine.StateTitle:
-		rc2 := runeColors(p)
-		// Bottom-anchored cascade: the cast stands ON the ground line and
-		// every text element stacks above it, so no viewport height can
-		// overlap or bury anything. Ground occupies the last 2 tile rows.
-		groundTop := f.H - 2*Pix
-		castY := groundTop - 10 // mario sprite top; feet on the last sky row
+		drawTitlePx(f, g, p, true)
+	case g.State == engine.StateLevelClear:
+		drawBannerPx(f, mid-2, "LEVEL CLEAR!", p.OverlayFG, p.OverlayBG, p)
+	case g.State == engine.StateGameOver:
+		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
+		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
+	case g.State == engine.StateWin:
+		drawBannerPx(f, mid-4, "YOU WIN!", p.OverlayFG, p.OverlayBG, p)
+		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
+	}
+}
+
+// drawTitlePx draws the title screen: mario vs goomba cast on the ground,
+// and in full mode the logo, subtitle, "press any key" blink and the
+// leaderboard hint above/below the cast. With full=false only the cast is
+// drawn — the leaderboard board takes the rest of the screen.
+func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
+	rc2 := runeColors(p)
+	// Bottom-anchored cascade: the cast stands ON the ground line and
+	// every text element stacks above it, so no viewport height can
+	// overlap or bury anything. Ground occupies the last 2 tile rows.
+	groundTop := f.H - 2*Pix
+	castY := groundTop - 10 // mario sprite top; feet on the last sky row
+	if full {
 		showText := castY >= 13 // room for logo (10px) + subtitle (5px)?
 		logoY := 2
 		if showText {
@@ -609,21 +639,20 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 				drawCenterShadowPx(f, subY, sub, p.White, 1, p.Dark)
 			}
 		}
-		// Mario and the goomba flank the centre, facing each other.
-		cx := f.W / 2
-		f.DrawSprite(sprMarioSmall, rc2, cx-17, castY, false, 2)
-		f.DrawSprite(sprGoomba, rc2, cx+8, castY+2, true, 2)
-		if g.Tick%40 < 28 {
-			blink := pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2)
-			drawCenterShadowPx(f, min(castY+11, f.H-5), blink, p.GoldLight, 1, p.Dark)
-		}
-	case g.State == engine.StateLevelClear:
-		drawBannerPx(f, mid-2, "LEVEL CLEAR!", p.OverlayFG, p.OverlayBG, p)
-	case g.State == engine.StateGameOver:
-		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
-		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
-	case g.State == engine.StateWin:
-		drawBannerPx(f, mid-4, "YOU WIN!", p.OverlayFG, p.OverlayBG, p)
-		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
+	}
+	// Mario and the goomba flank the centre, facing each other.
+	cx := f.W / 2
+	f.DrawSprite(sprMarioSmall, rc2, cx-17, castY, false, 2)
+	f.DrawSprite(sprGoomba, rc2, cx+8, castY+2, true, 2)
+	if !full {
+		return
+	}
+	if g.Tick%40 < 28 {
+		hint := pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2)
+		drawCenterShadowPx(f, min(castY+11, f.H-5), hint, p.GoldLight, 1, p.Dark)
+	}
+	if hintY := castY + 17; hintY+5 <= f.H-5 {
+		hint := pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2)
+		drawCenterShadowPx(f, hintY, hint, p.White, 1, p.Dark)
 	}
 }

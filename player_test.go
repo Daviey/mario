@@ -13,16 +13,16 @@ func TestSanitizeName(t *testing.T) {
 		{"  dave  ", "dave"},
 		{"a b\tc", "a b c"}, // any whitespace collapses to plain spaces
 		{"8chars--", "8chars--"},
-		{"a.b_c-d", "a.b_c-d"},
+		{"a.b c-d", "a.b c-d"},
 		{"12345678", "12345678"},
-		{"__", "__"}, // underscores are allowed
 	}
 	for _, c := range ok {
 		if got, ok := sanitizeName(c.in); !ok || got != c.want {
 			t.Errorf("sanitizeName(%q) = %q,%v want %q,true", c.in, got, ok, c.want)
 		}
 	}
-	bad := []string{"", " ", "123456789", "héllo", "x@y", "n:o", "semi;colon"}
+	// '_' has no pixel-font glyph: rejected like any other unsupported rune.
+	bad := []string{"", " ", "123456789", "héllo", "x@y", "n:o", "semi;colon", "under_score"}
 	for _, in := range bad {
 		if _, ok := sanitizeName(in); ok {
 			t.Errorf("sanitizeName(%q) should fail", in)

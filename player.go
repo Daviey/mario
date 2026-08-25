@@ -91,7 +91,7 @@ func sanitizeName(s string) (string, bool) {
 	for _, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == ' ' || r == '-' || r == '.' || r == '_':
+		case r == ' ' || r == '-' || r == '.':
 		default:
 			return "", false
 		}

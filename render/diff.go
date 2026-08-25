@@ -83,8 +83,8 @@ func NewStream(out io.Writer, pal *Palette) *Stream { return &Stream{out: out, p
 func (s *Stream) Reset() { s.prev = nil }
 
 // Draw renders one frame, writing only what changed.
-func (s *Stream) Draw(g *engine.Game) {
-	cur := Render(g, s.pal)
+func (s *Stream) Draw(g *engine.Game, ui ...*ScoreUI) {
+	cur := Render(g, s.pal, ui...)
 	if d := Diff(s.prev, cur); d != "" {
 		io.WriteString(s.out, d)
 	}

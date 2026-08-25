@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"mario/engine"
-	"mario/input"
 	"mario/render"
 )
 
@@ -103,18 +102,18 @@ func isTTY(f *os.File) bool {
 
 // play runs the game loop, drawing differential frames until quit.
 // Shared by the native terminal runner and the browser (WASM) build.
-func play(g *engine.Game, mapper *input.Mapper, st *render.Stream) {
-	draw := func() { st.Draw(g) }
-	draw() // first frame: full repaint
+func play(g *engine.Game, io *gameIO, st *render.Stream) {
+	draw := func(ui *render.ScoreUI) { st.Draw(g, ui) }
+	draw(nil) // first frame: full repaint
 
 	ticker := time.NewTicker(time.Second / engine.TicksPerSecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		in := mapper.Poll()
+		in := io.poll()
 		g.Update(in)
-		draw()
-		if in.Quit {
+		draw(io.uiTick(g))
+		if in.Quit || io.quitRequested() {
 			return
 		}
 	}
