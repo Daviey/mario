@@ -1,3 +1,5 @@
+//go:build !js
+
 package main
 
 // Post-game score submission: prompt (cooked terminal, after run() restored

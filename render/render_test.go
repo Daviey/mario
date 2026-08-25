@@ -455,3 +455,32 @@ func TestPixelFont(t *testing.T) {
 		t.Error("glyph '?' missing")
 	}
 }
+
+func TestRenderPixels(t *testing.T) {
+	g := newGame(t)
+	f := RenderPixels(g, testPal)
+	wantH := HudBandPx + g.ViewH*Pix + StatusBandPx
+	if f.W != g.ViewW*Pix || f.H != wantH {
+		t.Fatalf("pixel frame = %dx%d, want %dx%d", f.W, f.H, g.ViewW*Pix, wantH)
+	}
+	// HUD band across the top, status band across the bottom.
+	if got := f.At(4, 0); got != testPal.HUDBG {
+		t.Errorf("hud band = %+v", got)
+	}
+	if got := f.At(4, f.H-1); got != testPal.StatusBG {
+		t.Errorf("status band = %+v", got)
+	}
+	// World sits between the bands: sky pixel just under the HUD.
+	if got := f.At(4, HudBandPx+2); got != testPal.Sky {
+		t.Errorf("world sky = %+v", got)
+	}
+	// RGB packing: 3 bytes per pixel, sky encodes to 5c 94 fc.
+	rgb := f.RGBBytes()
+	if len(rgb) != f.W*f.H*3 {
+		t.Fatalf("rgb len = %d", len(rgb))
+	}
+	i := ((HudBandPx+2)*f.W + 4) * 3 // row HudBandPx+2, col 4
+	if rgb[i] != 0x5c || rgb[i+1] != 0x94 || rgb[i+2] != 0xfc {
+		t.Errorf("sky rgb = %x %x %x", rgb[i], rgb[i+1], rgb[i+2])
+	}
+}

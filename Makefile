@@ -48,8 +48,7 @@ web:
 	@mkdir -p $(DIST)/web
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(DIST)/web/mario.wasm .
 	cp web/index.html $(WEBDIST)/
-	cp web/assets/ghostty-web.js web/assets/ghostty-vt.wasm $(WEBDIST)/
-	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" $(WEBDIST)/
+	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
 	@echo "static site in $(WEBDIST) — drop it on GitHub Pages (or any static host)"
 
 web-serve: web
