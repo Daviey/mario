@@ -79,6 +79,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - `main.go` — package doc (controls, flags), shared `play()` loop, `runDemo` + `scriptInput` (the deterministic demo script used by tests and `-ui-preview`)
 - `native.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
 - Repo hygiene: never commit `.env`; new worktrees need it copied in manually (leaderboard silently offline otherwise). For local dev, `chmod 0600 .env` since it holds the DB password.
+- **Leaderboard rate limits** (`supabase/migrations/20260825000002_rate_limits.sql`, applied live): a BEFORE INSERT trigger caps anon submissions at 10/min per source address (from Cloudflare's `cf-connecting-ip` via the `request.headers` setting) and 2/min per device_id. Bursty probes or LIVE tests must pace themselves or they get `400 too many submissions`. The peer-filled `scores.ip` column is hidden from anon by column-scoped SELECT grants — `select=*` fails for anon by design.
 - `wasm.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)` and `marioBoard(json)` (leaderboard DOM text) before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
 - `gameio.go` — the one-keyboard-one-owner input router (includes `PlainDecoder` for UI text entry)
 - `lbui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
