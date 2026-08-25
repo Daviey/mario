@@ -8,6 +8,10 @@
 //	-demo        run a headless scripted demo and exit
 //	-level FILE  play a custom ASCII level instead of the built-ins
 //	-width N     viewport width in tiles (default: terminal width)
+//	-scores N    print the top N leaderboard scores and exit
+//
+// Scores are recorded and (after game over) can be submitted to a
+// Supabase-backed leaderboard; see board package and .env.
 package main
 
 import (

@@ -1,0 +1,30 @@
+name: verify-scores
+
+# Score verifier: replays every pending submission headless through the
+# deterministic engine and keeps only scores that reproduce exactly.
+# Also doubles as the Supabase free-tier keep-alive ping.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-scores
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Verify pending scores
+        run: go run . -verify-pending
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
