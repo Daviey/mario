@@ -88,7 +88,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Go ≥ 1.22, `CGO_ENABLED=0` always (static; NixOS host cannot run dynamic scratch builds — set `GOTMPDIR` if `/tmp` is noexec).
 - No package manager, no Node tooling for the game itself; `web/` is plain HTML+JS consuming the `.wasm`.
 - Terminal features are progressive enhancement: truecolor → 16-color fallback (`-basic` to force), kitty keyboard protocol → legacy key-repeat inference.
-- **No CI, no linters, no go.work, no Dockerfile** — `make vet`/`make fmtcheck` are the quality gates.
+- **CI**: `.github/workflows/release.yml` — on tag push `v*`: tests, cross-compiles all platforms, publishes a GitHub Release (binaries + SHA256SUMS + web zip) and deploys `dist/web` to GitHub Pages. No PR/push CI otherwise; no linters, no go.work, no Dockerfile — `make vet`/`make fmtcheck` are the local quality gates.
 - Repo hygiene: never commit `.env`; new worktrees need it copied in manually (leaderboard silently offline otherwise).
 
 ## Testing & QA
