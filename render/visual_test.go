@@ -13,7 +13,7 @@ func dumpFrame(f *Frame) string {
 	legend := map[Color]byte{
 		testPal.Sky: '.', testPal.GroundLight: 'o', testPal.GroundMid: 'O',
 		testPal.GroundDark: 'x', testPal.BrickLight: 'B', testPal.BrickDark: 'b',
-		testPal.QuestionBG: 'Q', testPal.QuestionHi: 'h', testPal.QuestionFG: 'q',
+		testPal.QuestionBG: 'Q', testPal.QuestionDim: 'd', testPal.QuestionHi: 'h', testPal.QuestionFG: 'q',
 		testPal.QuestionMark: '?', testPal.UsedBG: 'U', testPal.PipeLight: 'E',
 		testPal.PipeMid: 'G', testPal.PipeDark: 'g', testPal.Pole: 'P',
 		testPal.FlagRed: 'F', testPal.Coin: 'Y', testPal.GoldLight: 'L',

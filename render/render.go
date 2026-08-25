@@ -38,6 +38,7 @@ type Palette struct {
 	BrickLight   Color
 	BrickDark    Color // mortar shadow
 	QuestionBG   Color
+	QuestionDim  Color // flash partner of QuestionBG; the mark never dims
 	QuestionHi   Color
 	QuestionFG   Color
 	QuestionMark Color
@@ -84,10 +85,10 @@ func NewPalette(trueColor bool) *Palette {
 		BrickLight:   color(0xD86818, 208%16),
 		BrickDark:    color(0x6B2B00, 1),
 		QuestionBG:   color(0xFC9838, 11),
+		QuestionDim:  color(0xE08018, 3),
 		QuestionHi:   color(0xFFD9A0, 11),
 		QuestionFG:   color(0x4A1C00, 0),
 		QuestionMark: color(0xFFF8E0, 15),
-		UsedBG:       color(0x9C4A10, 1),
 		PipeLight:    color(0x80D010, 10),
 		PipeMid:      color(0x00A800, 2),
 		PipeDark:     color(0x004400, 2),
@@ -287,6 +288,20 @@ func CloudAt(tx int) (row, width int, ok bool) {
 	return 4 + int(h>>8)%7, 2 + int(h>>12)%2, true
 }
 
+// cloudBlocked reports whether a cloud anchored at tx on sky row row would
+// touch solid tiles or the goal castle. Blocked clouds are skipped so they
+// never slice behind level geometry — clouds only ever draw on open sky.
+func cloudBlocked(g *engine.Game, tx, row int) bool {
+	for x := tx; x < tx+3; x++ { // sprCloud spans 12px = 3 tiles
+		if g.Level.At(x, row) != engine.Empty {
+			return true
+		}
+	}
+	// The goal castle occupies tiles FlagX+3..+7 on rows 9..12.
+	c0 := g.Level.FlagX + 3
+	return row >= 9 && tx+3 > c0 && tx < c0+5
+}
+
 // HillAt reports whether a hill sits at world column tx (every ~13).
 func HillAt(tx int) bool { return hashX(tx)%13 == 5 }
 
@@ -410,7 +425,7 @@ func drawStatus(s *Screen, p *Palette) {
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	txOf, tyOf func(int) int) {
 	for tx := 0; tx < g.Level.Width; tx++ {
-		if row, _, ok := CloudAt(tx); ok {
+		if row, _, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
 			f.DrawSprite(sprCloud, rc, txOf(tx*Pix), tyOf(row*Pix), false, 1)
 		}
 		if HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {

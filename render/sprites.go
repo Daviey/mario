@@ -207,21 +207,27 @@ func drawBrick(f *Frame, p *Palette, x, y, tx int) {
 	f.Set(x, y, p.QuestionHi)           // top-left highlight
 }
 
+// drawQuestion paints a ? block. The '?' spans the full tile — top bar,
+// both sides of the curl, then a separated bottom-left dot; only the
+// corners the stroke cannot use carry the bevel. The defining gap
+// between curl and dot is what makes the mark read as '?' at 4px. Like
+// the original, the BODY flashes between two oranges while the mark
+// itself never dims.
 func drawQuestion(f *Frame, p *Palette, x, y int, bright bool) {
-	f.Fill(x, y, Pix, Pix, p.QuestionBG)
-	f.Fill(x, y, Pix, 1, p.QuestionHi) // beveled top/left
-	f.Fill(x, y, 1, Pix, p.QuestionHi)
-	f.Fill(x+Pix-1, y, 1, Pix, p.BrickDark) // shaded bottom/right
-	f.Fill(x, y+Pix-1, Pix, 1, p.BrickDark)
-	q := p.QuestionFG
+	body := p.QuestionDim
 	if bright {
-		q = p.QuestionMark
+		body = p.QuestionBG
 	}
-	// '?': top bar, right stem, dot on the base.
-	f.Set(x+1, y+1, q)
-	f.Set(x+2, y+1, q)
-	f.Set(x+2, y+2, q)
-	f.Set(x+1, y+3, q)
+	f.Fill(x, y, Pix, Pix, body)
+	f.Set(x, y, p.QuestionHi)      // lit corner
+	f.Set(x+Pix-1, y, p.BrickDark) // shaded corners
+	f.Set(x, y+Pix-1, p.BrickDark)
+	f.Set(x+Pix-1, y+Pix-1, p.BrickDark)
+	f.Set(x+1, y, p.QuestionMark) // top bar
+	f.Set(x+2, y, p.QuestionMark)
+	f.Set(x, y+1, p.QuestionMark) // curl sides
+	f.Set(x+Pix-1, y+1, p.QuestionMark)
+	f.Set(x+1, y+Pix-1, p.QuestionMark) // dot, separated by the gap row
 }
 
 func drawUsed(f *Frame, p *Palette, x, y int) {
@@ -234,29 +240,33 @@ func drawUsed(f *Frame, p *Palette, x, y int) {
 	f.Set(x+Pix-1, y+Pix-1, p.Dark)
 }
 
-// drawPipe paints one 4px column of a pipe. col is the column within the
-// two-tile pipe (0 left, 1 right). Lip rows (the pipe's top) draw an
-// 8px-wide rim from the left column only.
+// drawPipe paints a pipe span from its left column only (col 0); the
+// right column is a no-op. The lip (pipe top) is a full-width 8px rim
+// over an underside shadow, with the shaft starting inside the same tile
+// and running unbroken to the ground — the shaft is inset 1px per side,
+// so the rim overhangs it like the classic pipe silhouette.
 func drawPipe(f *Frame, p *Palette, x, y, col int, lip bool) {
-	if lip {
-		if col != 0 {
-			return // the left column paints the whole rim
-		}
-		f.Fill(x, y, 2*Pix, 1, p.GreenLight)
-		f.Fill(x+4, y, 4, 1, p.Green)
-		f.Fill(x, y+1, 2*Pix, 1, p.GreenDark) // rim shadow
-		f.Set(x, y, p.Green)
-		f.Set(x+7, y, p.GreenDark)
+	if col != 0 {
 		return
 	}
-	switch col {
-	case 0:
-		f.Fill(x, y, 2, Pix, p.GreenLight) // lit left edge
-		f.Fill(x+2, y, 2, Pix, p.Green)
-	case 1:
-		f.Fill(x, y, 3, Pix, p.Green)
-		f.Fill(x+3, y, 1, Pix, p.GreenDark) // shaded edge; col 4 stays sky
+	if lip {
+		f.Fill(x, y, 2*Pix, 1, p.GreenLight)
+		f.Fill(x+4, y, 4, 1, p.Green)
+		f.Set(x, y, p.Green)
+		f.Set(x+7, y, p.GreenDark)
+		f.Fill(x, y+1, 2*Pix, 1, p.GreenDark) // rim underside
+		drawPipeShaft(f, p, x, y+2, Pix-2)
+		return
 	}
+	drawPipeShaft(f, p, x, y, Pix)
+}
+
+// drawPipeShaft paints the 6px-wide pipe shaft (pixels x+1..x+6), lit
+// from the left.
+func drawPipeShaft(f *Frame, p *Palette, x, y, h int) {
+	f.Fill(x+1, y, 2, h, p.GreenLight)
+	f.Fill(x+3, y, 3, h, p.Green)
+	f.Fill(x+6, y, 1, h, p.GreenDark)
 }
 
 // drawFlagPole paints one pole tile; drawFlagTop paints the finial and

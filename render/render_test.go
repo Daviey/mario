@@ -71,16 +71,25 @@ func TestGroundPixels(t *testing.T) {
 
 func TestQuestionAndUsedPixels(t *testing.T) {
 	g := newGame(t)
-	s := Render(g, testPal)
+	s := Render(g, testPal) // Tick 0: bright body phase
 	// Question at world (6,9): pixel cols 24..27, rows 12..15.
 	if got := worldPx(s, 25, 14); got != testPal.QuestionBG {
 		t.Errorf("question block body = %+v", got)
 	}
-	// Blink-on phase: the '?' stroke is bright.
-	g.Tick = 0
+	if got := worldPx(s, 25, 12); got != testPal.QuestionMark {
+		t.Errorf("'?' pixel = %+v, want always-bright mark", got)
+	}
+	if got := worldPx(s, 24, 13); got != testPal.QuestionMark {
+		t.Errorf("'?' curl pixel = %+v, want always-bright mark", got)
+	}
+	// Dim phase: the body deepens but the mark stays bright.
+	g.Tick = 24
 	s = Render(g, testPal)
-	if got := worldPx(s, 25, 13); got != testPal.QuestionMark {
-		t.Errorf("'?' pixel = %+v, want bright", got)
+	if got := worldPx(s, 25, 14); got != testPal.QuestionDim {
+		t.Errorf("dim body = %+v", got)
+	}
+	if got := worldPx(s, 25, 12); got != testPal.QuestionMark {
+		t.Errorf("'?' pixel in dim phase = %+v, mark must never dim", got)
 	}
 	// A used block is solid dull brown.
 	g.Level.Set(8, 9, engine.Used)
@@ -93,19 +102,56 @@ func TestQuestionAndUsedPixels(t *testing.T) {
 func TestPipeShading(t *testing.T) {
 	g := newGame(t)
 	s := Render(g, testPal)
-	// Pipe at world x=10, lip at row 11 -> pixel (40,20) lit rim.
+	// Pipe at world x=10, lip at row 11 -> rim pixel rows 20-21.
 	if got := worldPx(s, 41, 20); got != testPal.GreenLight {
 		t.Errorf("pipe rim = %+v, want lit green", got)
 	}
 	if got := worldPx(s, 47, 21); got != testPal.GreenDark {
 		t.Errorf("pipe rim shadow = %+v", got)
 	}
-	// Body: lit left edge, shaded right edge, one sky gap column.
-	if got := worldPx(s, 40, 24); got != testPal.GreenLight {
+	// The shaft starts inside the lip tile: no sky band under the rim.
+	if got := worldPx(s, 41, 22); got != testPal.GreenLight {
+		t.Errorf("shaft under rim = %+v, want lit green (no gap)", got)
+	}
+	// Body continues the shaft, inset 1px per side so the rim overhangs.
+	if got := worldPx(s, 40, 24); got != testPal.Sky {
+		t.Errorf("pipe inset column = %+v, want sky", got)
+	}
+	if got := worldPx(s, 41, 24); got != testPal.GreenLight {
 		t.Errorf("pipe body lit edge = %+v", got)
 	}
-	if got := worldPx(s, 48, 24); got != testPal.Sky {
-		t.Errorf("pipe gap column = %+v, want sky", got)
+	if got := worldPx(s, 46, 24); got != testPal.GreenDark {
+		t.Errorf("pipe body shaded edge = %+v", got)
+	}
+	if got := worldPx(s, 47, 24); got != testPal.Sky {
+		t.Errorf("pipe inset column = %+v, want sky", got)
+	}
+}
+
+func TestCloudsNeverBehindBlocks(t *testing.T) {
+	// Bricks every 3rd column on row 9: every cloud anchored there
+	// overlaps one (clouds span 3 tiles), so no cloud pixel may appear
+	// anywhere in that row band.
+	b := engine.NewBuilder(80, engine.LevelHeight)
+	b.Ground(0, 79)
+	for x := 0; x < 80; x += 3 {
+		b.Set(x, 9, 'B')
+	}
+	b.Set(2, 12, 'M')
+	b.Flag(70)
+	l, err := engine.ParseLevel("t", b.Rows())
+	if err != nil {
+		t.Fatalf("ParseLevel: %v", err)
+	}
+	g := engine.NewGame([]*engine.Level{l}, 20, 9)
+	g.State = engine.StatePlaying
+	s := Render(g, testPal)
+	for x := 0; x < s.W; x++ {
+		for y := 12; y <= 15; y++ {
+			if got := worldPx(s, x, y); got == testPal.Cloud {
+				t.Fatalf("cloud pixel at (%d,%d) behind the brick row", x, y)
+			}
+		}
 	}
 }
 
