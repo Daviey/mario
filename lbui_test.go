@@ -335,3 +335,57 @@ func TestTitleLOpensBoardOffline(t *testing.T) {
 	}
 	t.Fatal("'l' never opened the board")
 }
+
+func TestBoardRClosesAndRestarts(t *testing.T) {
+	// 'r' on the board (the R RESTART hint) must close the board,
+	// request a one-shot restart edge instead of quitting, and re-arm
+	// the game-over ask so the next run can submit again.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	g := gameOverGame(t)
+	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+	step := func(n int) *render.ScoreUI {
+		var s *render.ScoreUI
+		for range n {
+			g.Update(io.poll())
+			s = io.uiTick(g)
+		}
+		return s
+	}
+	if s := step(1); s == nil || s.Mode != render.UIAsk {
+		t.Fatalf("game over should ask, got %+v", s)
+	}
+	io.feed([]byte("y"))
+	if s := step(1); s.Mode != render.UIEntry {
+		t.Fatalf("y should open entry, got %v", s.Mode)
+	}
+	io.feed([]byte("\r"))
+	if s := step(1); s.Mode != render.UIBoard || s.Status != "OFFLINE" {
+		t.Fatalf("submit should show board, got %+v", s)
+	}
+
+	io.feed([]byte("r"))
+	if s := step(1); s != nil {
+		t.Fatalf("r should close the board: %+v", s)
+	}
+	if io.quitRequested() {
+		t.Fatal("restart must not quit")
+	}
+	in := io.poll()
+	if !in.Restart {
+		t.Fatal("restart edge missing from polled input")
+	}
+	g.Update(in)
+	if g.State != engine.StatePlaying {
+		t.Fatalf("restart should reset the game, got %v", g.State)
+	}
+	if io.poll().Restart {
+		t.Fatal("restart edge should be one-shot")
+	}
+
+	// Re-armed: a second game over asks to submit again.
+	g.Score = 500
+	g.State = engine.StateGameOver
+	if s := step(1); s == nil || s.Mode != render.UIAsk {
+		t.Fatalf("next game over should ask again, got %+v", s)
+	}
+}
