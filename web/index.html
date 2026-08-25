@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUPER CLI MARIO</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0b0e1a;
+    color: #e8e6df;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #bar {
+    padding: 6px 16px;
+    background: #0a1c6e;
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 2px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid #e4221b;
+    flex: 0 0 auto;
+  }
+  #bar .dim { font-weight: 400; letter-spacing: 0; color: #9fb6d9; font-size: 12px; }
+  #t {
+    flex: 1 1 auto; min-height: 0; cursor: text;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #t canvas {
+    image-rendering: pixelated;      /* crisp chunky pixels when scaled */
+    transform-origin: center center; /* scaled to fill the window below */
+  }
+  #t:focus, #t:focus-within { outline: none; }
+  #note {
+    padding: 4px 16px; font-size: 12px; color: #6d7a99;
+    background: #071330; text-align: center;
+    flex: 0 0 auto;
+  }
+  #note a { color: #9fb6d9; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span>SUPER CLI MARIO</span>
+  <span class="dim">a/d move · w/space jump · x run · p pause · q quit</span>
+</div>
+<div id="t"></div>
+<div id="note">click the game to focus · <a href="#" onclick="location.reload(); return false">restart</a></div>
+
+<!-- All asset paths are RELATIVE so the site works under a GitHub Pages
+     sub-path (user.github.io/repo/). -->
+<script src="./wasm_exec.js"></script>
+<script>
+(async () => {
+  // Frame bridge: queue output until the game wiring exists, then stream.
+  const q = [];
+  let flush = null;
+  let sawFrame = false;
+  window.marioOut = (s) => { sawFrame = true; flush ? flush(s) : q.push(s); };
+  window.marioTrueColor = true;
+
+  // Terminal first: the real grid size sizes the game viewport.
+  const { init, Terminal, FitAddon } = await import('./ghostty-web.js');
+  await init();
+  const term = new Terminal({
+    fontSize: 18,
+    fontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
+    theme: { background: '#0b0e1a', foreground: '#e8e6df' },
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('t'));
+  fit.fit();
+  term.focus();
+  window.__term = term; // debug/verification handle
+
+  window.marioCols = term.cols;
+  window.marioRows = term.rows;
+
+  // Start the game module; main() blocks in its play loop, so do not await.
+  try {
+    const go = new Go();
+    const { instance } = await WebAssembly.instantiateStreaming(
+      fetch('./mario.wasm'), go.importObject);
+    go.run(instance);
+  } catch (e) {
+    document.getElementById('note').textContent =
+      'failed to load mario.wasm: ' + e + ' — serve over http(s), not file://';
+    return;
+  }
+
+  term.onData((d) => window.marioFeed(d));
+  flush = (s) => term.write(s);
+  while (q.length) term.write(q.shift());
+  document.body.addEventListener('click', () => term.focus());
+
+  // Full-page play: on resize, refit and tell the game its new viewport.
+  // More room shows more world; sprites never change size (cell metrics
+  // are font-driven, the fit only changes the column/row count).
+  const notify = () => window.marioResize(term.cols, term.rows);
+  window.addEventListener('resize', () => { fit.fit(); notify(); });
+
+  // ghostty-web can re-render with fractional cell metrics (browser zoom,
+  // OS display scaling), leaving unpainted black bands between cell rows.
+  // Detect banding and self-heal by nudging the container and refitting.
+  const banded = () => {
+    const c = document.querySelector('#t canvas');
+    if (!c) return false;
+    const ctx = c.getContext('2d');
+    const W = c.width, H = Math.floor(c.height * 0.6);
+    if (!W || !H) return false;
+    const img = ctx.getImageData(0, 0, W, H).data;
+    let runs = 0, run = 0;
+    for (let y = 0; y < H; y++) {
+      let d = 0, n = 0;
+      for (let x = 0; x < W; x += 5) {
+        const i = (y * W + x) * 4;
+        if (img[i] + img[i+1] + img[i+2] < 60) d++;
+        n++;
+      }
+      if (d / n > 0.7) { if (++run === 4) runs++; } else run = 0;
+    }
+    return runs >= 2;
+  };
+  const tEl = document.getElementById('t');
+  let repaint = () => {};
+  const heal = async () => {
+    if (!sawFrame) return; // never judge a canvas before the game has drawn
+    let refit = false;
+    for (let i = 0; i < 6 && banded(); i++) {
+      tEl.style.width = (tEl.clientWidth + 1) + 'px';
+      fit.fit();
+      refit = true;
+      await new Promise(r => setTimeout(r, 120));
+    }
+    if (refit) {
+      notify();
+      repaint(); // terminal cleared under the game: force a full frame
+    }
+  };
+  window.__setRepaint = (fn) => { repaint = fn; };
+  setInterval(heal, 2000);
+
+  // Fill the screen by sizing the terminal font, not by scaling pixels:
+  // choose the largest font at which the game's maximum grid (240 cols x
+  // 32 rows) still fits the window. The terminal then lands exactly on the
+  // game grid: edge-to-edge, crisp native rendering, sprites as large as
+  // the window allows — and the game viewport adapts to the actual grid,
+  // so gameplay never depends on the window size.
+  const MAX_COLS = 240, MAX_ROWS = 32;
+  const measureCell = () => {
+    const c = document.querySelector('#t canvas');
+    if (!c || !window.__term) return null;
+    const dpr = window.devicePixelRatio || 1;
+    return { w: c.width / dpr / window.__term.cols,
+             h: c.height / dpr / window.__term.rows };
+  };
+  const fillScreen = () => {
+    const cell = measureCell();
+    if (!cell || cell.w <= 0 || cell.h <= 0) return;
+    const f = term.options.fontSize;
+    const cw1 = cell.w / f, ch1 = cell.h / f; // cell size per font point
+    const availW = tEl.clientWidth, availH = tEl.clientHeight;
+    if (availW <= 0 || availH <= 0) return;
+    // Largest font whose fitted grid still fits the game's caps. Height
+    // (32 rows) normally drives it; the 240-column cap only binds on
+    // ultra-wide windows. Never below 10 rows (minimum playable view).
+    const MIN_ROWS = 10;
+    let target = Math.max(availH / (MAX_ROWS * ch1), availW / (MAX_COLS * cw1));
+    target = Math.min(target, availH / (MIN_ROWS * ch1));
+    term.options.fontSize = Math.max(8, Math.min(72, Math.round(target)));
+    fit.fit();
+    notify();
+    repaint();
+  };
+  await new Promise(r => setTimeout(r, 300));
+  fillScreen();
+  window.addEventListener('resize', () => setTimeout(fillScreen, 150));
+})();
+</script>
+</body>
+</html>
