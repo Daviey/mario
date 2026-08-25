@@ -10,10 +10,10 @@ import (
 func TestSanitizeName(t *testing.T) {
 	ok := []struct{ in, want string }{
 		{"DAVE", "DAVE"},
-		{"  dave  ", "dave"},
-		{"a b\tc", "a b c"}, // any whitespace collapses to plain spaces
-		{"8chars--", "8chars--"},
-		{"a.b c-d", "a.b c-d"},
+		{"  dave  ", "DAVE"},
+		{"a b\tc", "A B C"}, // any whitespace collapses to plain spaces
+		{"8chars--", "8CHARS--"},
+		{"a.b c-d", "A.B C-D"},
 		{"12345678", "12345678"},
 	}
 	for _, c := range ok {
@@ -77,5 +77,14 @@ func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 	pc4, err := loadPlayer()
 	if err != nil || pc4.DeviceID == "" {
 		t.Fatalf("corrupt config must regenerate: %+v, %v", pc4, err)
+	}
+
+	// Ensure file permissions are tight (0600)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("file perm is %04o, want 0600", mode)
 	}
 }

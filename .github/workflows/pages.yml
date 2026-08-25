@@ -37,15 +37,15 @@ jobs:
           SOURCE_RUN: ${{ github.event.workflow_run.id }}
         run: |
           aid=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/artifacts" \
-            --jq '.artifacts[] | select(.name == "web-dist") | .id' | head -n 1)
+            --jq '.artifacts | sort_by(.created_at) | reverse | .[] | select(.name == "web-dist") | .id' | head -n 1)
           [ -n "$aid" ] || { echo "web-dist artifact not found in run $SOURCE_RUN" >&2; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$aid/zip" > web-dist.zip
           mkdir web-dist
           unzip -q web-dist.zip -d web-dist
 
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v5
         with:
           path: web-dist
 
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v5

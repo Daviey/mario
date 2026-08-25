@@ -118,6 +118,15 @@ func (u *scoreUI) showBoard() {
 }
 
 func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error), deviceID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			u.mu.Lock()
+			u.loading = false
+			u.status = "OFFLINE"
+			u.rows = nil
+			u.mu.Unlock()
+		}
+	}()
 	rows, err := fetch()
 	u.mu.Lock()
 	defer u.mu.Unlock()

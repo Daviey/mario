@@ -27,7 +27,7 @@ type Client struct {
 
 // New returns a client for the given Supabase project URL and key.
 func New(baseURL, key string) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Key: key, HTTP: http.DefaultClient}
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Key: key, HTTP: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // DefaultURL/DefaultKey are the build-time embedded project URL and
@@ -94,7 +94,34 @@ func (c *Client) Top(ctx context.Context, n int) ([]Row, error) {
 	if err := json.Unmarshal(body, &rows); err != nil {
 		return nil, fmt.Errorf("decode scores: %w", err)
 	}
+	for i, r := range rows {
+		rows[i].Name = sanitizeDisplayName(r.Name)
+	}
 	return rows, nil
+}
+
+// sanitizeDisplayName clamps a peer-supplied name to the documented safe charset
+// and length before it reaches the terminal or DOM.
+func sanitizeDisplayName(s string) string {
+	var b []rune
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' {
+			r -= 'a' - 'A'
+		}
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b = append(b, r)
+		case r == ' ' || r == '-' || r == '.':
+			b = append(b, r)
+		}
+		if len(b) == 8 {
+			break
+		}
+	}
+	if len(b) == 0 {
+		return "-"
+	}
+	return string(b)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, q url.Values, body []byte, hdr ...string) ([]byte, error) {

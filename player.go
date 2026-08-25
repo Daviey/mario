@@ -26,7 +26,7 @@ func playerConfigPath() (string, error) {
 		return "", err
 	}
 	p := filepath.Join(dir, "mario")
-	if err := os.MkdirAll(p, 0o755); err != nil {
+	if err := os.MkdirAll(p, 0o700); err != nil {
 		return "", err
 	}
 	return filepath.Join(p, "player.json"), nil
@@ -47,7 +47,8 @@ func loadPlayer() (playerConfig, error) {
 	}
 	pc := playerConfig{DeviceID: newDeviceID()}
 	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-		os.WriteFile(path, data, 0o644) // best effort; regenerated if lost
+		os.WriteFile(path, data, 0o600)
+		os.Chmod(path, 0o600) // Ensure tight permissions if file existed
 	}
 	return pc, nil
 }
@@ -56,7 +57,8 @@ func (pc *playerConfig) saveName(name string) {
 	pc.Name = name
 	if path, err := playerConfigPath(); err == nil {
 		if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-			os.WriteFile(path, data, 0o644)
+			os.WriteFile(path, data, 0o600)
+			os.Chmod(path, 0o600)
 		}
 	}
 }
@@ -82,6 +84,9 @@ func sanitizeName(s string) (string, bool) {
 		if unicode.IsSpace(r) {
 			return ' '
 		}
+		if r >= 'a' && r <= 'z' {
+			return r - 'a' + 'A'
+		}
 		return r
 	}, strings.TrimSpace(s))
 	s = strings.TrimSpace(s)
@@ -90,7 +95,7 @@ func sanitizeName(s string) (string, bool) {
 	}
 	for _, r := range s {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 		case r == ' ' || r == '-' || r == '.':
 		default:
 			return "", false

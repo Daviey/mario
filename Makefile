@@ -40,18 +40,21 @@ $(TARGETS):
 		-o $(DIST)/$(BINARY)-$$os-$$arch$$suffix .
 
 release: $(TARGETS)
-	@cd $(DIST) && sha256sum $(BINARY)-* > SHA256SUMS 2>/dev/null || \
-		shasum -a 256 $(BINARY)-* > SHA256SUMS
+	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
+		shasum -a 256 $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS
 
 # Static browser build (GitHub Pages ready): the game itself compiled to
 # WASM, rendered client-side. All asset paths relative. The Supabase URL
 # and publishable key are embedded (board.Default*) from env or .env so
 # the leaderboard works in the browser, which has no environment.
-SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env 2>/dev/null))
-SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env 2>/dev/null))
+SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env web/supabase.env 2>/dev/null | head -n 1))
+SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env web/supabase.env 2>/dev/null | head -n 1))
 WEBLDFLAGS := $(LDFLAGS) -X mario/board.DefaultURL=$(SUPA_URL) -X mario/board.DefaultKey=$(SUPA_KEY)
 
 web:
+	@if [ -z "$(SUPA_URL)" ] || [ -z "$(SUPA_KEY)" ]; then \
+		echo "ERROR: SUPABASE_URL and SUPABASE_KEY must be set in env, .env, or web/supabase.env" >&2; exit 1; \
+	fi
 	@mkdir -p $(DIST)/web
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm .
 	cp web/index.html $(WEBDIST)/
@@ -62,7 +65,7 @@ web:
 
 web-serve: web
 	@echo "serving $(WEBDIST) at http://127.0.0.1:8417/"
-	@cd $(WEBDIST) && python3 -m http.server 8417
+	@cd $(WEBDIST) && python3 -m http.server 8417 --bind 127.0.0.1
 
 test:
 	go test ./...

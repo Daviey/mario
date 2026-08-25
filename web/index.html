@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co; img-src 'self' data:">
 <title>SUPER CLI MARIO</title>
 <style>
   :root { color-scheme: dark; }
@@ -336,14 +337,14 @@
     let html = '';
     if (st.mode === 'ask') {
       html = '<h3>GAME OVER</h3>'
-        + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
+        + '<p class="score">SCORE ' + escHtml(pad(st.score, 6)) + '</p>'
         + '<p class="gold blink">SUBMIT TO LEADERBOARD?</p>'
         + '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>';
     } else if (st.mode === 'entry') {
       const name = escHtml(st.name || '');
       const padN = '&nbsp;'.repeat(Math.max(0, 9 - name.length));
       html = '<h3>GAME OVER</h3>'
-        + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
+        + '<p class="score">SCORE ' + escHtml(pad(st.score, 6)) + '</p>'
         + '<p class="gold">ENTER NAME</p>'
         + '<p class="field">[' + name + '<span class="blink">_</span>' + padN + ']</p>'
         + '<p class="hint">ENTER OK&nbsp;&nbsp;&nbsp;BS DEL&nbsp;&nbsp;&nbsp;ESC BACK</p>';
@@ -352,8 +353,8 @@
       if (st.loading) body = '<p class="blink">LOADING...</p>';
       else if (!st.rows || !st.rows.length) body = '<p>NO SCORES YET</p>';
       else body = '<table>' + st.rows.map((r) =>
-        '<tr' + (r.mine ? ' class="mine"' : '') + '><td class="rk">' + r.rank
-        + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + r.score + '</td></tr>').join('') + '</table>';
+        '<tr' + (r.mine ? ' class="mine"' : '') + '><td class="rk">' + escHtml(r.rank)
+        + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + escHtml(r.score) + '</td></tr>').join('') + '</table>';
       const foot = st.status
         ? '<p class="gold">' + escHtml(st.status) + '</p>'
         : (st.title ? '<p class="hint blink">L CLOSE</p>'

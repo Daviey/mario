@@ -46,7 +46,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
-		rows, err := client.Top(context.Background(), *topN)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		rows, err := client.Top(ctx, *topN)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
@@ -141,6 +143,12 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// each chunk to the game mapper or the leaderboard UI (never both).
 	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				cleanup()
+				panic(r)
+			}
+		}()
 		buf := make([]byte, 64)
 		for {
 			n, err := os.Stdin.Read(buf)

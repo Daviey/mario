@@ -312,13 +312,15 @@ func TestSnapshotFields(t *testing.T) {
 func TestTitleLOpensBoardOffline(t *testing.T) {
 	// Integration through gameIO: 'l' on the title screen opens the board
 	// (OFFLINE without credentials) and never starts the game.
+	t.Setenv("SUPABASE_URL", "")
 	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
 	io.feed([]byte("l"))
-	for range 3 {
+	for range 100 {
+		time.Sleep(1 * time.Millisecond) // Let fetchInto goroutine run
 		g.Update(io.poll())
 		ui := io.uiTick(g)
-		if ui != nil && ui.Mode == render.UIBoard {
+		if ui != nil && ui.Mode == render.UIBoard && !ui.Loading {
 			if g.State != engine.StateTitle {
 				t.Fatalf("game left title: %v", g.State)
 			}

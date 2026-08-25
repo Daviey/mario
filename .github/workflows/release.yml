@@ -16,9 +16,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v6
         with:
           go-version-file: go.mod
           cache: false
@@ -30,10 +30,15 @@ jobs:
         run: make release
 
       - name: Build web bundle
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
         run: make web
 
       - name: Zip web bundle
-        run: cd dist/web && zip -r ../mario-web.zip .
+        run: |
+          cd dist/web && zip -r ../mario-web.zip .
+          cd .. && sha256sum mario-web.zip >> SHA256SUMS
 
       - name: Create GitHub release
         env:
@@ -45,7 +50,7 @@ jobs:
             --generate-notes \
             --repo "$GITHUB_REPOSITORY"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
         with:
           name: web-dist
           path: dist/web
