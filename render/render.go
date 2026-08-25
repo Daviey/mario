@@ -611,13 +611,38 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	if pl.Invincible > 0 && (g.Tick/3)%2 == 0 {
 		return // damage flicker
 	}
-	art := sprMarioSmall
-	if pl.Super {
-		art = sprMarioSuper
-	}
+	art := marioArt(pl)
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
+}
+
+// marioArt picks the pose: airborne jump, skid while turning against
+// motion, otherwise the distance-driven walk cycle (stand frame when idle).
+func marioArt(pl *engine.Player) []string {
+	switch {
+	case !pl.Grounded:
+		if pl.Super {
+			return sprMarioSuperJump
+		}
+		return sprMarioSmallJump
+	case pl.Skidding:
+		if pl.Super {
+			return sprMarioSuperSkid
+		}
+		return sprMarioSmallSkid
+	case pl.Vel.X != 0:
+		frames := marioSmallWalk
+		if pl.Super {
+			frames = marioSuperWalk
+		}
+		return frames[int(pl.WalkDist/engine.WalkFrameLen)%len(frames)]
+	default:
+		if pl.Super {
+			return sprMarioSuper
+		}
+		return sprMarioSmall
+	}
 }
 
 func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
