@@ -315,8 +315,15 @@ func (m *Mapper) apply(ev keyEvent) {
 			// actually follow.
 			if prev := m.lastSeen[ev.k]; prev > 0 {
 				m.pendingDelay = m.now - prev + 1
+				// If the gap is short, this is just a jittery repeat that
+				// barely missed a collapsed cadence window. Keep the hold's
+				// repeat status intact so the habit saves correctly.
+				if m.pendingDelay > holdWindow {
+					m.sawRepeat[ev.k] = false
+				}
+			} else {
+				m.sawRepeat[ev.k] = false
 			}
-			m.sawRepeat[ev.k] = false
 			m.win[ev.k] = m.graceFor(ev.k)
 		}
 		// Latch the press edge: if a frame hitch lets the release land
