@@ -328,9 +328,10 @@ func TestOverlayPixelText(t *testing.T) {
 			t.Fatalf("sprite pixel at (%d,8) covers the title", x)
 		}
 	}
-	// Mario and goomba sit in the open sky below the subtitle.
+	// Mario and goomba stand on the ground line (see fit_test for the
+	// precise placement contract); here just assert they exist on title.
 	mario, goomba := false, false
-	for y := 20; y < 31; y++ {
+	for y := 0; y < s.H*2; y++ {
 		for x := 0; x < s.W; x++ {
 			switch worldPx(s, x, y) {
 			case testPal.Player:
