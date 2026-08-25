@@ -55,6 +55,7 @@ CGO_ENABLED=0 go test -run TestGameOverAutoAsksAndSubmits -v .   # single test
 LIVE=1 go test -run TestLiveUISubmit -v .            # real-backend E2E (see Testing)
 ./mario -scores 10                                   # print leaderboard
 ./mario -ui-preview board                            # headless UI screens: ask|entry|board|title-board
+# release: git tag vX.Y.Z && git push origin vX.Y.Z   # CI: all binaries → GH Release, dist/web → Pages
 ```
 
 Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamically-linked scratch binaries — never drop `CGO_ENABLED=0`.
@@ -88,7 +89,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Go ≥ 1.22, `CGO_ENABLED=0` always (static; NixOS host cannot run dynamic scratch builds — set `GOTMPDIR` if `/tmp` is noexec).
 - No package manager, no Node tooling for the game itself; `web/` is plain HTML+JS consuming the `.wasm`.
 - Terminal features are progressive enhancement: truecolor → 16-color fallback (`-basic` to force), kitty keyboard protocol → legacy key-repeat inference.
-- **CI**: `.github/workflows/release.yml` — on tag push `v*`: tests, cross-compiles all platforms, publishes a GitHub Release (binaries + SHA256SUMS + web zip) and deploys `dist/web` to GitHub Pages. No PR/push CI otherwise; no linters, no go.work, no Dockerfile — `make vet`/`make fmtcheck` are the local quality gates.
+- **CI (release + Pages)**: tag push `v*` → `.github/workflows/release.yml` (tests → `make release` 5 binaries + `SHA256SUMS` → `make web` → `mario-web.zip` → GitHub Release + `web-dist` artifact) → `.github/workflows/pages.yml` (fires via `workflow_run` on release success) re-packages that artifact and deploys to https://daviey.github.io/mario/. The split exists because the `github-pages` environment's protection rules reject tag refs — Pages deploys must run from a default-branch context (`workflow_run`); the policy REST API can't change this. No PR/push CI otherwise; no linters, no go.work, no Dockerfile — `make vet`/`make fmtcheck` are the local quality gates.
 - Repo hygiene: never commit `.env`; new worktrees need it copied in manually (leaderboard silently offline otherwise).
 
 ## Testing & QA
@@ -114,4 +115,6 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Viewport extremes are real: `ViewH` can be 4 tiles tall; every new screen must survive the size sweeps or `TestScoreUIAllViewportSizes` fails.
 - The WASM build shares `play()` but not `render.Stream` — it rasterizes via `RenderPixels`; changes to overlay drawing must work through both `worldFrame` paths.
 - `web/index.html` contains a self-contained boot loader that ports the game's art/palette/font — if sprites/font change, consider whether the loader art should follow.
+- **CI runners use dash as `/bin/sh`** — Makefile recipes must stay POSIX (no `<<<`/bashisms): they pass locally on NixOS bash and die only in Actions. The runner's toolcache Go also lacks `$(go env GOROOT)/lib/wasm/wasm_exec.js` (hence the `find` in `make web`), and `dist/mario-*` already matches `mario-web.zip` — never list it twice in `gh release create`.
+- **Re-running a release run re-executes `gh release create`** — delete the tag's release first or it fails on existing assets. Reruns use the tag commit's workflow file; the `pages` (`workflow_run`) job always uses the default-branch file.
 - Live Supabase details: project `jdmgfpzxcdpyylhwdbkz` (direct IPv6 `db.<ref>.supabase.co` reachable from this host; pooler tenant lookup fails); schema changes go through the migration file + direct DB apply.
