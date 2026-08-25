@@ -51,6 +51,7 @@ type Row struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Score     int       `json:"score"`
+	DeviceID  string    `json:"device_id"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -68,7 +69,7 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 // Top returns the n best scores, highest first.
 func (c *Client) Top(ctx context.Context, n int) ([]Row, error) {
 	q := url.Values{}
-	q.Set("select", "id,name,score,created_at")
+	q.Set("select", "id,name,score,device_id,created_at")
 	q.Set("order", "score.desc")
 	q.Set("limit", strconv.Itoa(n))
 	body, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)

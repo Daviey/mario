@@ -6,12 +6,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"mario/board"
 	"mario/engine"
@@ -26,6 +26,7 @@ import (
 //	-width N     viewport width in tiles (0 = terminal width)
 //	-basic       force 16-color ANSI output instead of truecolor
 //	-scores N    print the top N leaderboard scores and exit
+//	-ui-preview M  render a leaderboard UI screen headless (ask|entry|board|title-board)
 func main() {
 	demo := flag.Bool("demo", false, "run a headless scripted demo and exit")
 	demoTicks := flag.Int("demoticks", 6000, "demo length in ticks (with -demo)")
@@ -33,6 +34,7 @@ func main() {
 	width := flag.Int("width", 0, "viewport width in tiles (0 = terminal width)")
 	basic := flag.Bool("basic", false, "force 16-color ANSI output instead of truecolor")
 	topN := flag.Int("scores", 0, "print the top N leaderboard scores and exit")
+	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (ask, entry, board, title-board)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -53,6 +55,14 @@ func main() {
 		return
 	}
 
+	if *uiPreview != "" {
+		if err := uiPreviewScreen(os.Stdout, *uiPreview, trueColor); err != nil {
+			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	levels, err := loadLevels(*levelPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
@@ -64,26 +74,14 @@ func main() {
 		return
 	}
 
-	score, stdin, err := run(levels, *width, trueColor)
-	if err != nil {
+	if _, err := run(levels, *width, trueColor); err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
-	}
-	in := io.Reader(os.Stdin)
-	if stdin != nil {
-		in = stdin // keystrokes owned by the game's stdin pump
-	}
-	if err := maybeSubmit(os.Stdout, in, score); err != nil {
-		// Submission problems never cost the player their game.
-		fmt.Fprintf(os.Stdout, "score submission skipped: %v\n", err)
 	}
 }
 
 // run plays the game on the real terminal and returns the final score.
-// The second return value is where post-game keystrokes arrive: the stdin
-// pump that owns fd 0 for the whole process forwards them there once play
-// ends, so the submit prompt never races the game's input reader.
-func run(levels []*engine.Level, width int, trueColor bool) (int, io.Reader, error) {
+func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -92,11 +90,11 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, io.Reader, err
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
 
 	if !isTTY(os.Stdin) {
-		return 0, nil, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
+		return 0, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")
 	}
 	restore, err := rawMode()
 	if err != nil {
-		return 0, nil, fmt.Errorf("cannot set raw mode: %w", err)
+		return 0, fmt.Errorf("cannot set raw mode: %w", err)
 	}
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
@@ -111,16 +109,11 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, io.Reader, err
 		os.Exit(0)
 	}()
 
-	// Best-effort: kitty keyboard protocol, alt screen, hidden cursor,
-	// window title. Unsupported terminals ignore these. Flags 1|2|8 =
-	// disambiguate + event types + report ALL keys as escape codes, so
-	// even plain letters and space get press/repeat/release events —
-	// without them every letter tap phantom-holds for the legacy repeat
-	// window (overrun moves, eaten jumps, mushy left-right). Terminals
-	// without the protocol keep the plain-byte fallback.
+	// Best-effort: kitty keyboard protocol (release events), alt screen,
+	// hidden cursor, window title. Unsupported terminals ignore these.
 	// The leading pop heals any mode left over by a previous run that was
 	// killed without cleanup, before we push our own entry.
-	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
+	os.Stdout.WriteString("\x1b[<u\x1b[>3u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
 
 	viewW := width
 	if viewW <= 0 {
@@ -143,72 +136,81 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, io.Reader, err
 	}
 	g := engine.NewGame(levels, viewW, viewH)
 
-	mapper := input.NewMapper()
-	// One goroutine owns fd 0 from here until process exit. During play it
-	// feeds the mapper; afterwards it forwards bytes to the submit prompt.
-	// Without the handoff, the reader and maybeSubmit both block in read(2)
-	// on the same fd and the kernel hands each keystroke to a random one —
-	// half the time the prompt never sees the answer and looks frozen.
-	promptR, promptW, err := os.Pipe()
-	if err != nil {
-		return 0, nil, fmt.Errorf("prompt pipe: %w", err)
-	}
-	pump := &stdinPump{toGame: true, game: mapper.Feed, prompt: promptW}
-	go pump.loop(os.Stdin)
+	// One goroutine owns fd 0 for the life of the process; gameIO routes
+	// each chunk to the game mapper or the leaderboard UI (never both).
+	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				io.feed(append([]byte(nil), buf[:n]...))
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	// Differential rendering: each frame only the changed cells are sent,
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.
 	st := newStream(os.Stdout, render.NewPalette(trueColor))
-	play(g, mapper, st)
-	pump.switchToPrompt()
-	return g.Score, promptR, nil
+	play(g, io, st)
+	return g.Score, nil
 }
 
-// stdinPump routes raw terminal bytes to exactly one consumer at a time:
-// the game mapper during play, the submit prompt afterwards — fd 0 has a
-// single owner for the life of the process.
-type stdinPump struct {
-	mu     sync.Mutex
-	toGame bool
-	game   func([]byte)
-	prompt io.Writer
-}
-
-// loop reads f until EOF or error, delivering every chunk through route.
-func (p *stdinPump) loop(f *os.File) {
-	buf := make([]byte, 64)
-	for {
-		n, err := f.Read(buf)
-		if n > 0 {
-			p.route(buf[:n])
-		}
-		if err != nil {
-			return
-		}
+// uiPreviewScreen renders one leaderboard UI screen headless: the demo
+// script runs to game over, then the machine is stepped to the requested
+// mode and one ANSI frame is printed (for visual checks and debugging).
+func uiPreviewScreen(w *os.File, mode string, trueColor bool) error {
+	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+	for t := range 6000 {
+		g.Update(scriptInput(t))
 	}
-}
-
-// route delivers one chunk of bytes to the active consumer. The copy keeps
-// the sink from retaining the loop's reused buffer.
-func (p *stdinPump) route(b []byte) {
-	cp := append([]byte(nil), b...)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.toGame {
-		p.game(cp)
-	} else if p.prompt != nil {
-		_, _ = p.prompt.Write(cp)
+	if g.Score == 0 {
+		return fmt.Errorf("demo script scored 0; cannot preview")
 	}
-}
 
-// switchToPrompt flips the destination for post-game keystrokes. Bytes
-// already in flight to the mapper are at most one chunk of late key
-// repeats, which the mapper discards once nothing polls it.
-func (p *stdinPump) switchToPrompt() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.toGame = false
+	pc, _ := loadPlayer()
+	canned := []board.Row{
+		{Name: "BIFF", Score: 32100, DeviceID: "x"},
+		{Name: "DAVE", Score: 12500, DeviceID: pc.DeviceID}, // "you"
+		{Name: "KIM", Score: 9900, DeviceID: "z"},
+	}
+	ui := newScoreUI(nil, func() ([]board.Row, error) { return canned, nil })
+
+	var frameG *engine.Game
+	switch mode {
+	case "ask":
+		ui.tick(g) // game over auto-asks
+	case "entry":
+		ui.tick(g)
+		ui.feedKeys([]byte("yDAVE")) // a half-typed name, cursor after it
+		ui.tick(g)
+		frameG = g
+	case "board":
+		// Direct board view (the submit path needs a real backend).
+		ui.tick(g)
+		ui.showBoard()
+		time.Sleep(100 * time.Millisecond) // let the fake fetch land
+		ui.tick(g)
+	case "title-board":
+		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+		ui.tick(g2)
+		ui.showBoard()
+		time.Sleep(100 * time.Millisecond)
+		frameG = g2
+		fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.tick(frameG)))
+		return nil
+	default:
+		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board)", mode)
+	}
+	if frameG == nil {
+		frameG = g
+	}
+	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.tick(frameG)))
+	return nil
 }
 
 // trueColorSupported sniffs the environment for terminals that render

@@ -1,57 +1,84 @@
 package main
 
-// Live integration test: exercises the real submit path against the
-// configured Supabase project. Skipped unless LIVE=1:
+// Live integration test: drives the real in-game UI machine (game-over
+// prompt → name entry → submit) against the configured Supabase project.
+// Skipped unless LIVE=1:
 //
-//	LIVE=1 go test -run TestLiveSubmitAndTop -v .
-//
-// Requires SUPABASE_URL/SUPABASE_KEY in the environment or ./.env.
-
+//	LIVE=1 go test -run TestLiveUISubmit -v .
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"mario/board"
+	"mario/engine"
+	"mario/render"
 )
 
-func TestLiveSubmitAndTop(t *testing.T) {
+func TestLiveUISubmit(t *testing.T) {
 	if os.Getenv("LIVE") != "1" {
 		t.Skip("set LIVE=1 to hit the real backend")
 	}
 	board.LoadDotEnv(".env")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // fresh player identity
+
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	for i := range 6000 {
+		g.Update(engine.Input{Right: true, Run: i%3 != 0, Up: i%97 < 22, AnyKey: i == 0})
+	}
+	if g.State != engine.StateGameOver || g.Score == 0 {
+		t.Fatalf("script should end game over with a score, got %v score=%d", g.State, g.Score)
+	}
+
+	ui := newScoreUI(nil, nil) // real board client from env
+	if ui.submit == nil {
+		t.Fatal("no leaderboard configured")
+	}
+
+	snap := ui.tick(g)
+	if snap == nil || snap.Mode != render.UIAsk {
+		t.Fatalf("expected ask prompt, got %+v", snap)
+	}
+	ui.feedKeys([]byte("yLIVEUI\r"))
+	snap = ui.tick(g)
+	if snap.Mode != render.UIBoard || snap.Status != "SUBMITTING" {
+		t.Fatalf("expected submitting board, got %+v", snap)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		ui.mu.Lock()
+		status := ui.status
+		ui.mu.Unlock()
+		if status == "SUBMITTED!" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ui.mu.Lock()
+	status := ui.status
+	ui.mu.Unlock()
+	if status != "SUBMITTED!" {
+		t.Fatalf("submit did not land: %q", status)
+	}
+
 	client, err := board.FromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	player, err := loadPlayer()
+	rows, err := client.Top(context.Background(), 50)
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := "LIVETST2"
-	if err := client.Submit(ctx, board.Entry{Name: name, Score: 7777, DeviceID: player.DeviceID}); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	rows, err := client.Top(ctx, 10)
-	if err != nil {
-		t.Fatalf("top: %v", err)
-	}
 	found := false
-	var out strings.Builder
-	printScores(&out, rows)
 	for _, r := range rows {
-		if r.Name == name && r.Score == 7777 {
+		if r.Name == "LIVEUI" && r.Score == g.Score {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("submitted score not immediately visible:\n%s", out.String())
+		t.Fatalf("LIVEUI %d not on the board: %+v", g.Score, rows)
 	}
-	t.Logf("board now shows %s:\n%s", name, out.String())
+	t.Logf("LIVEUI %d submitted and visible", g.Score)
 }

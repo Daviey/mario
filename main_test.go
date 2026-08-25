@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"mario/engine"
+	"mario/input"
+	"mario/render"
 )
 
 func TestRunDemo(t *testing.T) {
@@ -32,36 +33,31 @@ func TestRunDemo(t *testing.T) {
 	}
 }
 
-func TestStdinPumpHandoff(t *testing.T) {
-	// Post-game keystrokes must reach the submit prompt — never the game's
-	// input mapper — once play ends. The prompt reads through the same
-	// os.Pipe run() wires into maybeSubmit.
-	var mu sync.Mutex
-	var gameGot []string
-	game := func(b []byte) {
-		mu.Lock()
-		defer mu.Unlock()
-		gameGot = append(gameGot, string(b))
-	}
-	promptR, promptW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := &stdinPump{toGame: true, game: game, prompt: promptW}
+func TestGameIOKeyboardOwnership(t *testing.T) {
+	// While the leaderboard UI captures input, keystrokes must never reach
+	// the game mapper — typing a name with 'p' in it must not pause, 'r'
+	// must not restart. One consumer owns the keyboard at a time.
+	m := input.NewMapper()
+	ui := newScoreUI(nil, nil)
+	io := newGameIO(m, ui)
 
-	p.route([]byte("d")) // during play: game keys go to the mapper
-	p.switchToPrompt()
-	p.route([]byte("n\n")) // after play: the answer goes to the prompt
-
-	buf := make([]byte, 8)
-	n, rerr := promptR.Read(buf)
-	if rerr != nil || string(buf[:n]) != "n\n" {
-		t.Fatalf("prompt received %q (err %v); want %q", buf[:n], rerr, "n\n")
+	io.feed([]byte("p"))
+	if in := io.poll(); !in.Pause {
+		t.Fatal("during play the mapper must receive keys")
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(gameGot) != 1 || gameGot[0] != "d" {
-		t.Fatalf("game sink received %q; want only the pre-handoff bytes", gameGot)
+
+	ui.mu.Lock()
+	ui.mode = render.UIEntry
+	ui.mu.Unlock()
+	io.feed([]byte("p")) // also a valid name letter
+	if in := io.poll(); in.Pause {
+		t.Fatal("key leaked to the mapper during name entry")
+	}
+	ui.mu.Lock()
+	got := string(ui.keys)
+	ui.mu.Unlock()
+	if got != "p" {
+		t.Fatalf("UI captured %q; want %q", got, "p")
 	}
 }
 

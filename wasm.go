@@ -49,9 +49,10 @@ func (j *jsRGB) deliver(f *render.Frame) {
 
 func main() {
 	mapper := input.NewMapper()
+	io := newGameIO(mapper, newScoreUI(nil, nil))
 
 	js.Global().Set("marioFeed", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		mapper.Feed([]byte(args[0].String()))
+		io.feed([]byte(args[0].String()))
 		return nil
 	}))
 
@@ -73,16 +74,16 @@ func main() {
 	}))
 
 	pal := render.NewPalette(true)
-	draw := func() { jsFrameSink.deliver(render.RenderPixels(g, pal)) }
-	draw() // first frame
+	draw := func(ui *render.ScoreUI) { jsFrameSink.deliver(render.RenderPixels(g, pal, ui)) }
+	draw(nil) // first frame
 
 	ticker := newTicker(engine.TicksPerSecond)
 	for {
 		ticker.wait()
-		in := mapper.Poll()
+		in := io.poll()
 		g.Update(in)
-		draw()
-		if in.Quit {
+		draw(io.uiTick(g))
+		if in.Quit || io.quitRequested() {
 			break
 		}
 	}

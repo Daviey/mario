@@ -18,8 +18,8 @@ const (
 // RenderPixels renders a complete frame — HUD band, world, status band —
 // as a raw square-pixel grid for direct canvas painting (browser build).
 // Width is ViewW*Pix; height HudBandPx + ViewH*Pix + StatusBandPx.
-func RenderPixels(g *engine.Game, p *Palette) *Frame {
-	world := worldFrame(g, p)
+func RenderPixels(g *engine.Game, p *Palette, ui ...*ScoreUI) *Frame {
+	world := worldFrame(g, p, firstUI(ui))
 	f := NewFrame(world.W, world.H+HudBandPx+StatusBandPx, p.Sky)
 	f.DrawFrame(world, 0, HudBandPx)
 	drawHudPx(f, g, p)
