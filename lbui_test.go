@@ -50,6 +50,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 }
 
 func TestGameOverAutoAsksAndSubmits(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	var mu sync.Mutex
@@ -132,6 +133,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 }
 
 func TestDeclineDoesNotSubmitOrQuit(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	called := false
 	ui := newScoreUI(func(board.Entry) error { called = true; return nil }, nil)
@@ -152,6 +154,7 @@ func TestDeclineDoesNotSubmitOrQuit(t *testing.T) {
 }
 
 func TestEntryEditing(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ui := newScoreUI(nil, nil)
 	g := gameOverGame(t)
@@ -191,6 +194,7 @@ func TestEntryEditing(t *testing.T) {
 }
 
 func TestEmptyNameUsesStoredDefault(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	pc, _ := loadPlayer()
 	pc.saveName("REGULAR")
@@ -222,6 +226,7 @@ func TestEmptyNameUsesStoredDefault(t *testing.T) {
 }
 
 func TestTitleLOpensBoard(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	fetched := make(chan struct{}, 1)
 	ui := newScoreUI(nil, func() ([]board.Row, error) {
@@ -263,6 +268,7 @@ func TestTitleLOpensBoard(t *testing.T) {
 func TestOfflineStillShowsPrompt(t *testing.T) {
 	// No backend configured: game over still asks, submitting reports
 	// OFFLINE instead of crashing.
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("SUPABASE_KEY", "")
@@ -294,6 +300,7 @@ func TestBoardRowsForMarksMine(t *testing.T) {
 }
 
 func TestSnapshotFields(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ui := newScoreUI(nil, nil)
 	g := gameOverGame(t)
@@ -340,6 +347,7 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 	// 'r' on the board (the R RESTART hint) must close the board,
 	// request a one-shot restart edge instead of quitting, and re-arm
 	// the game-over ask so the next run can submit again.
+	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	g := gameOverGame(t)
 	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
