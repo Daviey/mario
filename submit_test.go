@@ -9,26 +9,7 @@ import (
 	"testing"
 
 	"mario/board"
-	"mario/engine"
 )
-
-// runResultAt builds a plausible finished run with the given claimed score.
-func runResultAt(score int) *runResult {
-	r := newRecorder()
-	for t := range 120 {
-		r.record(scriptInput(t))
-	}
-	g := replayGame(r.rec)
-	return &runResult{rec: r, score: score, coins: g.CoinCount, state: g.State}
-}
-
-func replayGame(rec recording) *engine.Game {
-	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
-	for _, v := range rec.I {
-		g.Update(decodeInput(v))
-	}
-	return g
-}
 
 // submitServer captures the entry a client submits.
 type submitServer struct {
@@ -57,18 +38,14 @@ func TestMaybeSubmitYes(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("y\nDAVE\n")
-	if err := maybeSubmit(&out, in, runResultAt(12500), true); err != nil {
+	if err := maybeSubmit(&out, in, 12500); err != nil {
 		t.Fatal(err)
 	}
 	e := <-s.got
-	if e.Name != "DAVE" || e.Score != 12500 || e.EngineVersion != scoreEngineVersion {
+	if e.Name != "DAVE" || e.Score != 12500 || e.DeviceID == "" {
 		t.Fatalf("entry = %+v", e)
 	}
-	var rec recording
-	if err := json.Unmarshal(e.Replay, &rec); err != nil || rec.V != 1 || len(rec.I) != 120 {
-		t.Fatalf("replay payload = %s (%v)", e.Replay, err)
-	}
-	if !strings.Contains(out.String(), "pending verification") {
+	if !strings.Contains(out.String(), "submitted") {
 		t.Errorf("out = %q", out.String())
 	}
 
@@ -89,7 +66,7 @@ func TestMaybeSubmitKeepsStoredNameOnEnter(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("\n\n") // accept default, blank name keeps stored
-	if err := maybeSubmit(&out, in, runResultAt(10), true); err != nil {
+	if err := maybeSubmit(&out, in, 10); err != nil {
 		t.Fatal(err)
 	}
 	if e := <-s.got; e.Name != "BIFF" {
@@ -105,7 +82,7 @@ func TestMaybeSubmitDecline(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("n\n")
-	if err := maybeSubmit(&out, in, runResultAt(10), true); err != nil {
+	if err := maybeSubmit(&out, in, 10); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -118,37 +95,17 @@ func TestMaybeSubmitDecline(t *testing.T) {
 	}
 }
 
-func TestMaybeSubmitSkipsWhenUnworthy(t *testing.T) {
+func TestMaybeSubmitSkipsZeroScore(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "http://unused")
 	t.Setenv("SUPABASE_KEY", "k")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	lost := newRecorder()
-	for range maxRecordTicks + 1 {
-		lost.record(engine.Input{})
-	}
-	cases := map[string]*runResult{
-		"zero score":  {rec: newRecorder(), score: 0},
-		"nil result":  nil,
-		"lost record": {rec: lost, score: 5},
-	}
-	for name, res := range cases {
-		var out bytes.Buffer
-		if err := maybeSubmit(&out, strings.NewReader("y\nX\n"), res, true); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if out.Len() != 0 {
-			t.Errorf("%s: must not prompt, out = %q", name, out.String())
-		}
-	}
-
-	// Custom level runs are unverifiable: no prompt either.
 	var out bytes.Buffer
-	if err := maybeSubmit(&out, strings.NewReader("y\nX\n"), runResultAt(9), false); err != nil {
+	if err := maybeSubmit(&out, strings.NewReader("y\nX\n"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if out.Len() != 0 {
-		t.Errorf("custom level: must not prompt, out = %q", out.String())
+		t.Errorf("zero score must not prompt, out = %q", out.String())
 	}
 }
 
@@ -160,7 +117,7 @@ func TestMaybeSubmitRetriesBadName(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("\ntoolongname9\nDAVE\n")
-	if err := maybeSubmit(&out, in, runResultAt(7), true); err != nil {
+	if err := maybeSubmit(&out, in, 7); err != nil {
 		t.Fatal(err)
 	}
 	if e := <-s.got; e.Name != "DAVE" {

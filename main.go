@@ -10,8 +10,8 @@
 //	-width N     viewport width in tiles (default: terminal width)
 //	-scores N    print the top N leaderboard scores and exit
 //
-// Scores are recorded and (after game over) can be submitted to a
-// Supabase-backed leaderboard; see board package and .env.
+// Scores can be submitted to a Supabase-backed leaderboard after game over;
+// see the board package and .env.
 package main
 
 import (
@@ -83,18 +83,14 @@ func scriptInput(t int) engine.Input {
 }
 
 // runDemo plays a deterministic scripted session with no terminal needed.
-func runDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) *recorder {
+func runDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) {
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
-	rec := newRecorder()
 	for t := range ticks {
-		in := scriptInput(t)
-		rec.record(in)
-		g.Update(in)
+		g.Update(scriptInput(t))
 	}
 	fmt.Fprintf(w, "demo: ticks=%d score=%d coins=%d lives=%d state=%s level=%s\n",
 		ticks, g.Score, g.CoinCount, g.Lives, g.State, g.LevelName())
 	fmt.Fprint(w, render.FrameANSI(g, render.NewPalette(trueColor)))
-	return rec
 }
 
 func isTTY(f *os.File) bool {
@@ -105,24 +101,21 @@ func isTTY(f *os.File) bool {
 	return st.Mode()&os.ModeCharDevice != 0
 }
 
-// play runs the game loop, drawing differential frames until quit, recording
-// every polled input for score submission. Shared by the native terminal
-// runner and the browser (WASM) build.
-func play(g *engine.Game, mapper *input.Mapper, st *render.Stream) *recorder {
+// play runs the game loop, drawing differential frames until quit.
+// Shared by the native terminal runner and the browser (WASM) build.
+func play(g *engine.Game, mapper *input.Mapper, st *render.Stream) {
 	draw := func() { st.Draw(g) }
 	draw() // first frame: full repaint
 
-	rec := newRecorder()
 	ticker := time.NewTicker(time.Second / engine.TicksPerSecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
 		in := mapper.Poll()
-		rec.record(in)
 		g.Update(in)
 		draw()
 		if in.Quit {
-			return rec
+			return
 		}
 	}
 }

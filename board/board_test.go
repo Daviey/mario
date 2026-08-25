@@ -52,11 +52,7 @@ func testClient(t *testing.T, resp func(*http.Request, string) (int, string)) (*
 
 func TestSubmitWire(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
-	e := Entry{
-		Name: "DAVE", Score: 12500, Seed: 0,
-		Replay:        json.RawMessage(`{"v":1,"i":[1]}`),
-		EngineVersion: "v1", DeviceID: "d",
-	}
+	e := Entry{Name: "DAVE", Score: 12500, DeviceID: "d"}
 	if err := client.Submit(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -77,12 +73,14 @@ func TestSubmitWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	if sent["engine_version"] != "v1" {
-		t.Errorf("engine_version = %v", sent["engine_version"])
+	want := map[string]any{"name": "DAVE", "score": float64(12500), "device_id": "d"}
+	if len(sent) != len(want) {
+		t.Errorf("body = %v, want exactly %v", sent, want)
 	}
-	// verified must never be client-set.
-	if _, ok := sent["verified"]; ok {
-		t.Error("client must not send verified")
+	for k, v := range want {
+		if sent[k] != v {
+			t.Errorf("body[%s] = %v, want %v", k, sent[k], v)
+		}
 	}
 }
 
@@ -104,9 +102,8 @@ func TestTopQueryAndDecode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := f.last(t)
-	q := req.URL.Query()
-	if q.Get("verified") != "eq.true" || q.Get("order") != "score.desc" || q.Get("limit") != "10" {
+	q := f.last(t).URL.Query()
+	if q.Get("order") != "score.desc" || q.Get("limit") != "10" {
 		t.Errorf("query = %v", q)
 	}
 	if len(rows) != 1 || rows[0].Name != "DAVE" || rows[0].Score != 12500 {
@@ -114,41 +111,11 @@ func TestTopQueryAndDecode(t *testing.T) {
 	}
 }
 
-func TestPendingQuery(t *testing.T) {
-	client, f := testClient(t, func(*http.Request, string) (int, string) {
-		return 200, `[{"id":"a","name":"T","score":1,"verified":false}]`
-	})
-	if _, err := client.Pending(context.Background(), 50); err != nil {
-		t.Fatal(err)
-	}
-	q := f.last(t).URL.Query()
-	if q.Get("verified") != "eq.false" || q.Get("order") != "created_at.asc" {
-		t.Errorf("query = %v", q)
-	}
-}
-
-func TestSetVerifiedPatches(t *testing.T) {
-	client, f := testClient(t, func(*http.Request, string) (int, string) { return 204, "" })
-	if err := client.SetVerified(context.Background(), "abc", true); err != nil {
-		t.Fatal(err)
-	}
-	req := f.last(t)
-	if req.Method != http.MethodPatch || req.URL.Query().Get("id") != "eq.abc" {
-		t.Fatalf("%s %v", req.Method, req.URL.Query())
-	}
-	if body := f.bodies[len(f.bodies)-1]; body != `{"verified":true}` {
-		t.Errorf("patch body = %s", body)
-	}
-}
-
-func TestDelete(t *testing.T) {
-	client, f := testClient(t, func(*http.Request, string) (int, string) { return 204, "" })
-	if err := client.Delete(context.Background(), "abc"); err != nil {
-		t.Fatal(err)
-	}
-	req := f.last(t)
-	if req.Method != http.MethodDelete || req.URL.Query().Get("id") != "eq.abc" {
-		t.Fatalf("%s %v", req.Method, req.URL.Query())
+func TestTopEmpty(t *testing.T) {
+	client, _ := testClient(t, func(*http.Request, string) (int, string) { return 200, `[]` })
+	rows, err := client.Top(context.Background(), 5)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows = %+v, err = %v", rows, err)
 	}
 }
 
