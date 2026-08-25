@@ -96,11 +96,17 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("cannot set raw mode: %w", err)
 	}
+	var saveCalibration func()
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
 		os.Stdout.WriteString("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[23t\x1b[?1049l\x1b[0m\r\n")
 		os.Stdout.Sync()
 		restore()
+		// Persist input calibration on every exit path, including the
+		// signal handler's os.Exit below (defers don't run there).
+		if saveCalibration != nil {
+			saveCalibration()
+		}
 	})
 	defer cleanup()
 	go func() {
@@ -109,11 +115,18 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 		os.Exit(0)
 	}()
 
-	// Best-effort: kitty keyboard protocol (release events), alt screen,
-	// hidden cursor, window title. Unsupported terminals ignore these.
+	// Best-effort: kitty keyboard protocol, alt screen, hidden cursor,
+	// window title. Unsupported terminals ignore these. Flags 1|2|8 =
+	// disambiguate + event types + report ALL keys as escape codes, so
+	// even plain letters and space get press/repeat/release events —
+	// without them every hold relies on OS-repeat inference, whose
+	// uncalibrated grace is shorter than the ~500-600ms repeat delay, so
+	// the first hold of a key stutters (moves, dead gap, resumes) and a
+	// player who lets go during the gap never gets smooth holds at all.
+	// The leaderboard UI decodes CSI-u back to plain bytes (gameIO).
 	// The leading pop heals any mode left over by a previous run that was
 	// killed without cleanup, before we push our own entry.
-	os.Stdout.WriteString("\x1b[<u\x1b[>3u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
+	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
 
 	viewW := width
 	if viewW <= 0 {
@@ -139,7 +152,12 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 
 	// One goroutine owns fd 0 for the life of the process; gameIO routes
 	// each chunk to the game mapper or the leaderboard UI (never both).
-	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+	// Calibration (repeat delay, hold habits) persists across runs so the
+	// first hold of a session is as smooth as the last of the previous one.
+	mapper := input.NewMapper()
+	loadKeyCalibration(mapper)
+	saveCalibration = func() { saveKeyCalibration(mapper) }
+	io := newGameIO(mapper, newScoreUI(nil, nil))
 	go func() {
 		buf := make([]byte, 64)
 		for {

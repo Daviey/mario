@@ -103,3 +103,19 @@ func TestJumpRetapFiresImmediately(t *testing.T) {
 		t.Fatal("second jump tap was eaten by a stale Up hold")
 	}
 }
+
+// The reported bug: every process starts with a blank mapper, so the first
+// hold of each key stalled for the OS repeat delay — every session, forever,
+// because a player who lets go during the stall never calibrates. Learning
+// must survive a restart: the first hold of a new session plays like the
+// last hold of the previous one.
+func TestCalibrationSurvivesRestart(t *testing.T) {
+	m := NewMapper()
+	calibrateHold(m, 'd', 20)
+	next := NewMapper()
+	next.ApplyCalibration(m.Calibration())
+	next.Feed([]byte{'d'}) // first hold of the next session
+	if held := countHeldRight(next, maxHoldWindow+2); held < 18 {
+		t.Errorf("session restart re-stutters: first hold survived %d ticks, want >= 18", held)
+	}
+}
