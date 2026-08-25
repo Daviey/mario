@@ -1,0 +1,37 @@
+# Deploy the web build to GitHub Pages after a release run completes.
+# Runs from the default branch (workflow_run context) because the
+# github-pages environment's deployment protection rules reject tag refs.
+name: pages
+
+on:
+  workflow_run:
+    workflows: ['release']
+    types: [completed]
+
+permissions:
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

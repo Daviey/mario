@@ -1,6 +1,8 @@
 # On tag push (v*): test, cross-compile every platform binary, publish a
-# GitHub Release with binaries + SHA256SUMS + a web zip, and deploy the
-# static web build to GitHub Pages.
+# GitHub Release with binaries + SHA256SUMS + a web zip, and upload the
+# static web build as an artifact. Deploying it to Pages happens in
+# pages.yml (workflow_run), which runs from the default branch because
+# the github-pages environment's protection rules reject tag refs.
 name: release
 
 on:
@@ -9,20 +11,10 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
-
-# Pages deployments must not overlap.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +47,3 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist/web
-
-      - id: deployment
-        uses: actions/deploy-pages@v4
