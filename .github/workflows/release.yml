@@ -45,6 +45,7 @@ jobs:
             --generate-notes \
             --repo "$GITHUB_REPOSITORY"
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-artifact@v7
         with:
+          name: web-dist
           path: dist/web
