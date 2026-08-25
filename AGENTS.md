@@ -99,6 +99,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Sweep/property tests** iterate viewport sizes (widths 16–60, heights 4–`LevelHeight`) and camera positions; cloud tests assert non-vacuous suppression (`suppressed > 0`).
 - **Fake backends**: `fakePostgREST` (board) and injectable `submit`/`fetch` (lbui) keep unit tests offline.
 - **Live E2E**: `live_test.go` — `LIVE=1 go test -run TestLiveUISubmit -v .` drives the real UI machine against real Supabase (writes a `LIVEUI` row; delete it after via direct DB if you run it).
+- **Live seed**: `live_seed_test.go` — `LIVE=1 go test -run TestLiveSeedOneRow -v .` inserts one `SEEDCHK` row so the in-game board has content to display; remove it from the Supabase dashboard afterwards (the anon key cannot delete).
 - Visual inspection: `render/visual_test.go` dumps frames as ASCII (`-v`, skipped in `-short`); `./mario -ui-preview <mode>` prints real ANSI frames headlessly.
 - Coverage: `make cover`; no enforced threshold.
 
@@ -107,6 +108,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Worktree policy (this machine)**: agent work happens in linked worktrees (`git worktree add .worktrees/<feature> -b <branch>`, or sibling `../game-<feature>`), never in the direct checkout; copy `.env` in; merge back into `main` (expect divergence — the user commits concurrently) and re-run the full suite on merged `main` before pushing. **Hook-enforced since 2026-08-25**: `.omp/hooks/pre/worktree-guard.ts` blocks `edit`/`write` calls targeting the main checkout in every omp session here (`.worktrees/**` and sibling worktrees pass; `bash` — git merge/push — is untouched; the guard fails open on unusual shapes, so it is a guardrail, not a jail).
 - **Check `git status` before `git add -A` on the main checkout** — the user keeps WIP test files there; sweeping them up has shipped half-done tests before.
 - Ranged edits in this repo have repeatedly misfired (especially after `gofmt` renumbering); prefer read-then-full-file writes for multi-line changes, and single-line 1:1 replacements otherwise.
+- **UI trigger keys must be mapper no-ops**: any byte the input mapper doesn't know maps to `AnyKey`, which starts the game on the title screen before `scoreUI` can see it. `'l'` (leaderboard) is deliberately mapped to a no-op event in `mappedKey` — a new UI hotkey needs the same treatment (regression: `input.TestLeaderKeyIsNotAGameKey`).
 - The pixel font's missing glyphs are a *product constraint*: `[`, `_`, lowercase etc. render wrong — the name-entry field draws its own rails instead of brackets for exactly this reason.
 - `engine.Input` is a fixed bool struct; anything needing character keys (name entry) must bypass the mapper via `gameIO`'s capture routing.
 - Viewport extremes are real: `ViewH` can be 4 tiles tall; every new screen must survive the size sweeps or `TestScoreUIAllViewportSizes` fails.
