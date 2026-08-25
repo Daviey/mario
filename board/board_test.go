@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -183,5 +184,45 @@ func TestFromEnvFallsBackToDefaults(t *testing.T) {
 	c, err = FromEnv()
 	if err != nil || c.BaseURL != "https://env.supabase.co" {
 		t.Fatalf("env should win: %+v err=%v", c, err)
+	}
+}
+
+func TestSanitizeDisplayName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"DAVE", "DAVE"},
+		{"dave", "DAVE"},             // lowercased to the documented charset
+		{"A\x1b[31mX", "A31MX"},         // ESC sequence stripped
+		{"<b>x</b>", "BXB"},           // markup stripped (angle brackets dropped)
+		{"a\u202Eb", "AB"},           // bidi override stripped
+		{"123456789012", "12345678"}, // clamped to 8 runes
+		{"\x01\x02\x03", "-"},        // nothing left -> placeholder
+	}
+	for _, c := range cases {
+		if got := sanitizeDisplayName(c.in); got != c.want {
+			t.Errorf("sanitizeDisplayName(%q) = %q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Top must sanitize every fetched row: peer-stored legacy rows may violate
+// the charset the display paths assume (regression for terminal injection).
+func TestTopSanitizesNames(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("apikey")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":"11111111-1111-1111-1111-111111111111","name":"A\u001b[31mX","score":1,"device_id":"22222222-2222-2222-2222-222222222222","created_at":"2026-08-26T00:00:00Z"}]`)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "testkey")
+	rows, err := c.Top(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "A31MX" {
+		t.Fatalf("rows = %+v want sanitized name A31MX", rows)
+	}
+	if got != "testkey" {
+		t.Fatalf("apikey header = %q", got)
 	}
 }
