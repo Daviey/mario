@@ -115,6 +115,117 @@ var sprMarioSuper = []string{ // 7×13 on a 1×2-tile hitbox
 	".DD.DD.",
 }
 
+var sprMarioSmallStride = []string{ // legs spread wide
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".RBBBR.",
+	".BBBBB.",
+	"DD...DD",
+}
+
+var sprMarioSmallPass = []string{ // feet together under the body
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	"RRBBBRR",
+	".BBBBB.",
+	"..DD...",
+}
+
+var sprMarioSmallJump = []string{ // fists up, legs split mid-air
+	"..RRR..",
+	".RRRRR.",
+	"RSDSDSR",
+	".SSSSS.",
+	".RBBBB.",
+	".BB..D.",
+	".DD....",
+}
+
+var sprMarioSmallSkid = []string{ // leaning back, arm braced forward
+	".RRR...",
+	"RRRRR..",
+	"SDSDS..",
+	"SSSSS..",
+	"..RBBBR",
+	".BBBB..",
+	"DD.....",
+}
+
+var sprMarioSuperStride = []string{
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".RRRRR.",
+	".RBBBR.",
+	".RBBBR.",
+	".BBBBB.",
+	".BB.BB.",
+	"BB...BB",
+	"BB...BB",
+	".D...D.",
+	"DD...DD",
+}
+
+var sprMarioSuperPass = []string{
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".RRRRR.",
+	"RRBBBRR",
+	"RRBBBRR",
+	".BBBBB.",
+	".BBBB..",
+	".BBBB..",
+	"..BB...",
+	"..DD...",
+	"..DD...",
+}
+
+var sprMarioSuperJump = []string{
+	"..RRR..",
+	".RRRRR.",
+	"RSDSDSR",
+	".SSSSS.",
+	".RRRRR.",
+	"RRBBBRR",
+	"RRBBBBR",
+	".BBBB..",
+	".BB.D..",
+	".BB.D..",
+	".DD....",
+	".DD....",
+	".......",
+}
+
+var sprMarioSuperSkid = []string{
+	".RRR...",
+	"RRRRR..",
+	"SDSDS..",
+	"SSSSS..",
+	"RRRRR..",
+	"..RBBBR",
+	"..RBBBR",
+	".BBBB..",
+	".BBB...",
+	".BBB...",
+	".BB....",
+	"DD.....",
+	"DD.....",
+}
+
+// Mario walk cycles, indexed by distance travelled (see WalkFrameLen):
+// contact (the stand pose), wide stride, passing. All face RIGHT.
+var (
+	marioSmallWalk = [][]string{sprMarioSmall, sprMarioSmallStride, sprMarioSmallPass}
+	marioSuperWalk = [][]string{sprMarioSuper, sprMarioSuperStride, sprMarioSuperPass}
+)
+
 var sprGoomba = []string{ // 7×6 on a 0.9×0.9 hitbox
 	"..nnn..",
 	".nnnnn.",

@@ -28,6 +28,7 @@ const (
 	Friction        = 0.010
 	AirFactor       = 0.85
 	CoyoteTicks     = 5
+	WalkFrameLen    = 0.55 // tiles travelled per walk-cycle animation frame
 	JumpBufferTicks = 5
 
 	EnemyWalk           = 0.030
@@ -54,7 +55,9 @@ type Player struct {
 	Facing     int // 1 right, -1 left
 	Grounded   bool
 	Super      bool
-	Invincible int // post-hit invincibility ticks
+	Invincible int     // post-hit invincibility ticks
+	WalkDist   float64 // ground distance travelled, drives the leg cycle
+	Skidding   bool    // turning against horizontal motion while grounded
 
 	groundTimer int // ticks since last grounded (coyote time)
 	jumpBuffer  int // ticks a jump press remains queued

@@ -40,11 +40,18 @@ func (g *Game) updatePlayer(in Input) {
 			}
 		}
 	}
+	// Turning against ground motion reads as a skid to the renderer.
+	p.Skidding = p.Grounded && dir != 0 &&
+		((dir > 0 && p.Vel.X < -0.01) || (dir < 0 && p.Vel.X > 0.01))
 	if p.Vel.X > maxV {
 		p.Vel.X = maxV
 	}
 	if p.Vel.X < -maxV {
 		p.Vel.X = -maxV
+	}
+	// Leg cycle advances with distance covered on the ground.
+	if p.Grounded {
+		p.WalkDist += math.Abs(p.Vel.X)
 	}
 
 	// Jumping: edge detection, jump buffer and coyote time.
