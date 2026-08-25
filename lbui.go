@@ -37,6 +37,7 @@ type scoreUI struct {
 	asked   bool // asked about this game-over already
 	quit    bool
 	done    bool // submitted or declined: don't re-ask
+	restart bool // board 'r': close the board and play again
 
 	submit func(e board.Entry) error
 	fetch  func() ([]board.Row, error)
@@ -101,6 +102,16 @@ func (u *scoreUI) quitRequested() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.quit
+}
+
+// takeRestart reports and clears a pending restart request from the
+// board screen ('r'): consumed as a single edge, like a mapped key press.
+func (u *scoreUI) takeRestart() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	r := u.restart
+	u.restart = false
+	return r
 }
 
 // showBoard switches to the board screen and starts a fetch.
@@ -231,11 +242,19 @@ func (u *scoreUI) keyLocked(b byte) {
 			}
 		}
 	case render.UIBoard:
-		if b == 'q' || b == 'Q' || b == 'l' || b == 'L' || b == 0x1b {
+		switch {
+		case b == 'q' || b == 'Q' || b == 'l' || b == 'L' || b == 0x1b:
 			u.mode = render.UIOff
 			if u.done {
 				u.quit = true // submitted/declined: game is over anyway
 			}
+		case b == 'r' || b == 'R':
+			// Close and play again. Clearing the once-per-run flags lets
+			// the next game over offer submission again.
+			u.mode = render.UIOff
+			u.asked = false
+			u.done = false
+			u.restart = true
 		}
 	}
 }

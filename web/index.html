@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>SUPER CLI MARIO</title>
 <style>
   :root { color-scheme: dark; }
@@ -14,9 +14,14 @@
     overflow: hidden;
     font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   }
+  body { touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; user-select: none; }
+  @supports (height: 100dvh) { body { height: 100dvh; position: fixed; inset: 0; width: 100%; } }
   #bar {
     flex: 0 0 auto;
     padding: 6px 16px;
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
     background: #0a1c6e; color: #fff;
     font-weight: 700; letter-spacing: 2px;
     display: flex; justify-content: space-between; align-items: baseline;
@@ -32,6 +37,9 @@
   #note {
     flex: 0 0 auto;
     padding: 4px 16px; font-size: 12px; color: #6d7a99;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
     background: #071330; text-align: center;
   }
   #note a { color: #9fb6d9; }
@@ -39,6 +47,7 @@
      art, palette and the 3×5 font are ports of render/*.go, so the
      loader and the title screen read as one continuous world. ---- */
   #stage { position: relative; }
+  #stage { touch-action: none; }
   #loader {
     position: absolute; inset: 0; z-index: 5;
     display: flex; flex-direction: column; align-items: center;
@@ -62,6 +71,7 @@
     pointer-events: none;
   }
   #board.off { display: none; }
+  #board.on-touch { pointer-events: auto; touch-action: pan-y; overflow-y: auto; }
   #board h3 { color:#FFF3B0; letter-spacing:.35em; font-size:15px; margin:0 0 14px; font-weight:700; }
   #board p { margin:4px 0; color:#fff; font-size:14px; }
   #board .gold { color:#FFF3B0; }
@@ -76,6 +86,33 @@
   #board tr.mine td { color: #FFF3B0; font-weight: 700; }
   @keyframes ui-blink { 50% { opacity: 0; } }
   #board .blink { animation: ui-blink 1.2s steps(1) infinite; }
+
+  /* ---- touch pad: gamepad and entry mode overlays ---- */
+  #pad {
+    display: none; flex: 0 0 auto;
+    padding: 10px max(14px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right));
+    background: #071330; border-top: 2px solid #1a2c55; touch-action: none;
+    align-items: center; justify-content: space-between;
+  }
+  body.touch #pad { display: flex; }
+  #pad .grp { display: flex; gap: 8px; align-items: center; }
+  .pbtn {
+    appearance: none; border: 1px solid #2a4a9e; background: #0a1c6e; color: #fff;
+    border-radius: 12px; font-weight: 700; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    width: 48px; height: 48px; touch-action: none; -webkit-touch-callout: none;
+  }
+  .pbtn.held, .pbtn:active { background: #1a3aa0; }
+  #pad .act-btn { width: 64px; height: 64px; font-size: 20px; border-radius: 50%; }
+  #pad .act-grp { gap: 12px; }
+  #pad .mid-btn { width: auto; min-width: 54px; height: 38px; font-size: 13px; border-radius: 8px; padding: 0 10px; }
+
+  #pad.ask, #pad.entry, #pad.board { justify-content: center; flex-wrap: wrap; }
+  #pad .btn-yes, #pad .btn-no { width: 140px; height: 64px; font-size: 20px; }
+  #pad.keypad { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 12px; width: 100%; max-width: 500px; margin: 0 auto; }
+  #pad.keypad .pbtn { width: 100%; height: 44px; border-radius: 8px; font-size: 15px; }
+  #pad.keypad .ok { grid-column: span 2; background: #E4221B; border-color: #f75550; }
+  #pad.keypad .ok.held, #pad.keypad .ok:active { background: #b21813; }
 </style>
 </head>
 <body>
@@ -94,6 +131,7 @@
   </div>
   <div id="board" class="off"></div>
 </div>
+<div id="pad"></div>
 <div id="note">click the game to focus · <a href="#" onclick="location.reload(); return false">restart</a></div>
 
 <!-- All asset paths are RELATIVE so the site works under a GitHub Pages
@@ -328,17 +366,24 @@
   const escHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const pad = (n, w) => String(n).padStart(w, '0');
+  const IS_TOUCH = () => document.body.classList.contains('touch');
   window.marioBoard = (json) => {
     let st;
     try { st = JSON.parse(json); } catch { return; }
-    if (!st || st.mode === 'off') { boardEl.classList.add('off'); return; }
+    if (!st || st.mode === 'off') {
+      boardEl.classList.remove('on-touch'); boardEl.classList.add('off');
+      if (window.setPadMode) window.setPadMode('game');
+      return;
+    }
     boardEl.classList.remove('off');
+    if (IS_TOUCH()) boardEl.classList.add('on-touch');
+    if (window.setPadMode) window.setPadMode(st.mode);
     let html = '';
     if (st.mode === 'ask') {
       html = '<h3>GAME OVER</h3>'
         + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
         + '<p class="gold blink">SUBMIT TO LEADERBOARD?</p>'
-        + '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>';
+        + (IS_TOUCH() ? '' : '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>');
     } else if (st.mode === 'entry') {
       const name = escHtml(st.name || '');
       const padN = '&nbsp;'.repeat(Math.max(0, 9 - name.length));
@@ -346,7 +391,7 @@
         + '<p class="score">SCORE ' + pad(st.score, 6) + '</p>'
         + '<p class="gold">ENTER NAME</p>'
         + '<p class="field">[' + name + '<span class="blink">_</span>' + padN + ']</p>'
-        + '<p class="hint">ENTER OK&nbsp;&nbsp;&nbsp;BS DEL&nbsp;&nbsp;&nbsp;ESC BACK</p>';
+        + (IS_TOUCH() ? '<p class="hint">TAP LETTERS BELOW</p>' : '<p class="hint">ENTER OK&nbsp;&nbsp;&nbsp;BS DEL&nbsp;&nbsp;&nbsp;ESC BACK</p>');
     } else { // board
       let body;
       if (st.loading) body = '<p class="blink">LOADING...</p>';
@@ -356,8 +401,8 @@
         + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + r.score + '</td></tr>').join('') + '</table>';
       const foot = st.status
         ? '<p class="gold">' + escHtml(st.status) + '</p>'
-        : (st.title ? '<p class="hint blink">L CLOSE</p>'
-                    : '<p class="hint blink">R RESTART&nbsp;&nbsp;&nbsp;Q QUIT</p>');
+        : (st.title ? (IS_TOUCH() ? '' : '<p class="hint blink">L CLOSE</p>')
+                    : (IS_TOUCH() ? '' : '<p class="hint blink">R RESTART&nbsp;&nbsp;&nbsp;Q QUIT</p>'));
       html = '<h3>LEADERBOARD</h3>' + body + foot;
     }
     boardEl.innerHTML = html;
@@ -379,7 +424,7 @@
     while (k > 1 && Math.floor(availW / (k * PIX)) < 16) k--;
     const tilesW = Math.max(16, Math.min(MAXW_T, Math.floor(availW / (k * PIX))));
     const pxW = tilesW * PIX, pxH = HUD + tilesH * PIX + STATUS;
-    window.marioSize(pxW, pxH);
+    if (window.marioSize) window.marioSize(pxW, pxH);
     canvas.style.width = (pxW * k / dpr) + 'px';
     canvas.style.height = (pxH * k / dpr) + 'px';
   };
@@ -410,6 +455,50 @@
     if (e.key.length === 1) window.marioFeed(release(e.code, e.key));
     else if (RELEASE[e.code]) window.marioFeed(RELEASE[e.code]);
   });
+
+  // Touch controls
+  const padEl = document.getElementById('pad');
+  padEl.innerHTML = `<div id="pad-game" style="display:contents">
+    <div class="grp"><button class="pbtn" data-key="a">◀</button><button class="pbtn" data-key="s">▼</button><button class="pbtn" data-key="d">▶</button></div>
+    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="\\r">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button></div>
+    <div class="grp act-grp"><button class="pbtn act-btn" data-key="x">B</button><button class="pbtn act-btn" data-key="w">A</button></div>
+  </div>
+  <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
+  <div id="pad-board" style="display:none; gap:16px"><button class="pbtn btn-no" data-tap="l">CLOSE</button><button class="pbtn btn-yes" data-tap="r">RESTART</button></div>
+  <div id="pad-entry" style="display:none"></div>`;
+  const padViews = { game: document.getElementById('pad-game'), ask: document.getElementById('pad-ask'), board: document.getElementById('pad-board'), entry: document.getElementById('pad-entry') };
+  window.setPadMode = (m) => {
+    padEl.className = m === 'entry' ? 'keypad' : m;
+    for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' ? 'contents' : (m === 'entry' ? 'grid' : 'flex')) : 'none';
+  };
+  
+  const kbd = 'QWERTYUIOPASDFGHJKLZXCVBNM1234567890.-'.split('');
+  kbd.forEach(c => { const b = document.createElement('button'); b.className = 'pbtn'; b.textContent = c; b.dataset.tap = c; padViews.entry.appendChild(b); });
+  const bs = document.createElement('button'); bs.className = 'pbtn'; bs.textContent = '⌫'; bs.dataset.tap = '\x7f'; padViews.entry.appendChild(bs);
+  const ok = document.createElement('button'); ok.className = 'pbtn ok'; ok.textContent = 'OK'; ok.dataset.tap = '\r'; padViews.entry.appendChild(ok);
+  const esc = document.createElement('button'); esc.className = 'pbtn'; esc.textContent = 'ESC'; esc.dataset.tap = '\x1b'; padViews.entry.appendChild(esc);
+
+  const bindPad = (b) => {
+    b.addEventListener('contextmenu', e => e.preventDefault());
+    const k = b.dataset.key;
+    if (k) {
+      const up = () => { if (!b.classList.contains('held')) return; b.classList.remove('held'); if (window.marioFeed) window.marioFeed(release(k, k)); };
+      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (window.marioFeed) window.marioFeed(PRESS[k] || k); });
+      b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+    }
+    const t = b.dataset.tap;
+    if (t) b.addEventListener('pointerdown', e => { e.preventDefault(); if (window.marioFeed) window.marioFeed(t); b.classList.add('held'); setTimeout(()=>b.classList.remove('held'), 80); });
+  };
+  padEl.querySelectorAll('.pbtn').forEach(bindPad);
+
+  const enableTouch = () => {
+    if (document.body.classList.contains('touch')) return;
+    document.body.classList.add('touch');
+    document.getElementById('note').innerHTML = 'tap START to play · <a href="#" onclick="location.reload(); return false">restart</a>';
+    sizeViewport();
+  };
+  if (matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch')) enableTouch();
+  window.addEventListener('touchstart', enableTouch, {once: true, passive: true});
 
   // Start the game module; main() runs its own 60 Hz loop. mario.wasm is
   // a few MB, so fetch it manually for real byte progress, then
@@ -456,6 +545,8 @@
   }
   sizeViewport();
   window.addEventListener('resize', () => setTimeout(sizeViewport, 100));
+  if (window.visualViewport) visualViewport.addEventListener('resize', () => setTimeout(sizeViewport, 100));
+  document.addEventListener('gesturestart', e => e.preventDefault());
   document.body.addEventListener('click', () => window.focus());
 })();
 </script>
