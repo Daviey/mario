@@ -125,9 +125,10 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	if viewW > 60 {
 		viewW = 60
 	}
-	// Fill the terminal vertically too: rows minus HUD/status, two pixel
-	// rows per tile. A taller window shows more sky/world, same sprite size.
-	viewH := (termHeight() - 2) / 2
+	// Fill the terminal vertically too: rows minus HUD/status, Pix/2
+	// terminal rows per tile. A taller window shows more sky/world, same
+	// sprite size.
+	viewH := (termHeight() - 2) * 2 / render.Pix
 	if viewH < 4 {
 		viewH = 4
 	}

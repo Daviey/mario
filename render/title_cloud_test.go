@@ -18,8 +18,8 @@ func sentinelCloudPal() *Palette {
 // (independently of titleTextEls) as x0,y0,x1,y1 pixel rects: MARIO logo,
 // SUPER CLI subtitle, PRESS ANY KEY blink, L LEADERBOARD hint.
 func titleBands(f *Frame) [][4]int {
-	groundTop := f.H - 2*Pix
-	castY := groundTop - 10
+	castY := titleCastY(f)
+	castH := 2 * sprH(sprMarioSmall)
 	var bands [][4]int
 	add := func(s string, y, scale int) {
 		w := textWidthPx(s, scale)
@@ -37,8 +37,8 @@ func titleBands(f *Frame) [][4]int {
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1)
 		}
 	}
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+11, f.H-5), 1)
-	if hintY := castY + 17; hintY+5 <= f.H-5 {
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1)
+	if hintY := castY + castH + 7; hintY+5 <= f.H-5 {
 		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1)
 	}
 	return bands
