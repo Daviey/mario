@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"syscall/js"
 
 	"mario/engine"
@@ -19,12 +20,15 @@ import (
 //
 //	window.marioFrame(w, h int, rgb []byte)
 //	                            - set BEFORE instantiation; receives each
-//	                            frame as tight RGB (w*h*3).
+//	                              frame as tight RGB (w*h*3).
 //	marioFeed(string)          - exported here; the page sends xterm/kitty
-//	                            style key sequences (press and release).
+//	                              style key sequences (press and release).
 //	marioSize(worldPxW, worldPxH)
 //	                            - exported here; sizes the game viewport in
-//	                            world pixels (tiles = px/4).
+//	                              world pixels (tiles = px/4).
+//	marioBoard(json string)    - called by the game on leaderboard UI
+//	                              changes; the page renders it as DOM text
+//	                              ({"mode":"off"} hides the panel).
 
 // jsRGB pushes frame pixels into a page-owned Uint8Array and hands it to
 // marioFrame, minimizing per-frame allocations.
@@ -74,15 +78,31 @@ func main() {
 	}))
 
 	pal := render.NewPalette(true)
-	draw := func(ui *render.ScoreUI) { jsFrameSink.deliver(render.RenderPixels(g, pal, ui)) }
-	draw(nil) // first frame
+	// The canvas always shows the world; leaderboard screens go to the
+	// page as JSON and render as real DOM text (window.marioBoard).
+	board := js.Global().Get("marioBoard")
+	lastBoard := ""
+	pushBoard := func(ui *render.ScoreUI) {
+		if ui == nil {
+			ui = &render.ScoreUI{}
+		}
+		if b, err := json.Marshal(ui); err == nil && string(b) != lastBoard {
+			lastBoard = string(b)
+			board.Invoke(string(b))
+		}
+	}
+	draw := func() { jsFrameSink.deliver(render.RenderPixels(g, pal)) }
+	draw()
+	pushBoard(nil)
 
 	ticker := newTicker(engine.TicksPerSecond)
 	for {
 		ticker.wait()
 		in := io.poll()
 		g.Update(in)
-		draw(io.uiTick(g))
+		ui := io.uiTick(g)
+		draw()
+		pushBoard(ui)
 		if in.Quit || io.quitRequested() {
 			break
 		}

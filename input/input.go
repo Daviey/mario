@@ -422,6 +422,12 @@ func mappedKey(code int) (keyEvent, bool) {
 		return keyEvent{special: spRestart}, true
 	case '\r', '\n':
 		return keyEvent{special: spAny}, true
+	case 'l', 'L':
+		// Leaderboard key: a UI trigger (title screen 'l' opens the
+		// board via scoreUI.note). Deliberately a mapped no-op so its
+		// AnyKey edge can never start the game — gameio routes the raw
+		// byte to the UI before the mapper sees it.
+		return keyEvent{}, true
 	}
 	return keyEvent{special: spAny}, true
 }

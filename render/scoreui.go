@@ -1,11 +1,13 @@
 package render
 
-// In-game leaderboard UI: submit prompt, name entry and the score board,
-// drawn with the 3x5 pixel font over the world frame (title backdrop or
-// game-over backdrop). Pure function of the ScoreUI snapshot.
+// In-game leaderboard UI as real text. The screens replace the world with
+// terminal-font text cells (native build — same layer as the HUD row) or a
+// DOM panel (browser build — the page renders the JSON snapshot). Pure
+// function of the ScoreUI snapshot and the game tick (blink).
 
 import (
 	"fmt"
+	"strings"
 )
 
 // UIMode is which leaderboard screen (if any) is showing.
@@ -22,23 +24,42 @@ const (
 	UIBoard
 )
 
+// String names the mode for logs and the JSON bridge.
+func (m UIMode) String() string {
+	switch m {
+	case UIAsk:
+		return "ask"
+	case UIEntry:
+		return "entry"
+	case UIBoard:
+		return "board"
+	}
+	return "off"
+}
+
+// MarshalJSON encodes the mode as its name so the page can switch on it.
+func (m UIMode) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + m.String() + `"`), nil
+}
+
 // ScoreRow is one leaderboard entry.
 type ScoreRow struct {
-	Rank  int
-	Name  string
-	Score int
-	Mine  bool
+	Rank  int    `json:"rank"`
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+	Mine  bool   `json:"mine"`
 }
 
 // ScoreUI is an immutable snapshot of the leaderboard UI state.
 type ScoreUI struct {
-	Mode     UIMode
-	Score    int // score being submitted (ask/entry)
-	Name     string
-	CursorOn bool // blinking cursor block (entry)
-	Rows     []ScoreRow
-	Loading  bool
-	Status   string // e.g. "SUBMITTED!" or an error line (board)
+	Mode     UIMode     `json:"mode"`
+	Score    int        `json:"score"` // score being submitted (ask/entry)
+	Name     string     `json:"name"`
+	CursorOn bool       `json:"cursorOn"` // blinking cursor (entry)
+	Rows     []ScoreRow `json:"rows"`
+	Loading  bool       `json:"loading"`
+	Status   string     `json:"status"` // e.g. "SUBMITTED!" or an error line
+	Title    bool       `json:"title"`  // opened from the title screen
 }
 
 // firstUI returns the first optional UI snapshot or nil.
@@ -49,102 +70,117 @@ func firstUI(ui []*ScoreUI) *ScoreUI {
 	return nil
 }
 
-// drawScoreUIPx draws the active leaderboard UI. onTitle selects the title
-// layout (board floats between logo and cast); otherwise the game-over /
-// win layout (centered block).
-func drawScoreUIPx(f *Frame, ui *ScoreUI, p *Palette, onTitle bool, tick int) {
+const (
+	nameFieldW   = 8  // max name chars, mirrors lbui maxNameLen
+	boardMaxRows = 10 // the board shows the top ten
+)
+
+// blinkVisible reports whether blinking lines draw this tick (same cadence
+// as the pixel UI: ~0.7s on, ~0.3s off at 60 Hz).
+func blinkVisible(tick int) bool { return tick%40 < 28 }
+
+// drawScoreUIText paints the active leaderboard screen as real text cells
+// over a dark background, replacing the world rows of the screen (rows
+// 1..H-2; row 0 is the HUD, the last row the status line).
+func drawScoreUIText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
+	for y := 1; y < s.H-1; y++ {
+		for x := 0; x < s.W; x++ {
+			s.SetStyled(x, y, ' ', p.White, p.Dark, false)
+		}
+	}
 	switch ui.Mode {
 	case UIAsk:
-		// Bottom-anchored block: banner, then a dark panel with the lines
-		// the caller draws at fixed offsets (panel is backing only, so
-		// every screen size lays out identically).
-		y0 := f.H - 32
-		drawBannerPx(f, y0, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
-		drawPanelPx(f, p, y0+9, 23)
-		drawCenterPx(f, y0+13, fmt.Sprintf("SCORE %d", ui.Score), p.White, 1)
-		if tick%40 < 28 {
-			drawCenterPx(f, y0+20, "SUBMIT SCORE?", p.GoldLight, 1)
-		}
-		drawCenterPx(f, y0+27, "Y YES   N NO", p.White, 1)
+		drawCenteredBlock(s, p.Dark, tick, []uiLine{
+			{"GAME OVER", p.White, true, false},
+			{fmt.Sprintf("SCORE %06d", ui.Score), p.White, false, false},
+			{"", p.White, false, false},
+			{"SUBMIT TO LEADERBOARD?", p.GoldLight, false, true},
+			{"Y YES   N NO", p.White, false, false},
+		})
 	case UIEntry:
-		y0 := f.H - 40
-		drawBannerPx(f, y0, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
-		drawPanelPx(f, p, y0+9, 31)
-		drawCenterPx(f, y0+13, fmt.Sprintf("SCORE %d", ui.Score), p.White, 1)
-		drawCenterPx(f, y0+20, "ENTER NAME", p.GoldLight, 1)
-		// The font has no bracket glyphs, so the name field is drawn as
-		// gold rails flanking the text, with the cursor just after it.
-		nameY := y0 + 27
-		nw := textWidthPx(ui.Name, 1)
-		x := (f.W - nw) / 2
-		drawTextPx(f, x, nameY, ui.Name, p.White, 1)
-		f.Fill(x-4, nameY, 1, 5, p.GoldLight)
-		f.Fill(x+nw+6, nameY, 1, 5, p.GoldLight)
-		if ui.CursorOn {
-			f.Fill(x+nw+1, nameY, 2, 5, p.GoldLight)
-		}
-		drawCenterPx(f, y0+34, "ENTER OK  BS DEL", p.White, 1)
+		drawCenteredBlock(s, p.Dark, tick, []uiLine{
+			{"GAME OVER", p.White, true, false},
+			{fmt.Sprintf("SCORE %06d", ui.Score), p.White, false, false},
+			{"", p.White, false, false},
+			{"ENTER NAME", p.GoldLight, false, false},
+			{nameField(ui.Name, ui.CursorOn), p.White, false, false},
+			{"ENTER OK   BS DEL   ESC BACK", p.White, false, false},
+		})
 	case UIBoard:
-		drawBoardPx(f, ui, p, onTitle, tick)
+		drawBoardText(s, ui, p, tick)
 	}
 }
 
-// drawPanelPx paints a dark backing band; text lines are drawn by the
-// caller at 7px pitch so special rows (name field, blink) share one
-// coordinate source.
-func drawPanelPx(f *Frame, p *Palette, y, h int) {
-	pw := max(textWidthPx("SUBMIT SCORE?", 1), textWidthPx("ENTER OK  BS DEL", 1))
-	if pw > f.W-4 {
-		pw = f.W - 4
-	}
-	x := (f.W - pw) / 2
-	f.Fill(x-2, y, pw+4, h, p.Dark)
+// uiLine is one line of a centered text block.
+type uiLine struct {
+	text  string
+	fg    Color
+	bold  bool
+	blink bool
 }
 
-func drawBoardPx(f *Frame, ui *ScoreUI, p *Palette, onTitle bool, tick int) {
-	top := 4
-	if onTitle {
-		// Below the header, above the cast sprites (castY = f.H-18).
-		top = 6
-	}
-	if !ui.Loading && len(ui.Rows) > 0 {
-		// Solid band from just above the header through the last row:
-		// sprites and clouds must never bleed through board text.
-		fit := max(0, (f.H-20-(top+8))/7)
-		f.Fill(0, top-1, f.W, fit*7+10, p.Dark)
-		drawCenterPx(f, top, "LEADERBOARD", p.GoldLight, 1)
-	} else {
-		drawCenterShadowPx(f, top, "LEADERBOARD", p.GoldLight, 1, p.Dark)
-	}
-	if ui.Loading {
-		if tick%40 < 28 {
-			drawCenterShadowPx(f, top+8, "LOADING", p.White, 1, p.Dark)
+// drawCenteredBlock vertically centers a block of lines on the world rows.
+func drawCenteredBlock(s *Screen, bg Color, tick int, lines []uiLine) {
+	top := 1 + max(0, (s.H-2-len(lines))/2)
+	for i, ln := range lines {
+		if ln.blink && !blinkVisible(tick) {
+			continue
 		}
-		return
+		s.Center(top+i, ln.text, ln.fg, bg, ln.bold)
 	}
-	if len(ui.Rows) == 0 {
-		drawCenterShadowPx(f, top+8, "NO SCORES YET", p.White, 1, p.Dark)
-	} else {
-		// Rows run from top+8 down to the footer at f.H-6.
-		fit := max(0, (f.H-20-(top+8))/7)
-		for i, r := range ui.Rows {
-			if i >= fit {
-				break
-			}
-			c := p.White
-			if r.Mine {
-				c = p.GoldLight
-			}
-			drawCenterPx(f, top+8+i*7, fmt.Sprintf("%d %s %d", r.Rank, r.Name, r.Score), c, 1)
+}
+
+// nameField renders "[ DAVE_    ]" — a constant-width field so the layout
+// never jitters while typing; the cursor is a blinking underscore.
+func nameField(name string, cursor bool) string {
+	inner := name
+	if cursor {
+		inner += "_"
+	}
+	return "[" + inner + strings.Repeat(" ", max(0, nameFieldW+1-len(inner))) + "]"
+}
+
+// drawBoardText paints the leaderboard table: header, up to ten rows,
+// status/footer. Rows clamp on very short viewports instead of spilling
+// into the HUD or status lines.
+func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
+	bg := p.Dark
+	s.Center(1, "LEADERBOARD", p.GoldLight, bg, true)
+	footY := s.H - 2
+	bodyY := 3
+	switch {
+	case ui.Loading:
+		if blinkVisible(tick) {
+			s.Center(bodyY, "LOADING...", p.White, bg, false)
+		}
+	case len(ui.Rows) == 0:
+		s.Center(bodyY, "NO SCORES YET", p.White, bg, false)
+	default:
+		lastRow := footY - 2 // keep a blank row above the footer
+		n := min(len(ui.Rows), boardMaxRows, max(0, lastRow-bodyY+1))
+		for i := range n {
+			r := ui.Rows[i]
+			s.Center(bodyY+i, fmt.Sprintf("%2d  %-8s %6d", r.Rank, r.Name, r.Score),
+				rowColor(r.Mine, p), bg, r.Mine)
 		}
 	}
-	if ui.Status != "" {
-		drawCenterShadowPx(f, f.H-6, ui.Status, p.GoldLight, 1, p.Dark)
-	} else if onTitle {
-		if tick%40 < 28 {
-			drawCenterShadowPx(f, f.H-6, "L CLOSE", p.White, 1, p.Dark)
+	switch {
+	case ui.Status != "":
+		s.Center(footY, ui.Status, p.GoldLight, bg, false)
+	case ui.Title:
+		if blinkVisible(tick) {
+			s.Center(footY, "L CLOSE", p.White, bg, false)
 		}
-	} else if tick%40 < 28 {
-		drawCenterShadowPx(f, f.H-6, "R RESTART   Q QUIT", p.White, 1, p.Dark)
+	default:
+		if blinkVisible(tick) {
+			s.Center(footY, "R RESTART   Q QUIT", p.White, bg, false)
+		}
 	}
+}
+
+func rowColor(mine bool, p *Palette) Color {
+	if mine {
+		return p.GoldLight
+	}
+	return p.White
 }

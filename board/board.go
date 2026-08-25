@@ -30,9 +30,23 @@ func New(baseURL, key string) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Key: key, HTTP: http.DefaultClient}
 }
 
-// FromEnv builds a client from SUPABASE_URL and SUPABASE_KEY.
+// DefaultURL/DefaultKey are the build-time embedded project URL and
+// publishable key, injected via -ldflags -X (see the Makefile web target).
+// The publishable key is safe to embed — RLS limits it to anon insert +
+// public read. They exist so the WASM build, which has no environment
+// variables, can still reach the leaderboard; real env vars always win.
+var DefaultURL, DefaultKey string
+
+// FromEnv builds a client from SUPABASE_URL and SUPABASE_KEY, falling
+// back to the embedded build-time defaults when the variables are unset.
 func FromEnv() (*Client, error) {
 	u, k := os.Getenv("SUPABASE_URL"), os.Getenv("SUPABASE_KEY")
+	if u == "" {
+		u = DefaultURL
+	}
+	if k == "" {
+		k = DefaultKey
+	}
 	if u == "" || k == "" {
 		return nil, fmt.Errorf("SUPABASE_URL and SUPABASE_KEY must be set (see .env)")
 	}

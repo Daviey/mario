@@ -55,7 +55,7 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 		for _, viewH := range []int{7, 9, 12, 15} {
 			for _, lv := range engine.DefaultLevels() {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH) // starts on title
-				f := worldFrame(g, pal, nil)
+				f := worldFrame(g, pal)
 				bands := titleBands(f)
 				if len(bands) == 0 {
 					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)

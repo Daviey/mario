@@ -11,6 +11,7 @@ import (
 
 	"mario/board"
 	"mario/engine"
+	"mario/input"
 	"mario/render"
 )
 
@@ -306,4 +307,29 @@ func TestSnapshotFields(t *testing.T) {
 	if !snap.CursorOn {
 		t.Fatal("cursor should blink on early in the window")
 	}
+}
+
+func TestTitleLOpensBoardOffline(t *testing.T) {
+	// Integration through gameIO: 'l' on the title screen opens the board
+	// (OFFLINE without credentials) and never starts the game.
+	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+	io.feed([]byte("l"))
+	for range 3 {
+		g.Update(io.poll())
+		ui := io.uiTick(g)
+		if ui != nil && ui.Mode == render.UIBoard {
+			if g.State != engine.StateTitle {
+				t.Fatalf("game left title: %v", g.State)
+			}
+			if ui.Loading {
+				t.Error("offline board stuck LOADING")
+			}
+			if ui.Status != "OFFLINE" {
+				t.Errorf("status = %q, want OFFLINE", ui.Status)
+			}
+			return
+		}
+	}
+	t.Fatal("'l' never opened the board")
 }

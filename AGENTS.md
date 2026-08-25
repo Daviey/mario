@@ -22,7 +22,7 @@ stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ scoreUI.key
 - **Spine**: `play()` in `main.go` owns the 60 Hz `time.Ticker`; shared by native and WASM entries.
 - **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes never reach `input.Mapper` — typing `r` in name entry cannot restart the game (`gameio.go`).
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StatePlaying ↔ StateDying/StateLevelClear → StateGameOver/StateWin`. Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go`.
-- **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw`/`RenderPixels` take an optional `*ScoreUI` variadic that switches the overlay to leaderboard screens.
+- **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw` take an optional `*ScoreUI` that swaps the world for the leaderboard screens, drawn as **real text cells** (not the pixel font); the browser build receives the same snapshot as JSON (`marioBoard`) and renders a DOM panel.
 - **Leaderboard** (`lbui.go`, `board/`): `scoreUI` state machine (`UIOff/UIAsk/UIEntry/UIBoard`) driven by `tick(g)`; network runs off the tick loop via injectable `submit`/`fetch` funcs (nil → real `board.Client` from env). `board.Client` is a thin PostgREST wrapper (`Submit`, `Top`); RLS allows anon insert + public read only.
 - **Platform split** by build tags: `term_unix.go` (`!windows`), `term_windows.go` (`windows`), `wasm.go` (`js`).
 
@@ -48,7 +48,7 @@ make cover / vet / fmt / fmtcheck
 make run          # build + run
 make demo         # ./mario -demo (headless scripted run)
 make release      # cross-compile linux/amd64+arm64, darwin/amd64+arm64, windows/amd64 → dist/
-make web          # GOOS=js GOARCH=wasm → dist/web/ (mario.wasm + index.html + wasm_exec.js)
+make web          # GOOS=js GOARCH=wasm → dist/web/ (embeds Supabase URL/publishable key from env or .env)
 make web-serve    # serve dist/web at http://127.0.0.1:8417/
 
 CGO_ENABLED=0 go test -run TestGameOverAutoAsksAndSubmits -v .   # single test
@@ -65,7 +65,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Determinism is load-bearing.** No `math/rand`, no `time.Now()` in engine or render logic; blink/pulse effects key off `g.Tick`.
 - **Purity split**: `engine.Update` mutates state; `render.*` is a pure function of state (no I/O, no clocks). UI/network side effects live in `lbui.go` behind injectable funcs.
 - **Error handling**: gameplay never fails on leaderboard errors — submit/fetch failures degrade to `OFFLINE` status strings; `maybeSubmit`-style flows swallow config errors and stay silent.
-- **Arcade-string constraint**: all in-game UI text renders through the 3×5 pixel font — glyphs exist for `A-Z 0-9 space . - + / : ! ?` only. Uppercase everything; no `_`, no lowercase; long lines ladder down via `pickTextPx(candidates, maxW)`.
+- **Arcade-string constraint** (world/HUD overlays only — the leaderboard screens are real text now): anything drawn through the 3×5 pixel font may use `A-Z 0-9 space . - + / : ! ?` only. Uppercase everything; no `_`, no lowercase; long lines ladder down via `pickTextPx(candidates, maxW)`.
 - **Names**: max 8 chars, charset `A-Z0-9 . -` (enforced by `sanitizeName` in `player.go` AND by a DB CHECK — keep them in sync).
 - **Go 1.22 style**: `for i := range n` (project rule); errors wrapped with `%w`; table-driven tests.
 - **Layout invariants**: title screen text positions come from `titleTextEls` (single source of truth); clouds must never paint a pixel inside a title text band (`cloudBlocked` does pixel-level suppression).
@@ -76,10 +76,10 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 
 - `main.go` — package doc (controls, flags), shared `play()` loop, `runDemo` + `scriptInput` (the deterministic demo script used by tests and `-ui-preview`)
 - `native.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
-- `wasm.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)` before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
+- `wasm.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)` and `marioBoard(json)` (leaderboard DOM text) before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
 - `gameio.go` — the one-keyboard-one-owner input router
 - `lbui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
-- `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`), `LoadDotEnv`
+- `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`, falling back to build-time `DefaultURL`/`DefaultKey` embedded by `make web` so the WASM build can reach the board), `LoadDotEnv`
 - `supabase/migrations/20260825000000_scores.sql` — live table schema; apply changes here AND to the live DB
 - `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_KEY` (publishable key — safe to embed), `SUPABASE_DB_PASSWORD`
 

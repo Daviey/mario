@@ -17,9 +17,11 @@ const (
 
 // RenderPixels renders a complete frame — HUD band, world, status band —
 // as a raw square-pixel grid for direct canvas painting (browser build).
+// The leaderboard UI is NOT rasterized: the browser renders it as DOM
+// text (see wasm.go's marioBoard bridge).
 // Width is ViewW*Pix; height HudBandPx + ViewH*Pix + StatusBandPx.
-func RenderPixels(g *engine.Game, p *Palette, ui ...*ScoreUI) *Frame {
-	world := worldFrame(g, p, firstUI(ui))
+func RenderPixels(g *engine.Game, p *Palette) *Frame {
+	world := worldFrame(g, p)
 	f := NewFrame(world.W, world.H+HudBandPx+StatusBandPx, p.Sky)
 	f.DrawFrame(world, 0, HudBandPx)
 	drawHudPx(f, g, p)
