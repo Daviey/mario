@@ -32,6 +32,7 @@ const (
 	evD          = 32
 	evLeftShift  = 42
 	evX          = 45
+	evK          = 37
 	evL          = 38
 	evN          = 49
 	evDot        = 52
@@ -48,7 +49,7 @@ const (
 // name-entry charset accepts (A-Z 0-9 . -) plus the game's keys.
 var charForCode = map[uint16]byte{
 	evQ: 'q', evW: 'w', evE: 'e', evR: 'r', evY: 'y', evP: 'p', evA: 'a', evSpace: ' ',
-	evS: 's', evD: 'd', evL: 'l', evN: 'n', evX: 'x',
+	evS: 's', evD: 'd', evL: 'l', evN: 'n', evX: 'x', evK: 'k',
 	2: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', evKey0: '0',
 	evMinus: '-', evDot: '.',
 }

@@ -5,12 +5,12 @@ package engine
 
 import "math"
 
-// Input is the player input for one logical tick. Quit, Pause, Restart and
-// AnyKey are edge triggered (set for exactly one tick per key press) and are
-// produced by the input package.
+// Input is the player input for one logical tick. Quit, Pause, Restart,
+// Suicide and AnyKey are edge triggered (set for exactly one tick per key
+// press) and are produced by the input package.
 type Input struct {
-	Left, Right, Up, Down, Run   bool
-	Quit, Pause, Restart, AnyKey bool
+	Left, Right, Up, Down, Run            bool
+	Quit, Pause, Restart, Suicide, AnyKey bool
 }
 
 // State is the high level game state.
@@ -299,6 +299,13 @@ func (g *Game) updatePlaying(in Input) {
 			g.HurryT = 120
 			g.emit("hurry")
 		}
+	}
+
+	// The suicide key ('k'): a trapped player forfeits the life on demand
+	// instead of waiting out the clock. Rising edge, live play only.
+	if in.Suicide && !g.prevIn.Suicide {
+		g.kill()
+		return
 	}
 
 	// Fireballs throw on the run-key rising edge (run and fire share the

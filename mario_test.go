@@ -31,6 +31,39 @@ func TestRunDemo(t *testing.T) {
 	}
 }
 
+func TestSuicideKeyEndToEnd(t *testing.T) {
+	// The full terminal path: raw stdin bytes → router → mapper →
+	// engine death. 'k' must kill a live run.
+	a := New(nil)
+	a.Feed([]byte("\r")) // AnyKey: title → world card
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("never reached playing: %v", a.Game.State)
+	}
+	for range 30 {
+		a.Step()
+	}
+	lives := a.Game.Lives
+	a.Feed([]byte("k"))
+	died := false
+	for range 30 {
+		a.Step()
+		if a.Game.State == engine.StateDying {
+			died = true
+			break
+		}
+	}
+	if !died || a.Game.Lives != lives-1 {
+		t.Fatalf("died = %v state = %v lives = %d (was %d), want suicide death",
+			died, a.Game.State, a.Game.Lives, lives)
+	}
+}
+
 func TestLoadLevelsDefault(t *testing.T) {
 	levels, err := LoadLevels("")
 	if err != nil {

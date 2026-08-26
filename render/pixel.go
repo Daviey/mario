@@ -68,7 +68,7 @@ func drawStatusPx(f *Frame, p *Palette) {
 	y := f.H - StatusBandPx
 	f.Fill(0, y, f.W, StatusBandPx, p.StatusBG)
 	text := pickTextPx([]string{
-		"A/D MOVE  W JUMP  X RUN  P PAUSE  Q QUIT",
+		"A/D MOVE  W JUMP  X RUN  P PAUSE  K DIE  Q QUIT",
 		"A/D MOVE  W JUMP  X RUN",
 		"Q QUIT",
 		"",

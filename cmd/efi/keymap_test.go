@@ -27,8 +27,8 @@ func TestKeySeqsDriveMapper(t *testing.T) {
 		{"s ducks", evS, func(i engine.Input) bool { return i.Down }},
 		{"x runs", evX, func(i engine.Input) bool { return i.Run }},
 		{"space jumps", evSpace, func(i engine.Input) bool { return i.Up }},
-		{"q quits", evQ, func(i engine.Input) bool { return i.Quit }},
 		{"p pauses", evP, func(i engine.Input) bool { return i.Pause }},
+		{"k suicides", evK, func(i engine.Input) bool { return i.Suicide }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

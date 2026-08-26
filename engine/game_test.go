@@ -77,6 +77,52 @@ func TestTimerExpiryKills(t *testing.T) {
 	}
 }
 
+func TestSuicideKeyKillsAndRespawns(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	lives := g.Lives
+	g.Update(Input{Suicide: true})
+	if g.State != StateDying || g.Lives != lives-1 {
+		t.Fatalf("state = %v lives = %d, want dying with one life spent", g.State, g.Lives)
+	}
+	if !eventsContain(g.Events, "die") {
+		t.Error("suicide did not emit the die event")
+	}
+	// The edge fires once: holding the key through death and respawn
+	// must not kill again.
+	run(g, DyingTicks+WorldCardTicks+5, Input{Suicide: true})
+	if g.State != StatePlaying {
+		t.Fatalf("state = %v, want playing after respawn", g.State)
+	}
+	if g.Lives != lives-1 {
+		t.Errorf("lives = %d, want still %d (edge fired more than once)", g.Lives, lives-1)
+	}
+}
+
+func TestSuicideKeyIgnoredOutsideLivePlay(t *testing.T) {
+	// Title: a mapped game key, so it must not start a run.
+	g := NewGame([]*Level{buildLevel(t, 60)}, 40, LevelHeight)
+	g.Update(Input{Suicide: true})
+	if g.State != StateTitle {
+		t.Fatalf("state = %v, want title", g.State)
+	}
+	// World card: not AnyKey, so it must not skip the card.
+	g2 := newGame(t, buildLevel(t, 60))
+	g2.State = StateWorldCard
+	g2.stateTimer = WorldCardTicks
+	g2.Update(Input{Suicide: true})
+	if g2.State != StateWorldCard || g2.stateTimer == 0 {
+		t.Fatalf("suicide skipped the world card: %v", g2.State)
+	}
+	// Paused: no dying on demand while the game is frozen.
+	g3 := newGame(t, buildLevel(t, 60))
+	lives := g3.Lives
+	g3.Update(Input{Pause: true})
+	g3.Update(Input{Suicide: true})
+	if g3.State != StatePlaying || g3.Lives != lives {
+		t.Fatalf("suicide fired while paused: state %v", g3.State)
+	}
+}
+
 func TestFlagSequencePaysBonusAndAdvances(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
 	g := newGame(t, l)
