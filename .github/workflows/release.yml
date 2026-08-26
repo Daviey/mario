@@ -9,7 +9,8 @@
 # protection rules reject tag refs.
 #
 # Manual dispatch = test/build/web/apk only; the release job is
-# tag-gated, so dispatches never publish anything.name: release
+# tag-gated, so dispatches never publish anything.
+name: release
 
 on:
   push:
