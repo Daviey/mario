@@ -1,13 +1,16 @@
 # On tag push (v*): test, cross-compile every platform binary (one matrix
-# job per GOOS/GOARCH so a broken target is visible on its own), build the
-# web bundle, then a tag-gated release job merges the artifacts into a
-# GitHub Release (binaries + SHA256SUMS + mario-web.zip). The web-dist
-# artifact is picked up from this run by pages.yml (workflow_run), which
-# deploys from a default-branch context because the github-pages
-# environment's protection rules reject tag refs.
+# job per GOOS/GOARCH so a broken target is visible on its own), build
+# Debian packages for both Linux arches, build the web bundle, then a
+# tag-gated release job merges the artifacts into a GitHub Release
+# (binaries + debs + SHA256SUMS + mario-web.zip). The web-dist artifact is
+# picked up from this run by pages.yml (workflow_run), which deploys from
+# a default-branch context because the github-pages environment's
+# protection rules reject tag refs. A tag-gated aur job also republishes
+# packaging/aur to the AUR (mario) with the tag's pkgver — only when the
+# AUR_SSH_KEY secret is configured.
 #
-# Manual dispatch = test/build/web only; the release job is tag-gated, so
-# dispatches never publish anything.
+# Manual dispatch = test/build/web only; the release and aur jobs are
+# tag-gated, so dispatches never publish anything.
 name: release
 
 on:
@@ -55,10 +58,17 @@ jobs:
       - name: Build
         run: make ${{ matrix.goos }}/${{ matrix.goarch }}
 
+      # Deb is pure Go (tools/mkdeb) — no dpkg needed on the NixOS runner.
+      - name: Build deb package
+        if: matrix.goos == 'linux'
+        run: make deb/${{ matrix.goarch }}
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
         with:
           name: mario-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/mario-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: |
+            dist/mario-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+            dist/mario_*_${{ matrix.goarch }}.deb
           if-no-files-found: error
 
   web:
@@ -101,11 +111,13 @@ jobs:
           name: web-dist
           path: web-dist
 
-      # SHA256SUMS lists the five binaries + the web zip; mario-web.zip is
-      # picked up by the dist/mario-* glob below (do not list it twice).
+      # SHA256SUMS lists the five binaries, both debs + the web zip;
+      # mario-web.zip is picked up by the dist/mario-* glob below (do not
+      # list it twice). The debs are mario_<ver>_<arch>.deb — underscore,
+      # so they never collide with that glob.
       - name: Checksums + web zip
         run: |
-          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* > SHA256SUMS
+          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* mario_*_*.deb > SHA256SUMS
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -114,7 +126,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release create "$GITHUB_REF_NAME" \
-              dist/mario-* dist/SHA256SUMS \
+              dist/mario-* dist/mario_*_*.deb dist/SHA256SUMS \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
             exit 0
@@ -123,5 +135,46 @@ jobs:
           # its assets instead of dying on "already_exists".
           echo "release exists, uploading assets with --clobber"
           gh release upload "$GITHUB_REF_NAME" \
-            dist/mario-* dist/SHA256SUMS \
-            --clobber --repo "$GITHUB_REPOSITORY"
+              dist/mario-* dist/mario_*_*.deb dist/SHA256SUMS \
+              --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Republish packaging/aur/{PKGBUILD,.SRCINFO} to the AUR (package name
+  # "mario") with pkgver stamped from the tag. Needs the AUR_SSH_KEY secret
+  # (private key; its public half registered on the AUR account) — skipped
+  # silently until it is configured. PKGBUILD expands ${pkgver} itself at
+  # build time, so only the two literal pkgver lines and .SRCINFO's #tag
+  # need stamping; no makepkg on the runner (dash-only POSIX here).
+  aur:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Push PKGBUILD to AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -eu
+          command -v ssh >/dev/null 2>&1 || { echo "::error::runner image has no ssh client"; exit 1; }
+          # Secret-only gate: job-level `if` cannot read the secrets context,
+          # so skip inside the step until AUR_SSH_KEY is configured.
+          if [ -z "$AUR_SSH_KEY" ]; then echo "AUR_SSH_KEY not set — skipping AUR publish"; exit 0; fi
+          ver="${GITHUB_REF_NAME#v}"
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_KEY" > "$HOME/.ssh/aur_key"
+          chmod 600 "$HOME/.ssh/aur_key"
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/mario.git aur
+          cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO aur/
+          cd aur
+          sed -i "s/^pkgver=.*/pkgver=$ver/" PKGBUILD
+          sed -i "s/^pkgver = .*/pkgver = $ver/" .SRCINFO
+          sed -i "s|#tag=v[^']*|#tag=v$ver|" .SRCINFO
+          git config user.name "Dave Walker"
+          git config user.email "dave@daviey.com"
+          git add -A
+          git commit -q -m "mario v$ver" || echo "nothing changed"
+          git push origin master

@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-Terminal (CLI) Mario-style platformer in Go — plus a browser WASM build — with an online high-score board on Supabase. Single module `github.com/Daviey/mario`, stdlib-only, no external dependencies. Private repo: `github.com/Daviey/mario`.
+Terminal (CLI) Mario-style platformer in Go — plus a browser WASM build — with an online high-score board on Supabase. Single module `github.com/Daviey/mario`, stdlib-only, no external dependencies. Private repo: `github.com/Daviey/mario`. MIT-licensed.
 
 ## Project Overview
 
@@ -39,6 +39,9 @@ stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plai
 | `replay/` | Run recorder (RLE input log) and deterministic replay executor |
 | `supabase/migrations/` | SQL schema for the `scores` table (RLS + grants) — source of truth for the live DB |
 | `web/` | Static browser shell: `index.html` (canvas + boot-screen loader), builds to `dist/web/` |
+| `packaging/` | Distro payload shared by .deb and AUR: `mario.6` manpage, `mario.desktop`, Debian `copyright`; `packaging/aur/` = AUR `PKGBUILD` + `.SRCINFO` |
+| `internal/art/` | Standalone Mario-icon renderer (`art.IconPNG`) shared by genicon, mkdeb and the AUR build |
+| `tools/mkdeb/` | Pure-stdlib .deb builder (manual ar + tar + gzip; deterministic — tests parse the archive back) |
 | root `*.go` | The library facade and its thin entries only: `mario.go` (App), `demo.go` (LoadLevels/RunDemo), `preview.go` (ui-preview). Input routing lives in `internal/ui/router.go`, calibration/identity persistence in `internal/persist/` (`keys.go`, `player.go`), the leaderboard machine in `internal/ui/ui.go` |
 
 ## Development Commands
@@ -52,6 +55,7 @@ make cover / vet / fmt / fmtcheck
 make run          # build + run
 make demo         # ./mario -demo (headless scripted run)
 make release      # cross-compile linux/amd64+arm64, darwin/amd64+arm64, windows/amd64 → dist/
+make deb          # .deb packages (linux amd64+arm64) into dist/ via tools/mkdeb (no dpkg needed)
 make web          # GOOS=js GOARCH=wasm → dist/web/ (embeds Supabase URL/publishable key from env or .env)
 make web-serve    # serve dist/web at http://127.0.0.1:8417/
 
@@ -101,7 +105,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Go ≥ 1.22, `CGO_ENABLED=0` always (static; NixOS host cannot run dynamic scratch builds — set `GOTMPDIR` if `/tmp` is noexec).
 - No package manager, no Node tooling for the game itself; `web/` is plain HTML+JS consuming the `.wasm`.
 - Terminal features are progressive enhancement: truecolor → 16-color fallback (`-basic`), kitty keyboard protocol (flags `1|2|8` for explicit press/repeat/release) → legacy key-repeat inference.
-- **CI (push + release + Pages)**: push to `main` and PRs → `.github/workflows/ci.yml` on the self-hosted `mario` runner: `make check` + native build + `make release` (all cross-targets) + a GOOS=js web compile-check (skipped if repo vars missing). The runner image has **no C toolchain** — the race detector can never run there (`make race` is a local-only gate) and every Makefile goal must force `CGO_ENABLED=0` or it dies compiling `runtime/cgo`. Tag push `v*` → `.github/workflows/release.yml`: `make check` gate → a **build matrix** (one job per GOOS/GOARCH, `fail-fast: false`, each uploading `mario-<os>-<arch>` via `make <os>/<arch>`) + a `web` job (uploads the `web-dist` artifact) → tag-gated `release` job that merges artifacts, writes `SHA256SUMS` (+ `mario-web.zip`), and publishes; reruns are idempotent (existing release → `gh release upload --clobber`). → `.github/workflows/pages.yml` (fires via `workflow_run` on release success) re-packages the `web-dist` artifact and deploys to https://daviey.github.io/mario/. The split exists because the `github-pages` environment's protection rules reject tag refs — Pages deploys must run from a default-branch context (`workflow_run`); the policy REST API can't change this. Single self-hosted runner: matrix jobs queue serially (signal, not speed). No linters, no go.work, no Dockerfile — `make vet`/`make fmtcheck`/`make check` are the quality gates; `nix run nixpkgs#actionlint` lints the workflows (labels config in `.github/actionlint.yaml`).
+- **CI (push + release + Pages)**: push to `main` and PRs → `.github/workflows/ci.yml` on the self-hosted `mario` runner: `make check` + native build + `make release` (all cross-targets) + a GOOS=js web compile-check (skipped if repo vars missing). The runner image has **no C toolchain** — the race detector can never run there (`make race` is a local-only gate) and every Makefile goal must force `CGO_ENABLED=0` or it dies compiling `runtime/cgo`. Tag push `v*` → `.github/workflows/release.yml`: `make check` gate → a **build matrix** (one job per GOOS/GOARCH, `fail-fast: false`, each uploading `mario-<os>-<arch>` via `make <os>/<arch>`) — the two Linux jobs also run `make deb/<arch>` (`tools/mkdeb`, no dpkg on the runner) and upload `mario_<ver>_<arch>.deb` alongside the binary + a `web` job (uploads the `web-dist` artifact) → tag-gated `release` job that merges artifacts, writes `SHA256SUMS` (+ `mario-web.zip`), and publishes; reruns are idempotent (existing release → `gh release upload --clobber`). A tag-gated `aur` job republishes `packaging/aur/{PKGBUILD,.SRCINFO}` to the AUR (`mario`, name free as of 2026-08) with the tag's pkgver — needs the `AUR_SSH_KEY` secret, otherwise skips silently; the upstream repo being private means the AUR package builds only where a GitHub ssh key can clone it. → `.github/workflows/pages.yml` (fires via `workflow_run` on release success) re-packages the `web-dist` artifact and deploys to https://daviey.github.io/mario/. The split exists because the `github-pages` environment's protection rules reject tag refs — Pages deploys must run from a default-branch context (`workflow_run`); the policy REST API can't change this. Single self-hosted runner: matrix jobs queue serially (signal, not speed). No linters, no go.work, no Dockerfile — `make vet`/`make fmtcheck`/`make check` are the quality gates; `nix run nixpkgs#actionlint` lints the workflows (labels config in `.github/actionlint.yaml`).
 - Repo hygiene: never commit `.env`; new worktrees need it copied in manually (leaderboard silently offline otherwise).
 
 ## Testing & QA
@@ -119,6 +123,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 ## Gotchas
 
 - **Worktree policy (this machine)**: agent work happens in linked worktrees (`git worktree add .worktrees/<feature> -b <branch>`, or sibling `../game-<feature>`), never in the direct checkout; copy `.env` in; merge back into `main` (expect divergence — the user commits concurrently) and re-run the full suite on merged `main` before pushing. **Hook-enforced since 2026-08-25**: `.omp/hooks/pre/worktree-guard.ts` blocks `edit`/`write` calls targeting the main checkout in every omp session here (`.worktrees/**` and sibling worktrees pass; `bash` — git merge/push — is untouched; the guard fails open on unusual shapes, so it is a guardrail, not a jail).
+- **Distro packaging**: `make deb` + `packaging/aur` + `flake.nix` are versioned off `git describe`/the release tag — no `EngineVersion` bump for packaging-only changes. The flake uses `buildGoModule` (CGO off comes from its env defaults — don't shadow `CGO_ENABLED` with a derivation attr; it errors). AUR publish: set the `AUR_SSH_KEY` secret (private key registered on the AUR account) and every tag push refreshes the package.
 - **Check `git status` before `git add -A` on the main checkout** — the user keeps WIP test files there; sweeping them up has shipped half-done tests before.
 - Ranged edits in this repo have repeatedly misfired (especially after `gofmt` renumbering); prefer read-then-full-file writes for multi-line changes, and single-line 1:1 replacements otherwise.
 - **UI trigger keys must be mapper no-ops**: any byte the input mapper doesn't know maps to `AnyKey`, which starts the game on the title screen before `scoreUI` can see it. `'l'` (leaderboard) is deliberately mapped to a no-op event in `mappedKey` — a new UI hotkey needs the same treatment (regression: `input.TestLeaderKeyIsNotAGameKey`). `'d'` (daily) CANNOT be a no-op (it is WASD-Right), so its title trigger is checked in `Router.TakeDailyAtTitle` BEFORE the engine update consumes the same press as Right — keep that ordering.
