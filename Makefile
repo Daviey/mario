@@ -27,7 +27,7 @@ GOFLAGS := CGO_ENABLED=0
 all: build
 
 build:
-	$(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(BINARY) .
+	$(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/mario
 
 # One target per GOOS/GOARCH pair; dist/mario-<os>-<arch>[.exe].
 # POSIX sh only (no bashisms): GitHub runners use dash as /bin/sh.
@@ -37,7 +37,7 @@ $(TARGETS):
 	suffix=""; if [ "$$os" = "windows" ]; then suffix=".exe"; fi; \
 	echo "BUILD $(DIST)/$(BINARY)-$$os-$$arch$$suffix"; \
 	$(GOFLAGS) GOOS=$$os GOARCH=$$arch go build -ldflags '$(LDFLAGS)' \
-		-o $(DIST)/$(BINARY)-$$os-$$arch$$suffix .
+		-o $(DIST)/$(BINARY)-$$os-$$arch$$suffix ./cmd/mario
 
 release: $(TARGETS)
 	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
@@ -56,7 +56,7 @@ web:
 		echo "ERROR: SUPABASE_URL and SUPABASE_KEY must be set in env, .env, or web/supabase.env" >&2; exit 1; \
 	fi
 	@mkdir -p $(DIST)/web
-	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm .
+	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm ./cmd/web
 	cp web/index.html $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \

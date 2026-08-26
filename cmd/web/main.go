@@ -2,15 +2,6 @@
 
 package main
 
-import (
-	"encoding/json"
-	"syscall/js"
-
-	"mario/engine"
-	"mario/input"
-	"mario/render"
-)
-
 // Browser (WASM) entry point. The game runs fully client-side and paints
 // its pixel buffer straight onto a canvas owned by the page — no terminal
 // emulation, so there are no font metrics, no cell grids and no escape
@@ -30,6 +21,15 @@ import (
 //	                              changes; the page renders it as DOM text
 //	                              ({"mode":"off"} hides the panel).
 
+import (
+	"encoding/json"
+	"syscall/js"
+
+	"mario"
+	"mario/engine"
+	"mario/render"
+)
+
 // jsRGB pushes frame pixels into a page-owned Uint8Array and hands it to
 // marioFrame, minimizing per-frame allocations.
 type jsRGB struct {
@@ -46,21 +46,19 @@ func (j *jsRGB) deliver(f *render.Frame) {
 		j.buf = js.Global().Get("Uint8Array").New(n)
 		j.w, j.h = f.W, f.H
 	}
-	b := f.RGBBytes()
-	js.CopyBytesToJS(j.buf, b)
+	js.CopyBytesToJS(j.buf, f.RGBBytes())
 	js.Global().Call("marioFrame", f.W, f.H, j.buf)
 }
 
 func main() {
-	mapper := input.NewMapper()
-	io := newGameIO(mapper, newScoreUI(nil, nil))
+	app := mario.New(nil)
 
 	js.Global().Set("marioFeed", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		io.feed([]byte(args[0].String()))
+		app.Feed([]byte(args[0].String()))
 		return nil
 	}))
 
-	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+	g := app.Game
 
 	// Live viewport: the page reports how many world pixels it can show;
 	// tiles = pixels/Pix. Never below the playable minimum.
@@ -98,12 +96,10 @@ func main() {
 	ticker := newTicker(engine.TicksPerSecond)
 	for {
 		ticker.wait()
-		in := io.poll()
-		g.Update(in)
-		ui := io.uiTick(g)
+		app.Step()
 		draw()
-		pushBoard(ui)
-		if in.Quit || io.quitRequested() {
+		pushBoard(app.UI())
+		if app.Quit() {
 			break
 		}
 	}

@@ -1,4 +1,4 @@
-package main
+package mario
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 
 func TestRunDemo(t *testing.T) {
 	var buf bytes.Buffer
-	runDemo(&buf, engine.DefaultLevels(), true, 6000)
+	RunDemo(&buf, engine.DefaultLevels(), true, 6000)
 	out := buf.String()
 	if !strings.Contains(out, "demo: ticks=6000") {
 		t.Errorf("demo summary missing: %q", out[:min(80, len(out))])
@@ -27,7 +27,7 @@ func TestRunDemo(t *testing.T) {
 	}
 	// Deterministic: same input script, same outcome.
 	var buf2 bytes.Buffer
-	runDemo(&buf2, engine.DefaultLevels(), true, 6000)
+	RunDemo(&buf2, engine.DefaultLevels(), true, 6000)
 	if buf.String() != buf2.String() {
 		t.Error("demo output is not deterministic")
 	}
@@ -107,9 +107,9 @@ func TestGameIODecodesKittyForUI(t *testing.T) {
 }
 
 func TestLoadLevelsDefault(t *testing.T) {
-	levels, err := loadLevels("")
+	levels, err := LoadLevels("")
 	if err != nil {
-		t.Fatalf("loadLevels: %v", err)
+		t.Fatalf("LoadLevels: %v", err)
 	}
 	if len(levels) != 3 {
 		t.Errorf("levels = %d, want 3", len(levels))
@@ -141,9 +141,9 @@ func TestLoadLevelsCustom(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(rows, "\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	levels, err := loadLevels(path)
+	levels, err := LoadLevels(path)
 	if err != nil {
-		t.Fatalf("loadLevels: %v", err)
+		t.Fatalf("LoadLevels: %v", err)
 	}
 	if len(levels) != 1 || levels[0].Name != "custom.txt" {
 		t.Fatalf("levels = %+v", levels)
@@ -151,14 +151,14 @@ func TestLoadLevelsCustom(t *testing.T) {
 
 	// The custom level is playable through the demo path.
 	var buf bytes.Buffer
-	runDemo(&buf, levels, false, 6000)
+	RunDemo(&buf, levels, false, 6000)
 	if !strings.Contains(buf.String(), "demo:") {
 		t.Error("demo failed on custom level")
 	}
 }
 
 func TestLoadLevelsErrors(t *testing.T) {
-	if _, err := loadLevels("/nonexistent/level.txt"); err == nil {
+	if _, err := LoadLevels("/nonexistent/level.txt"); err == nil {
 		t.Error("missing file: want error")
 	}
 	dir := t.TempDir()
@@ -166,7 +166,7 @@ func TestLoadLevelsErrors(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("ZZZ\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadLevels(bad); err == nil {
+	if _, err := LoadLevels(bad); err == nil {
 		t.Error("invalid level: want error")
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package mario
 
 // Seeds one real leaderboard row so the in-game board has content to
 // display. Skipped unless LIVE=1 (write path — the row is named SEEDCHK,

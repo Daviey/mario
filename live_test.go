@@ -1,4 +1,4 @@
-package main
+package mario
 
 // Live integration test: drives the real in-game UI machine (game-over
 // prompt → name entry → submit) against the configured Supabase project.

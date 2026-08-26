@@ -1,4 +1,4 @@
-package main
+package mario
 
 // gameIO routes raw input bytes: while the leaderboard UI captures input
 // (name entry, prompts), bytes never reach the game mapper — so typing

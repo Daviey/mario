@@ -1,4 +1,4 @@
-package main
+package mario
 
 // Player identity for the leaderboard: a stable device UUID (generated once,
 // stored in the OS config dir) and a display name. No accounts anywhere.

@@ -1,4 +1,4 @@
-package main
+package mario
 
 // The in-game leaderboard UI state machine: game-over flows into a
 // submit prompt, pixel-font name entry, then the board screen (also

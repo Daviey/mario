@@ -1,4 +1,4 @@
-package main
+package mario
 
 // Leaderboard UI state machine tests. Network is faked; the engine is
 // driven to game over with the deterministic demo script.

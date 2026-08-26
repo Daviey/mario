@@ -20,7 +20,7 @@ stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ io.plain �
                      wasm:   RenderPixels → RGB bytes → page's marioFrame()
 ```
 
-- **Spine**: `play()` in `main.go` owns the 60 Hz `time.Ticker`; shared by native and WASM entries.
+- **Spine**: the importable root package `mario` (library facade, `mario.go`) owns the 60 Hz loop: `App.Run(*render.Stream)` blocks for the native terminal; `App.Step()` drives one tick for clock-owning consumers (the browser build). Both entries are thin: `cmd/mario` (native CLI) and `cmd/web` (WASM).
 - **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes are decoded via `input.PlainDecoder` and passed to the UI. The mapper speaks `CSI u` natively, but the UI is strictly byte-oriented (`gameio.go`).
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StatePlaying ↔ StateDying/StateLevelClear → StateGameOver/StateWin`. Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go`.
 - **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw` take an optional `*ScoreUI` that swaps the world for the leaderboard screens, drawn as **real text cells** (not the pixel font); the browser build receives the same snapshot as JSON (`marioBoard`) and renders a DOM panel.
@@ -76,8 +76,10 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 
 ## Important Files
 
-- `main.go` — package doc (controls, flags), shared `play()` loop, `runDemo` + `scriptInput` (the deterministic demo script used by tests and `-ui-preview`)
-- `native.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
+- `mario.go` — library facade: `Options`/`App` (`New`, `Feed`, `Step`, `Run`, `UI`, `Quit`, `SaveCalibration`); package doc shows the embed-as-easter-egg pattern
+- `demo.go` — `LoadLevels`, `RunDemo` + `scriptInput` (the deterministic demo script used by tests and `-ui-preview`)
+- `cmd/mario/main.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
+- `cmd/web/main.go` — WASM entry (`go build ./cmd/web` under GOOS=js)
 - Repo hygiene: never commit `.env`; new worktrees need it copied in manually (leaderboard silently offline otherwise). For local dev, `chmod 0600 .env` since it holds the DB password.
 - **Leaderboard rate limits** (`supabase/migrations/20260825000002_rate_limits.sql`, applied live): a BEFORE INSERT trigger caps anon submissions at 10/min per source address (from Cloudflare's `cf-connecting-ip` via the `request.headers` setting) and 2/min per device_id. Bursty probes or LIVE tests must pace themselves or they get `400 too many submissions`. The peer-filled `scores.ip` column is hidden from anon by column-scoped SELECT grants — `select=*` fails for anon by design.
 - **Leaderboard hardening** (`20260825000003_pow_and_privacy.sql`): submissions require 20-bit SHA-256 proof-of-work over `<device_id>:<score>:<nonce>` (solver in `board/pow.go`, verifier in `verify_pow()` trigger — keep difficulty in sync); `device_id` is NOT readable by anon (mine-ness arrives precomputed via the `board_rows` RPC, so don't reach for `Row.DeviceID`); nightly pg_cron job keeps top-500 rows / drops >60d. Reads go through POST `/rest/v1/rpc/board_rows`, inserts must carry `pow_nonce`.

@@ -1,4 +1,4 @@
-package main
+package mario
 
 // Key-calibration persistence: the input mapper learns the terminal's OS
 // key-repeat delay and per-key hold habits (see the input package). Learning

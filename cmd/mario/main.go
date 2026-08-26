@@ -1,5 +1,21 @@
-//go:build !js
-
+// Command mario is a fully terminal-based Mario-style platformer, built
+// on the importable mario library.
+//
+// Controls: a/d or arrows move, w/space jump, x run, p pause, q quit,
+// r restart (after game over / win).
+//
+// Flags:
+//
+//	-demo         run a headless scripted demo and exit
+//	-demoticks N  demo length in ticks (with -demo)
+//	-level FILE   play a custom ASCII level instead of the built-ins
+//	-width N      viewport width in tiles (0 = terminal width)
+//	-basic        force 16-color ANSI output instead of truecolor
+//	-scores N     print the top N leaderboard scores and exit
+//	-ui-preview M render a leaderboard UI screen headless (ask|entry|board|title-board)
+//
+// Scores can be submitted to a Supabase-backed leaderboard after game over;
+// see the board package and .env.
 package main
 
 import (
@@ -13,20 +29,12 @@ import (
 	"syscall"
 	"time"
 
+	"mario"
 	"mario/board"
 	"mario/engine"
-	"mario/input"
 	"mario/render"
 )
 
-// Flags:
-//
-//	-demo        run a headless scripted demo and exit
-//	-level FILE  play a custom ASCII level file instead of the built-ins
-//	-width N     viewport width in tiles (0 = terminal width)
-//	-basic       force 16-color ANSI output instead of truecolor
-//	-scores N    print the top N leaderboard scores and exit
-//	-ui-preview M  render a leaderboard UI screen headless (ask|entry|board|title-board)
 func main() {
 	demo := flag.Bool("demo", false, "run a headless scripted demo and exit")
 	demoTicks := flag.Int("demoticks", 6000, "demo length in ticks (with -demo)")
@@ -58,21 +66,21 @@ func main() {
 	}
 
 	if *uiPreview != "" {
-		if err := uiPreviewScreen(os.Stdout, *uiPreview, trueColor); err != nil {
+		if err := mario.UIPreview(os.Stdout, *uiPreview, trueColor); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	levels, err := loadLevels(*levelPath)
+	levels, err := mario.LoadLevels(*levelPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
 
 	if *demo {
-		runDemo(os.Stdout, levels, trueColor, *demoTicks)
+		mario.RunDemo(os.Stdout, levels, trueColor, *demoTicks)
 		return
 	}
 
@@ -130,36 +138,20 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// killed without cleanup, before we push our own entry.
 	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
 
+	// Fill the terminal: width in tiles, height minus HUD/status rows,
+	// Pix/2 terminal rows per tile. A taller window shows more sky/world,
+	// same sprite size.
 	viewW := width
 	if viewW <= 0 {
 		viewW = termWidth() / render.Pix // viewport is measured in tiles now
 	}
-	if viewW < 16 {
-		viewW = 16
-	}
-	if viewW > 60 {
-		viewW = 60
-	}
-	// Fill the terminal vertically too: rows minus HUD/status, Pix/2
-	// terminal rows per tile. A taller window shows more sky/world, same
-	// sprite size.
 	viewH := (termHeight() - 2) * 2 / render.Pix
-	if viewH < 4 {
-		viewH = 4
-	}
-	if viewH > levels[0].Height {
-		viewH = levels[0].Height
-	}
-	g := engine.NewGame(levels, viewW, viewH)
 
-	// One goroutine owns fd 0 for the life of the process; gameIO routes
+	app := mario.New(&mario.Options{Levels: levels, ViewW: viewW, ViewH: viewH})
+	saveCalibration = app.SaveCalibration
+
+	// One goroutine owns fd 0 for the life of the process; the app routes
 	// each chunk to the game mapper or the leaderboard UI (never both).
-	// Calibration (repeat delay, hold habits) persists across runs so the
-	// first hold of a session is as smooth as the last of the previous one.
-	mapper := input.NewMapper()
-	loadKeyCalibration(mapper)
-	saveCalibration = func() { saveKeyCalibration(mapper) }
-	io := newGameIO(mapper, newScoreUI(nil, nil))
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -171,7 +163,7 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				io.feed(append([]byte(nil), buf[:n]...))
+				app.Feed(append([]byte(nil), buf[:n]...))
 			}
 			if err != nil {
 				return
@@ -182,61 +174,16 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// Differential rendering: each frame only the changed cells are sent,
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.
-	st := newStream(os.Stdout, render.NewPalette(trueColor))
-	play(g, io, st)
-	return g.Score, nil
+	app.Run(render.NewStream(os.Stdout, render.NewPalette(trueColor)))
+	return app.Game.Score, nil
 }
 
-// uiPreviewScreen renders one leaderboard UI screen headless: the demo
-// script runs to game over, then the machine is stepped to the requested
-// mode and one ANSI frame is printed (for visual checks and debugging).
-func uiPreviewScreen(w *os.File, mode string, trueColor bool) error {
-	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-	for t := range 6000 {
-		g.Update(scriptInput(t))
+func isTTY(f *os.File) bool {
+	st, err := f.Stat()
+	if err != nil {
+		return false
 	}
-	if g.Score == 0 {
-		return fmt.Errorf("demo script scored 0; cannot preview")
-	}
-
-	canned := []board.Row{
-		{Name: "BIFF", Score: 32100},
-		{Name: "DAVE", Score: 12500, Mine: true}, // "you"
-		{Name: "KIM", Score: 9900},
-	}
-	ui := newScoreUI(nil, func() ([]board.Row, error) { return canned, nil })
-
-	var frameG *engine.Game
-	switch mode {
-	case "ask":
-		ui.tick(g) // game over auto-asks
-	case "entry":
-		ui.tick(g)
-		ui.feedKeys([]byte("yDAVE")) // a half-typed name, cursor after it
-		ui.tick(g)
-		frameG = g
-	case "board":
-		// Direct board view (the submit path needs a real backend).
-		ui.tick(g)
-		ui.showBoard()
-		time.Sleep(100 * time.Millisecond) // let the fake fetch land
-		ui.tick(g)
-	case "title-board":
-		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-		ui.tick(g2)
-		ui.showBoard()
-		time.Sleep(100 * time.Millisecond)
-		frameG = g2
-		fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.tick(frameG)))
-		return nil
-	default:
-		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board)", mode)
-	}
-	if frameG == nil {
-		frameG = g
-	}
-	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.tick(frameG)))
-	return nil
+	return st.Mode()&os.ModeCharDevice != 0
 }
 
 // trueColorSupported sniffs the environment for terminals that render
