@@ -2,7 +2,12 @@
 //
 //   - Legacy: plain keydown bytes only (no release events). Held keys are
 //     inferred from OS key-repeat: a key counts as held while repeats keep
-//     arriving, and expires after holdWindow ticks of silence.
+//     arriving, and expires after holdWindow ticks of silence. One wrinkle:
+//     single-key-repeat terminals (every Wayland compositor — and tmux
+//     passthrough lands the game in this regime) silence the older key's
+//     repeat stream the instant a newer key is pressed, so a proven hold
+//     must also survive its stream going quiet while other keys are live
+//     (see live/demotedHeld).
 //   - Kitty keyboard protocol: CSI-u sequences with explicit press/repeat/
 //     release events. Releases clear the key immediately. The runner pushes
 //     flags 1|2|8 so every key — including plain letters and space —
@@ -45,6 +50,16 @@ const maxHoldWindow = 52 // upper bound for calibrated grace and cadence windows
 // GNOME/niri/macOS/Windows defaults).
 const defaultOSDelay = 36
 const staleSeqPolls = 3 // quiet polls before an incomplete escape sequence is dropped
+// upExtendTicks bounds the demotion extension for the jump key: past the
+// full rise of a jump a held jump key no longer changes physics (the jump
+// cut is over), and it must be expired again well before landing (~2x the
+// rise) so the retap edge still exists.
+const upExtendTicks = 24 // full jump rise ≈ -JumpVel/Gravity ≈ 20.5 ticks; slack after, still < landing (~41)
+// resurrectWindow is how long after a demoted hold finally expires a byte
+// for another key may resurrect it: while a direction is held and jump is
+// tapped, the direction is dead for roughly the airborne time (~41 ticks)
+// between taps; past this window, silence means released.
+const resurrectWindow = 2*maxHoldWindow - 2*holdWindow // 80 ticks ≈ 1.3s
 
 type keyEvent struct {
 	k       key
@@ -68,6 +83,10 @@ type Mapper struct {
 	osDelay      int            // measured keydown→first-repeat delay, in ticks (0 = uncalibrated)
 	pendingDelay int            // delay candidate from the newest resumed keypress
 	sources      map[int]key    // kitty press sources still held, for exact releases
+	demoted      [keyCount]bool // proven hold silenced by a newer key press (see demotedHeld)
+	wasLive      [keyCount]bool // live at the previous Poll; drives one-shot expiry
+	deadAt       [keyCount]int  // tick a demoted hold finally expired; 0 = none
+	lastByte     int            // tick of the most recent decoded event, any key
 	buf          []byte
 	feedAge      int // polls since the last Feed delivered bytes
 	pendQuit     bool
@@ -96,13 +115,42 @@ func (m *Mapper) Poll() engine.Input {
 	defer m.mu.Unlock()
 	m.now++
 	m.feedAge++
-	// Silent expiry closes a keypress: whether it ends as "this key is
-	// usually held" is exactly whether repeats arrived while it was live.
-	// That habit decides the grace the NEXT keydown of that key gets.
+	// Demotion sweep: a proven hold whose own window just lapsed while
+	// another key is demonstrably live was silenced by the terminal, not
+	// released — single-key-repeat compositors give the repeat stream to
+	// the newest key and never resume it for older ones. Such a hold stays
+	// live (see demotedHeld) instead of expiring on its own cadence.
 	for k := key(0); k < keyCount; k++ {
-		if m.lastSeen[k] > 0 && !m.sticky[k] && !m.live(k) {
-			m.heldHabit[k] = m.sawRepeat[k]
+		if m.demoted[k] || m.sticky[k] || m.lastSeen[k] == 0 || !m.sawRepeat[k] {
+			continue
 		}
+		if m.liveOwn(k) || !m.anyOtherLiveOwn(k) {
+			continue
+		}
+		m.demoted[k] = true
+	}
+	// Silent expiry closes a keypress exactly once (live → dead): whether
+	// it ends as "this key is usually held" is exactly whether repeats
+	// arrived while it was live. That habit decides the grace the NEXT
+	// keydown of that key gets. A hold that dies while demoted leaves a
+	// resurrection marker: its release was never confirmed, so a later
+	// press of another key can reopen the question (see apply).
+	for k := key(0); k < keyCount; k++ {
+		if m.live(k) {
+			m.wasLive[k] = true
+			continue
+		}
+		if !m.wasLive[k] {
+			continue
+		}
+		m.wasLive[k] = false
+		m.heldHabit[k] = m.sawRepeat[k]
+		m.deadAt[k] = 0
+		if m.demoted[k] {
+			m.deadAt[k] = m.now
+		}
+		m.sawRepeat[k] = false
+		m.demoted[k] = false
 	}
 	// An escape sequence that never completed (bytes lost or split by a
 	// slow link) would otherwise swallow every following key, because any
@@ -147,9 +195,17 @@ func (m *Mapper) held(k key) bool {
 	return m.latched[k] || m.live(k)
 }
 
-// live reports the key physically held right now, ignoring the one-tick
-// press latch.
+// live reports the key held right now, ignoring the one-tick press latch:
+// either by its own byte evidence, or — for holds demoted by a newer key
+// press — by the demotion extension below.
 func (m *Mapper) live(k key) bool {
+	return m.liveOwn(k) || m.demotedHeld(k)
+}
+
+// liveOwn reports the key held by its own byte evidence alone: a kitty
+// press/repeat still sticky, or a legacy stream whose repeats keep
+// lastSeen inside its expiry window.
+func (m *Mapper) liveOwn(k key) bool {
 	if m.sticky[k] {
 		return true
 	}
@@ -162,6 +218,38 @@ func (m *Mapper) live(k key) bool {
 		w = holdWindow
 	}
 	return m.now-ls <= w
+}
+
+// demotedHeld keeps a proven hold alive after the terminal silenced its
+// repeat stream in favour of a newer key. While any other key is still
+// demonstrably live (its own bytes arriving), the older hold stands: the
+// "hold right and jump" combo must not drop the direction mid-jump. When
+// the whole keyboard goes quiet it lingers only for the hold grace (the
+// same trust a fresh keydown of a proven-hold key gets), then expires.
+// The jump key is capped at upExtendTicks so a demoted Up can never eat
+// the retap edge of the next jump.
+func (m *Mapper) demotedHeld(k key) bool {
+	if !m.demoted[k] {
+		return false
+	}
+	if k == kUp {
+		return m.now-m.lastSeen[k] <= upExtendTicks
+	}
+	if m.anyOtherLiveOwn(k) {
+		return true
+	}
+	return m.now-m.lastByte <= m.graceFor(k)
+}
+
+// anyOtherLiveOwn reports whether some other key is held by its own byte
+// evidence right now.
+func (m *Mapper) anyOtherLiveOwn(k key) bool {
+	for o := key(0); o < keyCount; o++ {
+		if o != k && m.liveOwn(o) {
+			return true
+		}
+	}
+	return false
 }
 
 // Calibration is the mapper's learned terminal timing: the measured OS
@@ -252,6 +340,7 @@ func (m *Mapper) drain() {
 }
 
 func (m *Mapper) apply(ev keyEvent) {
+	m.lastByte = m.now + 1
 	if ev.evType == 3 { // release
 		if !ev.hasKey || ev.k >= keyCount {
 			return
@@ -271,9 +360,28 @@ func (m *Mapper) apply(ev keyEvent) {
 		}
 		m.sticky[ev.k] = false
 		m.lastSeen[ev.k] = 0
+		m.demoted[ev.k] = false
+		m.deadAt[ev.k] = 0
 		return
 	}
 	if ev.hasKey && ev.k < keyCount {
+		// Resurrection: a hold that expired while demoted was never
+		// confirmed released — on a single-key-repeat terminal its stream
+		// simply never comes back. A byte for another key within the
+		// resurrection window reopens the question and stands the hold
+		// back up (the jump key never resurrects: a phantom Up eats
+		// retap edges).
+		// (releases never reach this block: they return above)
+		for k := key(0); k < keyCount; k++ {
+			if k == ev.k || k == kUp || m.deadAt[k] == 0 {
+				continue
+			}
+			if m.now+1-m.deadAt[k] <= resurrectWindow {
+				m.demoted[k] = true
+				m.deadAt[k] = 0
+				m.wasLive[k] = true
+			}
+		}
 		if ev.evType >= 1 {
 			m.sticky[ev.k] = true
 			if ev.src != 0 {
@@ -283,7 +391,7 @@ func (m *Mapper) apply(ev keyEvent) {
 		if ev.evType != 2 { // repeats don't refresh press recency
 			m.pressedAt[ev.k] = m.now + 1
 		}
-		if m.live(ev.k) {
+		if m.liveOwn(ev.k) {
 			// Continuing byte of a live keypress (an OS repeat): the
 			// press is proven a hold, and silence should now expire it
 			// on the observed cadence.
@@ -307,6 +415,14 @@ func (m *Mapper) apply(ev keyEvent) {
 					m.win[ev.k] = w
 				}
 			}
+		} else if m.demoted[ev.k] {
+			// Own bytes resumed after demotion: either the terminal
+			// handed the repeat stream back or the player re-pressed.
+			// The hold was never disproven, so keep its repeat status,
+			// but don't measure a cadence across the demotion gap.
+			m.demoted[ev.k] = false
+			m.deadAt[ev.k] = 0
+			m.win[ev.k] = m.graceFor(ev.k)
 		} else {
 			// Fresh or resumed keypress. A resumed one (byte after the
 			// previous press expired) is either the first OS repeat of a
