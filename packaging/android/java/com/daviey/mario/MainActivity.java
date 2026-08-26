@@ -94,6 +94,19 @@ public class MainActivity extends Activity {
         if (path.isEmpty()) {
             path = "index.html";
         }
+        // The page registers a CACHE-FIRST service worker on http(s)
+        // origins — ours qualifies. In the APK that is pure poison: the
+        // assets ship inside the app, and a stale SW keeps serving the
+        // previous version's boot.js/wasm after an update. Serve a no-op
+        // SW that claims immediately and purges any old caches instead.
+        if (path.equals("sw.js")) {
+            String noop = "self.addEventListener('install',e=>self.skipWaiting());"
+                    + "self.addEventListener('activate',e=>{e.waitUntil(caches.keys()"
+                    + ".then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
+                    + "// no fetch handler: every request goes to the APK assets";
+            return new WebResourceResponse("text/javascript", "utf-8",
+                    new ByteArrayInputStream(noop.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
         try {
             InputStream in = getAssets().open(path);
             // No charset: mixed text/binary assets.
@@ -119,14 +132,26 @@ public class MainActivity extends Activity {
                 new HashMap<String, String>(), new ByteArrayInputStream(new byte[0]));
     }
 
-    /** Immersive sticky: game owns the whole screen. */
+    /** Immersive sticky: game owns the whole screen. Legacy flags are
+     *  no-ops on Android 15+ with targetSdk 35, so use InsetsController
+     *  there and keep the flags for older devices. */
     private void hideBars() {
-        web.setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                | View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                c.hide(android.view.WindowInsets.Type.systemBars());
+                c.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            web.setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
     }
 
     @Override
