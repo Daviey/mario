@@ -220,12 +220,12 @@ func TestDefaultLevelsValid(t *testing.T) {
 			t.Errorf("level %d: pit of width %d exceeds jump range", i, maxRun)
 		}
 		// No entity spawns inside solid tiles.
-		for _, e := range append(append([]Vec{}, l.GoombaSpawns...), l.KoopaSpawns...) {
+		for _, e := range append(append(append([]Vec{}, l.GoombaSpawns...), l.KoopaSpawns...), l.ParaSpawns...) {
 			if l.At(int(e.X+0.45), int(e.Y+0.45)).Solid() {
 				t.Errorf("level %d: enemy spawn inside solid at %v", i, e)
 			}
 		}
-		if len(l.GoombaSpawns)+len(l.KoopaSpawns) < 5 {
+		if n := len(l.GoombaSpawns) + len(l.KoopaSpawns) + len(l.ParaSpawns); n < 5 {
 			t.Errorf("level %d: too few enemies", i)
 		}
 	}
@@ -250,7 +250,7 @@ func TestLoadLevelCopiesTiles(t *testing.T) {
 func TestLevelNameAndIndex(t *testing.T) {
 	levels := DefaultLevels()
 	g := NewGame(levels, 40, LevelHeight)
-	for i, want := range []string{"1-1", "1-2", "1-3", "2-1"} {
+	for i, want := range []string{"1-1", "1-2", "1-3", "2-1", "2-2", "2-3", "2-4"} {
 		if g.LevelIndex() != i || g.LevelName() != want {
 			t.Errorf("level %d: got %d/%s, want %d/%s", i, g.LevelIndex(), g.LevelName(), i, want)
 		}

@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // Vec is a 2D vector (world units; one tile == 1.0). Y grows downward.
 type Vec struct{ X, Y float64 }
 
@@ -51,7 +53,13 @@ const (
 	PlantMercyDist      = 2.4 // stay hidden while the player stands this close
 	StompBounce         = -0.28
 	InvincibleTicks     = 120
-	EnemyFrameLen       = 0.16 // tiles travelled per enemy walk-cycle frame
+	EnemyFrameLen       = 0.16  // tiles travelled per enemy walk-cycle frame
+	ParaHopVel          = -0.34 // flying-koopa hop impulse (~2.7-tile apex)
+	ParaHopEvery        = 48    // grounded ticks between hops
+	FireBarBallGap      = 0.55  // tiles between fire-bar balls
+	FireBarBallSize     = 0.45  // collision box of one ball
+	FireBarLen          = 6     // balls per bar
+	FireBarSpeed        = 0.026 // radians per tick (~4s per revolution)
 
 	FlagSlideSpeed  = 0.05 // tiles per tick down the pole
 	CastleWalkSpeed = 0.07 // auto-walk to the castle door
@@ -140,6 +148,7 @@ type EnemyKind uint8
 const (
 	KindGoomba EnemyKind = iota
 	KindKoopa
+	KindPara // flying koopa: hops while walking; a stomp demotes it to koopa
 )
 
 // EnemyState is the lifecycle state of an enemy.
@@ -173,6 +182,36 @@ func newGoomba(p Vec) *Enemy {
 
 func newKoopa(p Vec) *Enemy {
 	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindKoopa, State: EnemyWalking, Dir: -1}
+}
+
+func newPara(p Vec) *Enemy {
+	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindPara, State: EnemyWalking, Dir: -1}
+}
+
+// FireBar is a rotating castle hazard: a chain of fireballs pivoting on a
+// hub. Angle advances deterministically with the game tick.
+type FireBar struct {
+	X, Y  float64 // hub centre in tile coords
+	Speed float64 // radians per tick; negative reverses direction
+}
+
+// NewFireBar builds a bar whose hub centre is the centre of cell (x, y).
+// Every other bar (by hub column) spins the other way, a touch faster —
+// variety without extra level syntax.
+func NewFireBar(x, y float64) FireBar {
+	speed := FireBarSpeed
+	if int(x)%2 == 1 {
+		speed = -1.5 * FireBarSpeed
+	}
+	return FireBar{X: x + 0.5, Y: y + 0.5, Speed: speed}
+}
+
+// BallPos returns the centre of ball i (0-based, nearest the hub first)
+// at the given tick.
+func (fb FireBar) BallPos(i, tick int) Vec {
+	angle := fb.Speed * float64(tick)
+	r := 0.45 + float64(i+1)*FireBarBallGap
+	return Vec{fb.X + r*math.Cos(angle), fb.Y + r*math.Sin(angle)}
 }
 
 // CoinItem is a collectible coin floating in the world.

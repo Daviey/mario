@@ -332,6 +332,30 @@ var sprKoopa = []string{ // 6×9 on a 0.9×1.3 hitbox
 	".KK.K.",
 }
 
+var sprPara = []string{ // 8×9: koopa with wings raised (frame A)
+	"W..DKKK.",
+	"WW.KKKKK",
+	"W.GGGGG.",
+	".WGGGGG.",
+	".GGGGGG.",
+	".GgGGgG.",
+	".GgGGgG.",
+	"..KK.K..",
+	"..KK.K..",
+}
+
+var sprParaWalk = []string{ // wings flat on the downbeat (frame B)
+	"...DKKK.",
+	"..KKKKK.",
+	"W.GGGGG.",
+	"WWGGGGG.",
+	".GGGGGG.",
+	".GgGGgG.",
+	".GgGGgG.",
+	"..KK.K..",
+	"..KK.K..",
+}
+
 var sprShell = []string{ // 6×4
 	".GGGG.",
 	"GGGGGG",
@@ -531,6 +555,21 @@ func drawPipeShaft(f *Frame, p *Palette, x, y, h int) {
 	f.Fill(x+1, y, 3, h, p.GreenLight)
 	f.Fill(x+4, y, 5, h, p.Green)
 	f.Fill(x+9, y, 2, h, p.GreenDark)
+}
+
+// drawLava paints a castle lava tile: molten red with an animated crust on
+// the surface tile (bobbing bubbles keyed off the world tick).
+func drawLava(f *Frame, p *Palette, x, y, tx int, surface bool, tick int) {
+	f.Fill(x, y, Pix, Pix, p.FlagRed)
+	f.Fill(x+Pix-1, y, 1, Pix, p.Dark) // depth shading at the pool edge
+	if !surface {
+		return
+	}
+	f.Fill(x, y, Pix, 2, p.Coin)
+	f.Fill(x, y, Pix, 1, p.GoldLight)
+	if (tx+tick/10)%3 == 0 {
+		f.Set(x+2, y+2, p.GoldLight) // rising bubble
+	}
 }
 
 // drawFlagPole paints one pole tile; drawFlagTop paints the finial and

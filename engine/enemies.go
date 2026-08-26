@@ -40,6 +40,14 @@ func (g *Game) updateEnemies() {
 			landed, _, _ := g.moveY(&e.Pos, e.W, e.H, e.Vel.Y)
 			if landed {
 				e.Vel.Y = 0
+				// Flying koopas hop as they walk: charge on the ground, leap.
+				if e.Kind == KindPara && e.State == EnemyWalking {
+					e.Timer++
+					if e.Timer >= ParaHopEvery {
+						e.Timer = 0
+						e.Vel.Y = ParaHopVel
+					}
+				}
 			}
 			if e.Pos.Y > bottom {
 				e.Gone = true
@@ -97,10 +105,15 @@ func (g *Game) playerEnemyInteractions() {
 		stomping := p.Vel.Y > 0.02 && (p.Pos.Y+p.H) < (e.Pos.Y+e.H*0.7)
 		switch {
 		case stomping && e.State == EnemyWalking:
-			if e.Kind == KindGoomba {
+			switch e.Kind {
+			case KindGoomba:
 				e.State = EnemySquashed
 				e.Timer = 30
-			} else {
+			case KindPara:
+				// Wings clipped: the paratroopa demotes to a walking
+				// koopa (a second stomp makes the shell, as usual).
+				e.Kind = KindKoopa
+			default:
 				e.State = EnemyShell
 				e.Pos.Y += e.H - GoombaH
 				e.H = GoombaH
