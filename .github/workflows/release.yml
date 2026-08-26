@@ -6,13 +6,10 @@
 # + APK + SHA256SUMS + mario-web.zip). The web-dist artifact is picked
 # up from this run by pages.yml (workflow_run), which deploys from a
 # default-branch context because the github-pages environment's
-# protection rules reject tag refs. A tag-gated aur job also republishes
-# packaging/aur to the AUR (mario) with the tag's pkgver — only when the
-# AUR_SSH_KEY secret is configured.
+# protection rules reject tag refs.
 #
-# Manual dispatch = test/build/web/apk only; the release and aur jobs are
-# tag-gated, so dispatches never publish anything.
-name: release
+# Manual dispatch = test/build/web/apk only; the release job is
+# tag-gated, so dispatches never publish anything.name: release
 
 on:
   push:
@@ -168,51 +165,6 @@ jobs:
               dist/mario-* dist/mario_*_*.deb dist/mario_*_android.apk dist/SHA256SUMS \
               --clobber --repo "$GITHUB_REPOSITORY"
 
-  # Republish packaging/aur/{PKGBUILD,.SRCINFO} to the AUR (package name
-  # "mario") with pkgver stamped from the tag. Needs the AUR_SSH_KEY secret
-  # (private key; its public half registered on the AUR account) — skipped
-  # silently until it is configured. PKGBUILD expands ${pkgver} itself at
-  # build time, so only the two literal pkgver lines and .SRCINFO's #tag
-  # need stamping; no makepkg on the runner (dash-only POSIX here).
-  aur:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: build
-    runs-on: [self-hosted, mario]
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
-
-      - name: Push PKGBUILD to AUR
-        env:
-          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
-        run: |
-          set -eu
-          command -v ssh >/dev/null 2>&1 || { echo "::error::runner image has no ssh client"; exit 1; }
-          # Secret-only gate: job-level `if` cannot read the secrets context,
-          # so skip inside the step until AUR_SSH_KEY is configured.
-          if [ -z "$AUR_SSH_KEY" ]; then echo "AUR_SSH_KEY not set — skipping AUR publish"; exit 0; fi
-          ver="${GITHUB_REF_NAME#v}"
-          # Key lives only in per-job temp and is cleaned up on exit.
-          mkdir -p "$RUNNER_TEMP/.ssh"
-          key="$RUNNER_TEMP/.ssh/aur_key"
-          printf '%s\n' "$AUR_SSH_KEY" > "$key"
-          chmod 600 "$key"
-          trap 'rm -f "$key"' EXIT
-          # Clean up any legacy persisted key from past runs
-          rm -f "$HOME/.ssh/aur_key"
-          # Pin AUR static host keys (prevent keyscan TOFU MITM)
-          mkdir -p "$HOME/.ssh"
-          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtFSFxQG/+2I8e9iQ6U8e65T//N6J115ZcWc/Hw6eEw" >> "$HOME/.ssh/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $key -o StrictHostKeyChecking=yes"
-          git clone ssh://aur@aur.archlinux.org/mario.git aur
-          cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO aur/
-          cd aur
-          sed -i "s/^pkgver=.*/pkgver=$ver/" PKGBUILD
-          sed -i "s/^pkgver = .*/pkgver = $ver/" .SRCINFO
-          sed -i "s|#tag=v[^']*|#commit=$GITHUB_SHA|" .SRCINFO
-          sed -i "s|#tag=v[^\"]*|#commit=$GITHUB_SHA|" PKGBUILD
-          git config user.name "Dave Walker"
-          git config user.email "dave@daviey.com"
-          git add -A
-          git commit -q -m "mario v$ver" || echo "nothing changed"
-          git push origin master
+  # packaging/aur is NOT published anywhere: the PKGBUILD is kept for
+  # local builds only (makepkg -p packaging/aur/PKGBUILD on a machine
+  # with a GitHub ssh key that can clone this private repo).
