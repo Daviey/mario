@@ -54,15 +54,11 @@ func main() {
 
 	ticker := time.NewTicker(time.Second / time.Duration(engine.TicksPerSecond))
 	defer ticker.Stop()
-	logf("mario-efi: entering loop")
 	for range ticker.C {
-		logf("mario-efi: loop start tick=%d", g.Tick)
 		for _, k := range kbs {
 			k.drain(app.Feed)
 		}
-		logf("mario-efi: before step")
 		app.Step()
-		logf("mario-efi: after step")
 		frame := render.RenderPixels(g, pal)
 		if u := app.UI(); u != nil {
 			frame = uiFrame(frame, pal, u, g.Tick)
