@@ -40,6 +40,7 @@ const (
 	spQuit
 	spPause
 	spRestart
+	spKill
 	spAny
 )
 
@@ -92,6 +93,7 @@ type Mapper struct {
 	pendQuit     bool
 	pendPause    bool
 	pendRestart  bool
+	pendKill     bool
 	pendAny      bool
 }
 
@@ -184,9 +186,10 @@ func (m *Mapper) Poll() engine.Input {
 		Quit:    m.pendQuit,
 		Pause:   m.pendPause,
 		Restart: m.pendRestart,
+		Suicide: m.pendKill,
 		AnyKey:  m.pendAny,
 	}
-	m.pendQuit, m.pendPause, m.pendRestart, m.pendAny = false, false, false, false
+	m.pendQuit, m.pendPause, m.pendRestart, m.pendKill, m.pendAny = false, false, false, false, false
 	m.latched = [keyCount]bool{} // each press edge is visible to exactly one Poll
 	return in
 }
@@ -455,6 +458,8 @@ func (m *Mapper) apply(ev keyEvent) {
 			m.pendPause = true
 		case spRestart:
 			m.pendRestart = true
+		case spKill:
+			m.pendKill = true
 		case spAny:
 			m.pendAny = true
 		}
@@ -600,6 +605,11 @@ func mappedKey(code int) (keyEvent, bool) {
 		return keyEvent{special: spPause}, true
 	case 'r', 'R':
 		return keyEvent{special: spRestart}, true
+	case 'k', 'K':
+		// Suicide key: dying on demand when trapped beats waiting out
+		// the clock. A mapped game key (not AnyKey), so pressing it on
+		// the title screen cannot start a run.
+		return keyEvent{special: spKill}, true
 	case '\r', '\n':
 		return keyEvent{special: spAny}, true
 	case 'l', 'L':

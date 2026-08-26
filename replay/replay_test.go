@@ -9,12 +9,12 @@ import (
 )
 
 func TestMaskRoundtrip(t *testing.T) {
-	in := engine.Input{Left: true, Up: true, Run: true, Pause: true, AnyKey: true}
+	in := engine.Input{Left: true, Up: true, Run: true, Pause: true, Suicide: true, AnyKey: true}
 	if got := inputOf(maskOf(in)); got != in {
 		t.Errorf("roundtrip: %+v -> %+v", in, got)
 	}
 	// Exhaustive: every single-bit input survives.
-	for bit := range 9 {
+	for bit := range 10 {
 		var in engine.Input
 		switch bit {
 		case 0:
@@ -33,6 +33,8 @@ func TestMaskRoundtrip(t *testing.T) {
 			in.Pause = true
 		case 7:
 			in.Restart = true
+		case 9:
+			in.Suicide = true
 		case 8:
 			in.AnyKey = true
 		}

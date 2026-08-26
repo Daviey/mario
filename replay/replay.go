@@ -32,6 +32,7 @@ func maskOf(in engine.Input) uint16 {
 	set(5, in.Quit)
 	set(6, in.Pause)
 	set(7, in.Restart)
+	set(9, in.Suicide)
 	set(8, in.AnyKey)
 	return m
 }
@@ -41,7 +42,7 @@ func inputOf(m uint16) engine.Input {
 	return engine.Input{
 		Left: bit(0), Right: bit(1), Up: bit(2), Down: bit(3),
 		Run: bit(4), Quit: bit(5), Pause: bit(6), Restart: bit(7),
-		AnyKey: bit(8),
+		Suicide: bit(9), AnyKey: bit(8),
 	}
 }
 

@@ -506,7 +506,7 @@
   const padEl = document.getElementById('pad');
   padEl.innerHTML = `<div id="pad-game" style="display:contents">
     <div class="grp dpad"><button class="pbtn b-left" data-key="a" aria-label="left">◀</button><button class="pbtn b-down" data-key="s" aria-label="duck">▼</button><button class="pbtn b-right" data-key="d" aria-label="right">▶</button></div>
-    <div class="grp mid-grp"><button class="pbtn mid-btn" data-tap="p" aria-label="pause">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">SCORES</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
+    <div class="grp mid-grp"><button class="pbtn mid-btn" data-tap="p" aria-label="pause">⏸</button><button class="pbtn mid-btn" data-tap="k" aria-label="give up (die)">☠</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">SCORES</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
     <div class="grp act-grp"><button class="pbtn act-btn b-btn" data-key="x" aria-label="run and fire">B</button><button class="pbtn act-btn a-btn" data-key="w" aria-label="jump">A</button></div>
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>

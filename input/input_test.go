@@ -556,3 +556,29 @@ func TestLeaderKeyIsNotAGameKey(t *testing.T) {
 		t.Errorf("'l' produced game input %+v; want none", in)
 	}
 }
+
+func TestSuicideKey(t *testing.T) {
+	// 'k' dies on demand: a mapped edge that fires for exactly one
+	// tick per press — and never an AnyKey edge, so it cannot start a
+	// run from the title screen.
+	for _, seq := range []string{"k", "K", "\x1b[107;1:1u", "\x1b[75;1:1u"} {
+		m := NewMapper()
+		m.Feed([]byte(seq))
+		in := m.Poll()
+		if !in.Suicide {
+			t.Errorf("%q did not set Suicide: %+v", seq, in)
+		}
+		if in.AnyKey || in.Quit || in.Pause || in.Restart || in.Left || in.Right || in.Up || in.Down || in.Run {
+			t.Errorf("%q leaked other game input: %+v", seq, in)
+		}
+		if again := m.Poll(); again.Suicide {
+			t.Errorf("%q: edge fired on a second poll", seq)
+		}
+	}
+	// A kitty release must not fire the edge.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[107;1:3u"))
+	if in := m.Poll(); in.Suicide {
+		t.Error("release fired the suicide edge")
+	}
+}
