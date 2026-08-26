@@ -141,6 +141,7 @@ func channelScale(v byte, length uint32) uint32 {
 		return uint32(v) >> 2
 	case 5:
 		return uint32(v) >> 3
+	case 4:
 		return uint32(v) >> 4
 	}
 	return uint32(v) >> 3
