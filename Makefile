@@ -1,8 +1,8 @@
 # SUPER CLI MARIO — build for every target we support.
 #
 #   make            native binary (./mario or .\mario.exe)
-#   make release    cross-compile all platforms into dist/
-#   make test       unit tests
+#   make release    cross-compile all platforms into dist/ (parallel)
+#   make check      fmtcheck + vet + test (the CI pre-release gate)
 #   make race       unit tests under the race detector
 #   make cover      coverage summary per package
 #   make vet / fmt / fmtcheck / clean / run / demo
@@ -22,7 +22,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release test race cover vet fmt fmtcheck run demo clean web web-serve $(TARGETS)
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve $(TARGETS)
 
 all: build
 
@@ -39,7 +39,10 @@ $(TARGETS):
 	$(GOFLAGS) GOOS=$$os GOARCH=$$arch go build -ldflags '$(LDFLAGS)' \
 		-o $(DIST)/$(BINARY)-$$os-$$arch$$suffix ./cmd/mario
 
-release: $(TARGETS)
+# Parallel across targets (each go build parallelises internally, so -j is
+# capped at one job per target).
+release:
+	+$(MAKE) -j$(words $(TARGETS)) $(TARGETS)
 	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
 		shasum -a 256 $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS
 
@@ -66,6 +69,9 @@ web:
 web-serve: web
 	@echo "serving $(WEBDIST) at http://127.0.0.1:8417/"
 	@cd $(WEBDIST) && python3 -m http.server 8417 --bind 127.0.0.1
+
+# CI pre-release gate, in fail-fast order: formatting, vet, then tests.
+check: fmtcheck vet test
 
 test:
 	$(GOFLAGS) go test ./...

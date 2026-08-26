@@ -1,0 +1,47 @@
+# Pre-tag gate: everything a release run does except publishing. Catches
+# fmt/vet/test regressions, broken cross-targets, and GOOS=js breakage on
+# main and PRs before a tag is cut. Runs on the self-hosted runner, so
+# there are no metered Actions minutes.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded PR runs are cancelled; every main commit gets a full run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Format + vet + tests
+        run: make check
+
+      - name: Race detector
+        run: make race
+
+      - name: Native build
+        run: make build
+
+      - name: Cross-compile all release targets
+        run: make release
+
+      # GOOS=js compile check (artifact discarded); skips if repo vars
+      # were never set up.
+      - name: Web build compile-check
+        if: ${{ vars.SUPABASE_URL != '' && vars.SUPABASE_KEY != '' }}
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
+        run: make web

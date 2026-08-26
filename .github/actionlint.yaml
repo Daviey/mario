@@ -1,0 +1,5 @@
+# actionlint config: the trucker self-hosted runner fleet exposes the
+# extra 'mario' label (self-hosted, Linux, X64, mario).
+self-hosted-runner:
+  labels:
+    - mario
