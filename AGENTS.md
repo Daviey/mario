@@ -9,7 +9,7 @@ A fully playable SMB-style platformer rendered as half-block terminal pixels (na
 ## Architecture & Data Flow
 
 ```text
-stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ io.plain ──▶ scoreUI.keys (lbui.go)
+stdin bytes ──▶ router.Feed() ──┬─(UI active)──▶ io.plain ──▶ scoreUI.keys (lbui.go)
                                ├─(title 'l')──▶ io.plain ──▶ scoreUI.note
                                └─(playing)───▶ input.Mapper.Feed
                                                 │ Poll() each tick
@@ -21,7 +21,7 @@ stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ io.plain �
 ```
 
 - **Spine**: the importable root package `mario` (library facade, `mario.go`) owns the 60 Hz loop: `App.Run(*render.Stream)` blocks for the native terminal; `App.Step()` drives one tick for clock-owning consumers (the browser build). Both entries are thin: `cmd/mario` (native CLI) and `cmd/web` (WASM).
-- **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes are decoded via `input.PlainDecoder` and passed to the UI. The mapper speaks `CSI u` natively, but the UI is strictly byte-oriented (`gameio.go`).
+- **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes are decoded via `input.PlainDecoder` and passed to the UI. The mapper speaks `CSI u` natively, but the UI is strictly byte-oriented (`internal/ui/router.go`).
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StatePlaying ↔ StateDying/StateLevelClear → StateGameOver/StateWin`. Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go`.
 - **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw` take an optional `*ScoreUI` that swaps the world for the leaderboard screens, drawn as **real text cells** (not the pixel font); the browser build receives the same snapshot as JSON (`marioBoard`) and renders a DOM panel.
 - **Leaderboard** (`internal/ui`, `board/`): `ui.UI` state machine (`UIOff/UIAsk/UIEntry/UIBoard`) driven by `Tick(g)`; network runs off the tick loop via injectable `submit`/`fetch` funcs (nil → real `board.Client` from env). `board.Client` is a thin PostgREST wrapper (`Submit`, `Top`); RLS allows anon insert + public read only.
@@ -37,7 +37,7 @@ stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ io.plain �
 | `board/` | Supabase PostgREST client + `.env` loader |
 | `supabase/migrations/` | SQL schema for the `scores` table (RLS + grants) — source of truth for the live DB |
 | `web/` | Static browser shell: `index.html` (canvas + boot-screen loader), builds to `dist/web/` |
-| root `*.go` | Entry points, input routing (`gameio.go`), calibration/identity persistence (`keys.go`, `player.go`), leaderboard UI (`lbui.go`) |
+| root `*.go` | Entry points, input routing (`internal/ui/router.go`), calibration/identity persistence (`keys.go`, `player.go`), leaderboard UI (`lbui.go`) |
 
 ## Development Commands
 
@@ -120,14 +120,14 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Ranged edits in this repo have repeatedly misfired (especially after `gofmt` renumbering); prefer read-then-full-file writes for multi-line changes, and single-line 1:1 replacements otherwise.
 - **UI trigger keys must be mapper no-ops**: any byte the input mapper doesn't know maps to `AnyKey`, which starts the game on the title screen before `scoreUI` can see it. `'l'` (leaderboard) is deliberately mapped to a no-op event in `mappedKey` — a new UI hotkey needs the same treatment (regression: `input.TestLeaderKeyIsNotAGameKey`).
 - The pixel font's missing glyphs are a *product constraint*: `[`, `_`, lowercase etc. render wrong — the name-entry field draws its own rails instead of brackets for exactly this reason.
-- `engine.Input` is a fixed bool struct; anything needing character keys (name entry) must bypass the mapper via `gameIO`'s capture routing.
+- `engine.Input` is a fixed bool struct; anything needing character keys (name entry) must bypass the mapper via the Router's capture routing.
 - **UI input capture vs escape sequences**: The UI consumes single bytes for typing/control. `input.PlainDecoder` strips out non-text escape sequences (preventing lone `0x1b` from instantly closing the UI) and translates `CSI u` text keys back into normal bytes.
  - **Single-key-repeat demotion (legacy regime)**: Wayland compositors (and anything behind tmux, which strips the kitty negotiation) autorepeat only the newest pressed key — holding right and pressing jump silences right's repeat stream forever. The mapper's demotion model (`input/input.go`: `demotedHeld`, resurrection, `upExtendTicks` cap for jump) exists to keep proven holds alive through that; don't "simplify" those arrays away. Regression tests: `input/demote_test.go`.
 - Viewport extremes are real: `ViewH` can be 4 tiles tall; every new screen must survive the size sweeps or `TestScoreUIAllViewportSizes` fails.
 - The WASM build shares `play()` but not `render.Stream` — it rasterizes via `RenderPixels`; changes to overlay drawing must work through both `worldFrame` paths.
 - `web/index.html` contains a self-contained boot loader that ports the game's art/palette/font — if sprites/font change, consider whether the loader art should follow.
 - **Mobile Web Support**: The browser build bypasses virtual keyboard quirks by rendering its own on-screen gamepad and alphanumeric keypad (`#pad`). The page reads `st.mode` from `marioBoard(json)` to swap control clusters contextually. The CSS uses `100dvh`, `touch-action: none`, and `visualViewport` resize listeners to prevent iOS Safari scrolling and zooming. The page must feed every game key as a kitty press/release pair (`\e[<cp>;1:1u` / `\e[<cp>;1:3u`) — a bare text byte is a legacy press that decays after ~0.2s in the mapper, so pad holds would stall (regression: phone ◀/▶ died after a step). UI-capture paths are safe: `PlainDecoder` decodes press pairs back to plain bytes. HTML-attribute payloads can't hold raw control chars — use `&#13;` for Enter (a template-literal `"\\r"` is a literal backslash+r).
-- **Board Restart**: Pressing `r` on the leaderboard closes the board, sets `u.restart`, and injects an `Input.Restart` edge via `gameio.poll()`. This cleans up UI state (`asked = false`) so the next game-over can prompt for submission again.
+- **Board Restart**: Pressing `r` on the leaderboard closes the board, sets `u.restart`, and injects an `Input.Restart` edge via `router.poll()`. This cleans up UI state (`asked = false`) so the next game-over can prompt for submission again.
 - **CI runners use dash as `/bin/sh`** — Makefile recipes must stay POSIX (no `<<<`/bashisms): they pass locally on NixOS bash and die only in Actions. The runner's toolcache Go also lacks `$(go env GOROOT)/lib/wasm/wasm_exec.js` (hence the `find` in `make web`), and `dist/mario-*` already matches `mario-web.zip` — never list it twice in `gh release create`.
 - **Re-running a release run** is idempotent since the matrix rework: `gh release create` failure falls back to `gh release upload --clobber`, refreshing assets instead of dying on "already_exists". Reruns still use the tag commit's workflow file; the `pages` (`workflow_run`) job always uses the default-branch file.
 - Live Supabase details: project `jdmgfpzxcdpyylhwdbkz` (direct IPv6 `db.<ref>.supabase.co` reachable from this host; pooler tenant lookup fails); schema changes go through the migration file + direct DB apply.
