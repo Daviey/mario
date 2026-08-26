@@ -87,11 +87,12 @@ cover:
 vet:
 	$(GOFLAGS) go vet ./...
 
+# fmt/fmtcheck touch tracked files only — mirrors what CI checks out, and
+# keeps both from rewriting (or tripping on) WIP sources inside nested
+# .worktrees/ checkouts.
 fmt:
-	gofmt -w .
+	git ls-files -- '*.go' | xargs gofmt -w
 
-# Tracked files only — mirrors what CI checks out, and stops the gate
-# breaking when a nested .worktrees/ checkout holds WIP sources.
 fmtcheck:
 	@out=$$(git ls-files -- '*.go' | xargs gofmt -l); [ -z "$$out" ] || (echo "gofmt needed:"; echo "$$out"; exit 1)
 
