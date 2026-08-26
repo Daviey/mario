@@ -1,0 +1,36 @@
+# Maintainer: Dave Walker <dave@daviey.com>
+#
+# NOTE: upstream (github.com/Daviey/mario) is a private repository — this
+# package builds only where your GitHub ssh key can clone it. The release
+# workflow (.github/workflows/release.yml, "aur" job) refreshes pkgver on
+# every tag push; bump pkgrel manually for packaging-only changes.
+
+pkgname=mario
+pkgver=0.3.0
+pkgrel=1
+pkgdesc='Terminal Mario-style platformer with a replay-verified online leaderboard'
+arch=(x86_64 aarch64)
+url='https://daviey.github.io/mario/'
+license=('MIT')
+makedepends=(go git)
+source=("git+ssh://git@github.com/Daviey/mario.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+
+build() {
+	cd "${srcdir}/${pkgname}"
+	export CGO_ENABLED=0
+	go build -trimpath \
+		-ldflags "-s -w -X github.com/Daviey/mario/render.Version=v${pkgver}" \
+		-o mario ./cmd/mario
+	go run ./tools/genicon -out "${srcdir}/icon48.png" -size 48 -cell 8
+}
+
+package() {
+	cd "${srcdir}/${pkgname}"
+	install -Dm755 mario "${pkgdir}/usr/bin/mario"
+	install -Dm644 packaging/mario.6 "${pkgdir}/usr/share/man/man6/mario.6"
+	gzip -n "${pkgdir}/usr/share/man/man6/mario.6"
+	install -Dm644 packaging/mario.desktop "${pkgdir}/usr/share/applications/mario.desktop"
+	install -Dm644 "${srcdir}/icon48.png" "${pkgdir}/usr/share/icons/hicolor/48x48/apps/mario.png"
+	install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/mario/LICENSE"
+}
