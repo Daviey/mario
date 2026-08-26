@@ -27,10 +27,8 @@ jobs:
 
       - name: Format + vet + tests
         run: make check
-
-      - name: Race detector
-        run: make race
-
+      # No race step: the runner image has no C toolchain and the race
+      # detector requires cgo — `make race` stays a local gate.
       - name: Native build
         run: make build
 

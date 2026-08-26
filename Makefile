@@ -82,8 +82,10 @@ race:
 cover:
 	$(GOFLAGS) go test -cover ./...
 
+# Static like test/build: the CI runner image has no C toolchain, and
+# default-CGO vet would try to compile runtime/cgo (net/http resolver).
 vet:
-	go vet ./...
+	$(GOFLAGS) go vet ./...
 
 fmt:
 	gofmt -w .
