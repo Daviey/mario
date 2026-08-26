@@ -316,6 +316,7 @@
       ac = new Ctor();
       master = ac.createGain();
       master.gain.value = 0.25;
+      master.connect(ac.destination); // the one edge the whole synth hangs on
       noiseBuf = ac.createBuffer(1, (ac.sampleRate * 0.5) | 0, ac.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
