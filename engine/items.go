@@ -86,3 +86,7 @@ func (g *Game) spawnDebris(tx, ty int) {
 func (g *Game) spawnSparkle(x, y float64) {
 	g.Particles = append(g.Particles, &Particle{Pos: Vec{x, y}, Vel: Vec{0, -0.05}, Life: 14, Kind: ParticleSparkle})
 }
+
+func (g *Game) spawnDustPuff(x, y float64) {
+	g.Particles = append(g.Particles, &Particle{Pos: Vec{x, y}, Vel: Vec{0, -0.02}, Life: 12, Kind: ParticleDust})
+}

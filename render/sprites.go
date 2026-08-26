@@ -226,6 +226,89 @@ var (
 	marioSuperWalk = [][]string{sprMarioSuper, sprMarioSuperStride, sprMarioSuperPass}
 )
 
+var sprMarioSmallSquash = []string{ // crouched flat: hard-landing bounce
+	".......",
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	"SSSSSSS",
+	"RBBBBBR",
+	"DDDDDDD",
+}
+
+var sprMarioSmallStretch = []string{ // elongated: jump liftoff
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".BBBB..",
+	".BB....",
+	".DD....",
+}
+
+var sprMarioDead = []string{ // dying: flat on his back, arms flung out
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	"SSSSSSS",
+	".RBBBR.",
+	".BBBBB.",
+	"DD...DD",
+}
+
+var sprMarioSuperSquash = []string{
+	".......",
+	".......",
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".RRRRR.",
+	"RRBBBRR",
+	"RBBBBBR",
+	".BBBBB.",
+	"BBBBBBB",
+	"DDDDDDD",
+	"DDDDDDD",
+}
+
+var sprMarioSuperStretch = []string{
+	"..RRR..",
+	".RRRRR.",
+	".SDSDS.",
+	".SSSSS.",
+	".RRRRR.",
+	"RRBBBRR",
+	"RRBBBRR",
+	".BBBB..",
+	".BBB...",
+	".BBB...",
+	".BB....",
+	".DD....",
+	".DD....",
+}
+
+var sprGoombaWalk = []string{ // waddle: feet splayed
+	"..nnn..",
+	".nnnnn.",
+	"nnnnnnn",
+	"nWD.DWn",
+	".nnnnn.",
+	"DD...DD",
+}
+
+var sprKoopaWalk = []string{ // stepping: feet spread
+	"..DKKK",
+	".KKKKK",
+	".GGGGG",
+	".GGGGG",
+	"GGGGGG",
+	"GgGGgG",
+	"GgGGgG",
+	".K..K.",
+	"KK..KK",
+}
+
 var sprGoomba = []string{ // 7×6 on a 0.9×0.9 hitbox
 	"..nnn..",
 	".nnnnn.",

@@ -572,6 +572,11 @@ func drawParticlesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, ox
 			f.Set(x+1, y+1, p.BrickDark)
 		case engine.ParticleSparkle:
 			f.DrawSprite(sprSparkle, rc, x-1, y-1, false, 1)
+		case engine.ParticleDust:
+			f.Set(x, y, p.White)
+			if pt.Life%2 == 0 {
+				f.Set(x+1, y, p.White)
+			}
 		}
 	}
 }
@@ -598,8 +603,12 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		default:
 			art := sprGoomba
+			walk := sprGoombaWalk
 			if e.Kind == engine.KindKoopa {
-				art = sprKoopa
+				art, walk = sprKoopa, sprKoopaWalk
+			}
+			if int(e.WalkDist/engine.EnemyFrameLen)%2 == 1 {
+				art = walk
 			}
 			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		}
@@ -611,29 +620,44 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	if pl.Invincible > 0 && (g.Tick/3)%2 == 0 {
 		return // damage flicker
 	}
-	art := marioArt(pl)
+	art := sprMarioDead
+	if g.State != engine.StateDying {
+		art = marioArt(pl)
+	}
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
-// marioArt picks the pose: airborne jump, skid while turning against
-// motion, otherwise the distance-driven walk cycle (stand frame when idle).
+// marioArt picks the pose: liftoff stretch or airborne jump, landing squash,
+// skid while turning against motion, otherwise the distance-driven walk
+// cycle (stand frame when idle). The death pose is chosen in drawPlayerPx.
 func marioArt(pl *engine.Player) []string {
+	super := pl.Super
 	switch {
+	case !pl.Grounded && pl.StretchT > 0:
+		if super {
+			return sprMarioSuperStretch
+		}
+		return sprMarioSmallStretch
 	case !pl.Grounded:
-		if pl.Super {
+		if super {
 			return sprMarioSuperJump
 		}
 		return sprMarioSmallJump
+	case pl.SquashT > 0:
+		if super {
+			return sprMarioSuperSquash
+		}
+		return sprMarioSmallSquash
 	case pl.Skidding:
-		if pl.Super {
+		if super {
 			return sprMarioSuperSkid
 		}
 		return sprMarioSmallSkid
 	case pl.Vel.X != 0:
 		frames := marioSmallWalk
-		if pl.Super {
+		if super {
 			frames = marioSuperWalk
 		}
 		return frames[int(pl.WalkDist/engine.WalkFrameLen)%len(frames)]
@@ -683,8 +707,14 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 	}
 	// Mario and the goomba flank the centre, facing each other.
 	cx := f.W / 2
-	f.DrawSprite(sprMarioSmall, rc2, cx-2*sprW(sprMarioSmall)-6, castY, false, 2)
-	f.DrawSprite(sprGoomba, rc2, cx+7, castY+2*(sprH(sprMarioSmall)-sprH(sprGoomba)), true, 2)
+	// The cast walks in place: mario cycles his gait, the goomba waddles.
+	mario := marioSmallWalk[(g.Tick/10)%len(marioSmallWalk)]
+	goomba := sprGoomba
+	if (g.Tick/10)%2 == 1 {
+		goomba = sprGoombaWalk
+	}
+	f.DrawSprite(mario, rc2, cx-2*sprW(mario)-6, castY, false, 2)
+	f.DrawSprite(goomba, rc2, cx+7, castY+2*(sprH(mario)-sprH(goomba)), true, 2)
 
 }
 
