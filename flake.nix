@@ -22,15 +22,21 @@
                 inherit version;
                 src = self;
                 subPackages = [ "cmd/efi" ];
-                # Stdlib-only module — no dependencies to vendor. The
-                # default CGO_ENABLED=0 env gives the static binary the
-                # initramfs needs.
-                vendorHash = null;
+                # Force a fully static binary: the initramfs has no
+                # dynamic loader, and nixpkgs' Go otherwise links
+                # against a store glibc (execve in the boot image would
+                # fail with ENOENT on the interpreter path).
+                env.CGO_ENABLED = 0;
+                buildFlags = [ "-buildmode=exe" ];
                 ldflags = [
+                  "-linkmode"
+                  "internal"
                   "-s"
                   "-w"
                   "-X github.com/Daviey/mario/render.Version=v${version}"
                 ];
+                # Stdlib-only module — no dependencies to vendor.
+                vendorHash = null;
                 meta.description = "mario as initramfs /init — the EFI-stub boot payload";
               };
               # The .cpio suffix matters: the kernel's gen_initramfs.sh
