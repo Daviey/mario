@@ -1,16 +1,16 @@
 # On tag push (v*): test, cross-compile every platform binary (one matrix
 # job per GOOS/GOARCH so a broken target is visible on its own), build
 # Debian packages for both Linux arches, build the web bundle, build an
-# Android APK (WebView shell around that web bundle), then a tag-gated
-# release job merges the artifacts into a GitHub Release (binaries + debs
-# + APK + SHA256SUMS + mario-web.zip). The web-dist artifact is picked
-# up from this run by pages.yml (workflow_run), which deploys from a
-# default-branch context because the github-pages environment's
-# protection rules reject tag refs.
+# Android APK (WebView shell around that web bundle) and an unsigned iOS
+# .ipa (WKWebView shell built on this Linux runner with clang+lld+ldid),
+# then a tag-gated release job merges the artifacts into a GitHub Release
+# (binaries + debs + APK + IPA + SHA256SUMS + mario-web.zip). The
+# web-dist artifact is picked up from this run by pages.yml
+# (workflow_run), which deploys from a default-branch context because
+# the github-pages environment's protection rules reject tag refs.
 #
-# Manual dispatch = test/build/web/apk only; the release job is
+# Manual dispatch = test/build/web/apk/ipa only; the release job is
 # tag-gated, so dispatches never publish anything.
-name: release
 
 on:
   push:
@@ -120,16 +120,45 @@ jobs:
           path: dist/mario_*_android.apk
           if-no-files-found: error
 
+  # iOS IPA: the same WASM build wrapped in a WKWebView shell, built
+  # entirely on this Linux runner — clang (arm64-apple-ios) + lld +
+  # ldid from the repo flake, compiled against the iPhoneOS SDK staged
+  # at IOS_SDK (see packaging/ios/README.md — Apple's license keeps the
+  # SDK out of the repo). Best-effort like the APK: never gates the
+  # release; the steps below tolerate a missing IPA.
+  ipa:
+    needs: test
+    runs-on: [self-hosted, mario]
+    continue-on-error: true
+    timeout-minutes: 10
+    env:
+      IOS_SDK: /opt/ios-sdks/iPhoneOS16.5.sdk
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Build web bundle + IPA
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
+        run: nix develop .#ios -c make ipa
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
+        with:
+          name: mario-ios
+          path: dist/mario_*_ios_unsigned.ipa
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, web, apk]
+    needs: [build, web, apk, ipa]
     runs-on: [self-hosted, mario]
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
       # pattern mario-* merges every per-OS binary artifact AND the
-      # mario-android APK artifact (its name matches the pattern).
+      # mario-android APK + mario-ios IPA artifacts (their names match
+      # the pattern).
       - name: Wipe workspace before artifact download
         run: rm -rf dist web-dist && mkdir dist web-dist
       - name: Gather binaries
@@ -145,15 +174,17 @@ jobs:
           name: web-dist
           path: web-dist
 
-      # SHA256SUMS lists the five binaries, both debs, the Android APK
-      # + the web zip; mario-web.zip is picked up by the dist/mario-*
-      # glob below (do not list it twice). The debs are
-      # mario_<ver>_<arch>.deb and the APK mario_<ver>_android.apk —
-      # underscores, so they never collide with that glob.
+      # SHA256SUMS lists the five binaries, both debs, the Android APK,
+      # the iOS IPA + the web zip; mario-web.zip is picked up by the
+      # dist/mario-* glob below (do not list it twice). The debs are
+      # mario_<ver>_<arch>.deb, the APK mario_<ver>_android.apk and the
+      # IPA mario_<ver>_ios_unsigned.ipa — underscores, so they never
+      # collide with that glob.
       - name: Checksums + web zip
         run: |
           cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* mario_*_*.deb > SHA256SUMS
           ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
+          ls mario_*_ios_unsigned.ipa >/dev/null 2>&1 && sha256sum mario_*_ios_unsigned.ipa >> SHA256SUMS || echo no-ipa-this-run
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -165,6 +196,7 @@ jobs:
           # produced one (set -- keeps this shellcheck-clean POSIX sh).
           set -- dist/mario-* dist/mario_*_*.deb dist/SHA256SUMS
           ls dist/mario_*_android.apk >/dev/null 2>&1 && set -- "$@" dist/mario_*_android.apk
+          ls dist/mario_*_ios_unsigned.ipa >/dev/null 2>&1 && set -- "$@" dist/mario_*_ios_unsigned.ipa
           if gh release create "$GITHUB_REF_NAME" "$@" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
