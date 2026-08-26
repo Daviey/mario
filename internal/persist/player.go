@@ -1,14 +1,18 @@
 package persist
 
-// Player identity for the leaderboard: a stable device UUID (generated once,
-// stored in the OS config dir) and a display name. No accounts anywhere.
+// Player identity for the leaderboard: a stable device UUID (generated
+// once, stored per platform) and a display name. No accounts anywhere.
+//
+// The store itself is build-tagged: natively a 0600 JSON file under the
+// OS config dir (player_store_other.go); in the browser, localStorage
+// (player_store_js.go) — js has no filesystem, and without a persistent
+// device id every web submit would send device_id "" and be rejected by
+// the server's uuid column.
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -19,28 +23,11 @@ type PlayerConfig struct {
 	Best     int    `json:"best,omitempty"` // best score ever, local only
 }
 
-// PlayerConfigPath returns <UserConfigDir>/mario/player.json, creating the
-// directory if needed.
-func PlayerConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	p := filepath.Join(dir, "github.com/Daviey/mario")
-	if err := os.MkdirAll(p, 0o700); err != nil {
-		return "", err
-	}
-	return filepath.Join(p, "player.json"), nil
-}
-
-// LoadPlayer loads the stored player identity, creating a fresh one on first
-// run.
+// LoadPlayer loads the stored player identity, creating a fresh one on
+// first run. Store failures are best-effort: a fresh in-memory identity
+// is still returned so play (and offline bests) keep working.
 func LoadPlayer() (PlayerConfig, error) {
-	path, err := PlayerConfigPath()
-	if err != nil {
-		return PlayerConfig{}, err
-	}
-	if data, err := os.ReadFile(path); err == nil {
+	if data := loadPlayerBytes(); len(data) > 0 {
 		var pc PlayerConfig
 		if json.Unmarshal(data, &pc) == nil && pc.DeviceID != "" {
 			return pc, nil
@@ -48,8 +35,7 @@ func LoadPlayer() (PlayerConfig, error) {
 	}
 	pc := PlayerConfig{DeviceID: newDeviceID()}
 	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-		os.WriteFile(path, data, 0o600)
-		os.Chmod(path, 0o600) // Ensure tight permissions if file existed
+		storePlayerBytes(data)
 	}
 	return pc, nil
 }
@@ -67,11 +53,8 @@ func SaveBest(score int) {
 
 func (pc *PlayerConfig) SaveName(name string) {
 	pc.Name = name
-	if path, err := PlayerConfigPath(); err == nil {
-		if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-			os.WriteFile(path, data, 0o600)
-			os.Chmod(path, 0o600)
-		}
+	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
+		storePlayerBytes(data)
 	}
 }
 
