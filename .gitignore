@@ -1,4 +1,5 @@
 .env
+web/supabase.env
 /mario
 /mario.exe
 /dist/

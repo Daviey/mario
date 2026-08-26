@@ -8,7 +8,10 @@
 #   make vet / fmt / fmtcheck / clean / run / demo
 
 BINARY    := mario
-VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# VERSION feeds shell recipes (ldflags quoting, sed, mkdeb args), so strip
+# everything outside a safe charset at this single choke point — a crafted
+# git tag name must never reach recipe-shell evaluation.
+VERSION   := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || echo dev); printf '%s' "$$v" | tr -cd '[:alnum:]_.+-')
 DIST      := dist
 WEBDIST   := $(DIST)/web
 LDFLAGS   := -s -w -X github.com/Daviey/mario/render.Version=$(VERSION)
@@ -69,16 +72,30 @@ deb: deb/amd64 deb/arm64
 # the leaderboard works in the browser, which has no environment.
 SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env web/supabase.env 2>/dev/null | head -n 1))
 SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env web/supabase.env 2>/dev/null | head -n 1))
-WEBLDFLAGS := $(LDFLAGS) -X github.com/Daviey/mario/board.DefaultURL=$(SUPA_URL) -X github.com/Daviey/mario/board.DefaultKey=$(SUPA_KEY)
-
 web:
 	@if [ -z "$(SUPA_URL)" ] || [ -z "$(SUPA_KEY)" ]; then \
 		echo "ERROR: SUPABASE_URL and SUPABASE_KEY must be set in env, .env, or web/supabase.env" >&2; exit 1; \
 	fi
+	@case "$(SUPA_KEY)" in \
+		sb_publishable_*) ;; \
+		eyJ*) \
+			payload=$$(printf '%s' "$(SUPA_KEY)" | cut -d. -f2 | tr '_-' '/+'); \
+			case $$(( $${#payload} % 4 )) in \
+				2) payload="$$payload==" ;; \
+				3) payload="$$payload=" ;; \
+			esac; \
+			printf '%s' "$$payload" | base64 -d 2>/dev/null | grep -q '"role":"anon"' || { \
+				echo "ERROR: SUPABASE_KEY is a JWT without role=anon — refusing to embed a privileged key in a public artifact" >&2; exit 1; } ;; \
+		*) echo "ERROR: SUPABASE_KEY is not publishable (want sb_publishable_* or an anon JWT)" >&2; exit 1 ;; \
+	esac
 	@mkdir -p $(DIST)/web
+	cp web/boot.js $(WEBDIST)/
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm ./cmd/web
-	cp web/index.html $(WEBDIST)/
 	cp web/manifest.webmanifest $(WEBDIST)/
+	# Narrow the CSP to exactly this project's origin (the source keeps the
+	# dev-friendly https://*.supabase.co wildcard; only dist narrows).
+	@supa_origin=$$(printf '%s' "$(SUPA_URL)" | sed -e 's|^[a-zA-Z]*://||' -e 's|/.*||'); \
+		sed "s|https://\*.supabase.co|https://$$supa_origin|" web/index.html > $(WEBDIST)/index.html
 	# Cache-bust the service worker per release: the deployed sw.js carries
 	# the git version as its CACHE name, so every deploy keys a fresh cache
 	# (activate drops older ones) instead of serving stale bytes forever.

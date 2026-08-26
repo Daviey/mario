@@ -63,7 +63,11 @@ func main() {
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
-	board.LoadDotEnv(".env")
+	// The verifier holds the service key: it must not honor a CWD-relative
+	// .env before its own guarded load (see runVerifyPending).
+	if !*verifyPending {
+		board.LoadDotEnv(".env")
+	}
 	if *verifyPending {
 		if err := runVerifyPending(); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
@@ -203,7 +207,7 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 	// session drop; without it the process dies with the kitty keyboard
 	// protocol still pushed and the shell becomes unusable.
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGPIPE, syscall.SIGQUIT)
 
 	if !isTTY(os.Stdin) {
 		return 0, fmt.Errorf("stdin is not a terminal (use -demo for a headless run)")

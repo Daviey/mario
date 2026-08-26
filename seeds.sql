@@ -1,0 +1,4 @@
+insert into public.scores (name, score, device_id, pow_nonce, replay, engine_version, mode) values (E'P\x1b[31mX',9001,'0a219a17-7fe3-423e-a99d-2346b5f8d3c5','1256050','{"v":1,"ticks":1,"runs":[]}','seed','classic');
+insert into public.scores (name, score, device_id, pow_nonce, replay, engine_version, mode) values (E'<img src=x>',9002,'d6152acc-f7c6-41b9-b483-732e5dc57bfb','243862','{"v":1,"ticks":1,"runs":[]}','seed','classic');
+insert into public.scores (name, score, device_id, pow_nonce, replay, engine_version, mode) values (E'looooooooongname20',9003,'28e70813-fedc-4d0f-99f0-2bc467fcfdf9','3438958','{"v":1,"ticks":1,"runs":[]}','seed','classic');
+insert into public.scores (name, score, device_id, pow_nonce, replay, engine_version, mode) values (E'\u00dcBER',9004,'416e6a3f-598c-4cbf-8c19-4b5dcf5f7a6a','387354','{"v":1,"ticks":1,"runs":[]}','seed','classic');

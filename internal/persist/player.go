@@ -48,8 +48,8 @@ func LoadPlayer() (PlayerConfig, error) {
 	}
 	pc := PlayerConfig{DeviceID: newDeviceID()}
 	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-		os.WriteFile(path, data, 0o600)
-		os.Chmod(path, 0o600) // Ensure tight permissions if file existed
+		writeAtomic(path, data)
+		// Ensure tight permissions if file existed
 	}
 	return pc, nil
 }
@@ -69,8 +69,8 @@ func (pc *PlayerConfig) SaveName(name string) {
 	pc.Name = name
 	if path, err := PlayerConfigPath(); err == nil {
 		if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
-			os.WriteFile(path, data, 0o600)
-			os.Chmod(path, 0o600)
+			writeAtomic(path, data)
+
 		}
 	}
 }

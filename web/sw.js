@@ -8,6 +8,7 @@ const ASSETS = [
   './index.html',
   './mario.wasm',
   './wasm_exec.js',
+  './boot.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
