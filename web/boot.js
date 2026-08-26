@@ -483,6 +483,13 @@
     RELEASE[code] || '\x1b[' + key.charCodeAt(0) + ';1:3u';
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key === 'c') { window.marioFeed('\x03'); e.preventDefault(); return; }
+    // A physical keypress on a machine the pointer media queries misjudge
+    // as touch-only (e.g. Firefox/Wayland with a touchscreen) is the
+    // strongest signal a real keyboard exists — drop the on-screen pad
+    // for good (the 🎛 bar button brings it back).
+    if (document.body.classList.contains('touch') && padPref() === 'auto') {
+      setPadPref('off'); disableTouch();
+    }
     if (e.repeat) return; // a press stays held until its release; repeats unneeded
     const seq = PRESS[e.code]
       || (e.key.length === 1 ? kittyPress(e.key) : null)
@@ -530,18 +537,44 @@
   };
   padEl.querySelectorAll('.pbtn').forEach(bindPad);
 
+  // Pad visibility: auto by default (pointer media queries), or the
+  // user's explicit persisted choice — the queries alone misjudge some
+  // setups (Firefox on Wayland with a touchscreen reports no fine
+  // pointer), and a physical keypress flips auto to off (see the keydown
+  // handler above). ?touch remains a hard debug override.
+  const padPref = () => { try { return localStorage.getItem('mario.pad') || 'auto'; } catch { return 'auto'; } };
+  const setPadPref = v => { try { localStorage.setItem('mario.pad', v); } catch {} };
   const enableTouch = () => {
     if (document.body.classList.contains('touch')) return;
     document.body.classList.add('touch');
     document.getElementById('note').innerHTML = 'tap START to play · <a href="#">restart</a>';
     sizeViewport();
   };
-  // Pointer-class gated: the pad appears only on devices with no fine
-  // pointer at all (phones, keyboard-less tablets). Touch events on a
-  // touchscreen computer never enable it — those machines have a
-  // mouse/trackpad and must see the plain keyboard UI. ?touch overrides.
-  if (!matchMedia('(any-pointer: fine)').matches ||
-      new URLSearchParams(location.search).has('touch')) enableTouch();
+  const disableTouch = () => {
+    if (!document.body.classList.contains('touch')) return;
+    document.body.classList.remove('touch');
+    document.getElementById('note').innerHTML = 'click the game to focus · <a href="#">restart</a>';
+    sizeViewport();
+  };
+  const applyPad = () => {
+    if (new URLSearchParams(location.search).has('touch')) { enableTouch(); return; }
+    const p = padPref();
+    if (p === 'on') enableTouch();
+    else if (p === 'off') disableTouch();
+    // auto: pointer-class gated — the pad appears only on devices with
+    // no fine pointer at all (phones, keyboard-less tablets).
+    else if (!matchMedia('(any-pointer: fine)').matches) enableTouch();
+    else disableTouch();
+  };
+  applyPad();
+  // 🎛 bar button: toggle relative to what is currently shown; an
+  // explicit choice beats both detection and the auto-keypress rule.
+  const padBtn = document.getElementById('pad-btn');
+  padBtn.addEventListener('click', () => {
+    if (document.body.classList.contains('touch')) { setPadPref('off'); disableTouch(); }
+    else { setPadPref('on'); enableTouch(); }
+    padBtn.blur();
+  });
 
   // Start the game module; main() runs its own 60 Hz loop. mario.wasm is
   // a few MB, so fetch it manually for real byte progress, then
