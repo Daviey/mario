@@ -1,33 +1,72 @@
-# On tag push (v*): test, cross-compile every platform binary, publish a
-# GitHub Release with binaries + SHA256SUMS + a web zip, and upload the
-# static web build as an artifact. Deploying it to Pages happens in
-# pages.yml (workflow_run), which runs from the default branch because
-# the github-pages environment's protection rules reject tag refs.
+# On tag push (v*): test, cross-compile every platform binary (one matrix
+# job per GOOS/GOARCH so a broken target is visible on its own), build the
+# web bundle, then a tag-gated release job merges the artifacts into a
+# GitHub Release (binaries + SHA256SUMS + mario-web.zip). The web-dist
+# artifact is picked up from this run by pages.yml (workflow_run), which
+# deploys from a default-branch context because the github-pages
+# environment's protection rules reject tag refs.
+#
+# Manual dispatch = test/build/web only; the release job is tag-gated, so
+# dispatches never publish anything.
 name: release
 
 on:
   push:
     tags: ['v*']
-  # Manual dispatch = build/test only; the release-create step is tag-gated,
-  # so dispatches never publish anything.
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+# Tag pushes twice / rerun races must not interleave artifact uploads.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  test:
     runs-on: [self-hosted, mario]
-
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
 
       # Go comes from the runner image PATH (runner extraPackages); go.mod needs >=1.22
-      - name: Test
-        run: make test
+      - name: Check (fmtcheck + vet + tests)
+        run: make check
 
-      - name: Build all platform binaries
-        run: make release
+  build:
+    needs: test
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 10
+    strategy:
+      # Try every target even if one fails: per-platform signal, and the
+      # runner is single-threaded across jobs anyway, so no cost.
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Build
+        run: make ${{ matrix.goos }}/${{ matrix.goarch }}
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
+        with:
+          name: mario-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mario-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          if-no-files-found: error
+
+  web:
+    needs: test
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
 
       - name: Build web bundle
         env:
@@ -35,23 +74,54 @@ jobs:
           SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
         run: make web
 
-      - name: Zip web bundle
-        run: |
-          cd dist/web && zip -r ../mario-web.zip .
-          cd .. && sha256sum mario-web.zip >> SHA256SUMS
-
-      - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/mario-* dist/SHA256SUMS \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            --repo "$GITHUB_REPOSITORY"
-
+      # pages.yml fetches this artifact from the release run by name.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
         with:
           name: web-dist
           path: dist/web
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, web]
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Gather binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          pattern: mario-*
+          merge-multiple: true
+
+      - name: Gather web bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web-dist
+          path: web-dist
+
+      # SHA256SUMS lists the five binaries + the web zip; mario-web.zip is
+      # picked up by the dist/mario-* glob below (do not list it twice).
+      - name: Checksums + web zip
+        run: |
+          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* > SHA256SUMS
+          cd ../web-dist && zip -qr ../dist/mario-web.zip .
+          cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release create "$GITHUB_REF_NAME" \
+              dist/mario-* dist/SHA256SUMS \
+              --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
+              --repo "$GITHUB_REPOSITORY"; then
+            exit 0
+          fi
+          # Rerun of a completed run: the release already exists — refresh
+          # its assets instead of dying on "already_exists".
+          echo "release exists, uploading assets with --clobber"
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/mario-* dist/SHA256SUMS \
+            --clobber --repo "$GITHUB_REPOSITORY"
