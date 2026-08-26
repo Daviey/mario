@@ -30,7 +30,7 @@
                   "-s"
                   "-w"
                   "-X github.com/Daviey/mario/render.Version=v${version}"
-                ];
+                  install -m 0755 ${efiInit}/bin/efi $d/init
                 meta.description = "mario as initramfs /init — the EFI-stub boot payload";
               };
               efiInitrd = pkgs.runCommand "mario-efi-initramfs"
