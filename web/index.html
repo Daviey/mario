@@ -33,6 +33,7 @@
     border-bottom: 2px solid #e4221b;
   }
   #bar .dim { font-weight: 400; letter-spacing: 0; color: #9fb6d9; font-size: 12px; }
+  body.touch #bar .dim { display: none; }
   #stage {
     flex: 1 1 auto; min-height: 0;
     display: flex; align-items: center; justify-content: center;
@@ -92,60 +93,170 @@
   #board tr.mine td { color: #FFF3B0; font-weight: 700; }
   @keyframes ui-blink { 50% { opacity: 0; } }
   #board .blink { animation: ui-blink 1.2s steps(1) infinite; }
+  #board th { font-size: 10px; letter-spacing: .18em; color: #6d7a99; font-weight: 700; padding: 0 10px 3px; }
+  #board th:nth-child(1) { text-align: right; } #board th:nth-child(3), #board th:nth-child(4) { text-align: right; }
+  #board .card {
+    background: rgba(6,12,38,.93);
+    border: 2px solid #2a4a9e;
+    border-radius: 18px;
+    padding: 18px 26px 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.65);
+    max-width: min(88vw, 400px);
+    text-align: center;
+  }
+  #board.on-touch .card p { font-size: 15px; }
+  #board.on-touch .card .score, #board.on-touch .card .field { font-size: 17px; }
+  #board.on-touch .card td { font-size: 15px; padding: 2px 10px; }
 
-  /* ---- touch pad: gamepad and entry mode overlays ---- */
+
+  /* ---- touch pad: an arcade control deck in the game's own palette.
+     Every key sits on a rim (box-shadow) and physically travels when
+     held — translateY plus the rim collapsing under it — so a held
+     button looks pressed, not just recolored. ---- */
   #pad {
     display: none; flex: 0 0 auto;
-    padding: 10px max(14px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right));
-    background: #071330; border-top: 2px solid #1a2c55; touch-action: none;
+    padding: 12px max(16px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-right));
+    background: linear-gradient(#0b1740, #071330);
+    border-top: 2px solid #2a4a9e; touch-action: none;
     align-items: center; justify-content: space-between;
   }
   body.touch #pad { display: flex; }
-  #pad .grp { display: flex; gap: 8px; align-items: center; }
+  #pad .grp { display: flex; gap: 10px; align-items: center; }
   .pbtn {
     appearance: none; border: 1px solid #2a4a9e; background: #0a1c6e; color: #fff;
-    border-radius: 12px; font-weight: 700; font-size: 16px;
+    border-radius: 14px; font-weight: 700; font-size: 16px; letter-spacing: .08em;
     display: flex; align-items: center; justify-content: center;
     width: 48px; height: 48px; touch-action: none; -webkit-touch-callout: none;
+    text-shadow: 0 1px 0 rgba(0,0,0,.5);
+    box-shadow: 0 4px 0 #06123f, inset 0 1px 0 rgba(255,255,255,.08);
+    transition: transform .06s ease, box-shadow .06s ease, filter .06s ease;
   }
-  .pbtn.held, .pbtn:active { background: #1a3aa0; }
-  #pad .act-btn { width: 64px; height: 64px; font-size: 20px; border-radius: 50%; }
-  #pad .act-grp { gap: 12px; }
-  #pad .mid-btn { width: auto; min-width: 54px; height: 38px; font-size: 13px; border-radius: 8px; padding: 0 10px; }
-  /* Portrait phones are narrow: let the pad groups wrap (A/B drop to a
-     second row) and compact the mid buttons so everything stays tappable
-     until the player heeds the rotate hint. Landscape is untouched. */
+  body.touch #pad.keypad { display: grid; } /* specificity: must beat body.touch #pad's flex */
+  .pbtn.held, .pbtn:active {
+    background: #16309a;
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #06123f, inset 0 2px 6px rgba(0,0,0,.3);
+    filter: brightness(1.08);
+  }
+  .pbtn:focus-visible { outline: 2px solid #FCD000; outline-offset: 2px; }
+  /* D-pad: the ◀ ▼ ▶ trio sits in a recessed well — dark floor, inner
+     shadow from the rim, keys raised out of it. */
+  #pad .dpad {
+    background: #040a22;
+    border: 1px solid #22398a;
+    border-radius: 18px;
+    padding: 10px;
+    gap: 8px;
+    box-shadow: inset 0 3px 10px rgba(0,0,0,.55), inset 0 0 0 1px rgba(0,0,0,.35);
+  }
+  #pad .dpad .pbtn { background: #0d2154; }
+  #pad .dpad .pbtn.held, #pad .dpad .pbtn:active { background: #1a3aa0; }
+  /* Action caps: glossy concave — A in Mario red (jump), B in overall
+     blue (run/fire). */
+  #pad .act-grp { gap: 14px; align-items: flex-start; }
+  /* NES diagonal: B sits low-left of A on purpose. */
+  #pad .act-grp .b-btn { margin-top: 14px; }
+  #pad .act-btn {
+    width: 64px; height: 64px; font-size: 24px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.15);
+    background:
+      radial-gradient(circle at 32% 26%, rgba(255,255,255,.24), rgba(255,255,255,0) 52%),
+      linear-gradient(#e4221b, #a01208);
+    box-shadow: 0 5px 0 #5c0b06, inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  #pad .b-btn {
+    background:
+      radial-gradient(circle at 32% 26%, rgba(255,255,255,.24), rgba(255,255,255,0) 52%),
+      linear-gradient(#2b5dd7, #1a3a94);
+    box-shadow: 0 5px 0 #101f5e, inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  #pad .act-btn.held, #pad .act-btn:active {
+    transform: translateY(5px);
+    box-shadow: 0 0 0 #5c0b06, inset 0 3px 10px rgba(0,0,0,.35);
+    filter: brightness(.92);
+  }
+  #pad .b-btn.held, #pad .b-btn:active {
+    box-shadow: 0 0 0 #101f5e, inset 0 3px 10px rgba(0,0,0,.35);
+  }
+  /* System pills: pause / start / scores / daily. */
+  #pad .mid-grp { gap: 8px; }
+  #pad .mid-btn {
+    width: auto; min-width: 52px; height: 40px; font-size: 12px; letter-spacing: .14em;
+    border-radius: 999px; padding: 0 14px; color: #cdd9f2;
+    box-shadow: 0 3px 0 #06123f, inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  #pad .mid-btn.held, #pad .mid-btn:active {
+    transform: translateY(3px); color: #fff;
+    box-shadow: 0 0 0 #06123f, inset 0 2px 6px rgba(0,0,0,.3);
+  }
+  #daily-btn { color: #FCD000; border-color: #6b5600; background: #231a02; }
+  #daily-btn.held, #daily-btn:active { background: #4a3800; }
+  /* Portrait: controls own the prime row (D-pad left, A/B right), system
+     pills center on a slim row below, and the caps grow for thumbs. */
   @media (orientation: portrait) {
-    #pad { flex-wrap: wrap; justify-content: space-around; row-gap: 8px; }
-    #pad .mid-btn { min-width: 44px; padding: 0 6px; font-size: 12px; }
+    #pad { flex-wrap: wrap; row-gap: 10px; }
+    #pad .mid-grp { order: 3; flex-basis: 100%; justify-content: center; }
+    .pbtn { width: 50px; height: 50px; }
+    #pad .act-btn { width: 70px; height: 70px; }
+    #pad .act-grp { gap: 12px; }
+    #pad .act-grp .b-btn { margin-top: 16px; }
   }
+  body.touch #note { padding-bottom: max(10px, env(safe-area-inset-bottom)); color: #8ea3c9; }
 
   #pad.ask, #pad.entry, #pad.board { justify-content: center; flex-wrap: wrap; }
-  #pad .btn-yes, #pad .btn-no { width: 140px; height: 64px; font-size: 20px; }
-  #pad.keypad { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 12px; width: 100%; max-width: 500px; margin: 0 auto; }
-  #pad.keypad .pbtn { width: 100%; height: 44px; border-radius: 8px; font-size: 15px; }
-  #pad.keypad .ok { grid-column: span 2; background: #E4221B; border-color: #f75550; }
-  #pad.keypad .ok.held, #pad.keypad .ok:active { background: #b21813; }
+  /* YES is the coin-gold key; NO is a quiet slate key. */
+  #pad .btn-yes, #pad .btn-no { width: 140px; height: 64px; font-size: 18px; letter-spacing: .12em; border-radius: 16px; }
+  #pad .btn-yes {
+    color: #241a00; text-shadow: 0 1px 0 #ffe98a;
+    background: linear-gradient(#ffd94d, #d9a600);
+    border-color: #fff3b0;
+    box-shadow: 0 4px 0 #7d5c00, inset 0 1px 0 rgba(255,255,255,.55);
+  }
+  #pad .btn-yes.held, #pad .btn-yes:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #7d5c00, inset 0 3px 8px rgba(0,0,0,.2);
+  }
+  #pad .btn-no {
+    background: linear-gradient(#1c2650, #10173a);
+    box-shadow: 0 4px 0 #060b22, inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  #pad .btn-no.held, #pad .btn-no:active {
+    transform: translateY(4px); box-shadow: 0 0 0 #060b22;
+  }
+  #pad.keypad { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; padding: 12px; width: 100%; max-width: 520px; margin: 0 auto; }
+  #pad.keypad .pbtn { width: 100%; height: 46px; border-radius: 10px; font-size: 15px; letter-spacing: 0; }
+  #pad.keypad .ok {
+    grid-column: span 2;
+    background: linear-gradient(#e4221b, #a01208); border-color: #f75550;
+    box-shadow: 0 4px 0 #5c0b06, inset 0 1px 0 rgba(255,255,255,.2);
+  }
+  #pad.keypad .ok.held, #pad.keypad .ok:active {
+    background: #b21813; transform: translateY(4px); box-shadow: 0 0 0 #5c0b06;
+  }
   /* ---- top-bar controls + rotate hint ---- */
   #bar .bar-r { display: flex; align-items: center; gap: 10px; }
   #bar .cbtn {
     appearance: none; border: 1px solid #2a4a9e; background: #0a1c6e; color: #fff;
-    border-radius: 6px; font-size: 13px; line-height: 1;
-    width: 30px; height: 26px; padding: 0; cursor: pointer;
+    border-radius: 8px; font-size: 14px; line-height: 1;
+    width: 32px; height: 28px; padding: 0; cursor: pointer;
+    box-shadow: 0 2px 0 #06123f;
   }
+  #bar .cbtn:active { transform: translateY(2px); box-shadow: none; }
   .pbtn[hidden] { display: none; } /* [hidden] loses to .pbtn's flex otherwise */
   #rotate {
     display: none; flex: 0 0 auto;
     justify-content: center; align-items: center; gap: 10px;
-    background: #E4221B; color: #fff;
+    background: #0a1c6e; color: #FCD000;
+    border-bottom: 2px solid #2a4a9e;
     font-size: 12px; font-weight: 700; letter-spacing: 1px;
     padding: 4px 12px;
   }
   #rotate button {
-    appearance: none; border: 0; background: none; color: #fff;
+    appearance: none; border: 0; background: none; color: #9fb6d9;
     font-size: 14px; font-weight: 700; padding: 0 4px; cursor: pointer;
   }
   @media (orientation: portrait) { body.touch #rotate:not(.off) { display: flex; } }
+  @media (prefers-reduced-motion: reduce) { .pbtn { transition: none; } }
 </style>
 </head>
 <body>
@@ -463,7 +574,7 @@
       let body;
       if (st.loading) body = '<p class="blink">LOADING...</p>';
       else if (!st.rows || !st.rows.length) body = '<p>NO SCORES YET</p>';
-      else body = '<table>' + st.rows.map((r) =>
+      else body = '<table><tr class="hdr"><th>#</th><th>NAME</th><th>SCORE</th><th>LV</th></tr>' + st.rows.map((r) =>
         '<tr' + (r.mine ? ' class="mine"' : '') + '><td class="rk">' + escHtml(r.rank)
         + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + escHtml(r.score)
         + '</td><td class="lv">L' + escHtml(r.level || 1) + '</td></tr>').join('') + '</table>';
@@ -475,7 +586,7 @@
         + (st.rank > 0 ? '<p class="gold">YOU ARE #' + escHtml(st.rank) + '</p>' : '')
         + foot;
     }
-    boardEl.innerHTML = html;
+    boardEl.innerHTML = '<div class="card">' + html + '</div>';
   };
 
   // ---- Sound: window.marioSfx is the game's whole audio layer — a tiny
@@ -675,9 +786,9 @@
   // Touch controls
   const padEl = document.getElementById('pad');
   padEl.innerHTML = `<div id="pad-game" style="display:contents">
-    <div class="grp"><button class="pbtn" data-key="a">◀</button><button class="pbtn" data-key="s">▼</button><button class="pbtn" data-key="d">▶</button></div>
-    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
-    <div class="grp act-grp"><button class="pbtn act-btn" data-key="x">B</button><button class="pbtn act-btn" data-key="w">A</button></div>
+    <div class="grp dpad"><button class="pbtn b-left" data-key="a" aria-label="left">◀</button><button class="pbtn b-down" data-key="s" aria-label="duck">▼</button><button class="pbtn b-right" data-key="d" aria-label="right">▶</button></div>
+    <div class="grp mid-grp"><button class="pbtn mid-btn" data-tap="p" aria-label="pause">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">SCORES</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
+    <div class="grp act-grp"><button class="pbtn act-btn b-btn" data-key="x" aria-label="run and fire">B</button><button class="pbtn act-btn a-btn" data-key="w" aria-label="jump">A</button></div>
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
   <div id="pad-board" style="display:none; gap:16px"><button class="pbtn btn-no" data-tap="l">CLOSE</button><button class="pbtn btn-yes" data-tap="r">RESTART</button></div>
@@ -685,7 +796,7 @@
   const padViews = { game: document.getElementById('pad-game'), ask: document.getElementById('pad-ask'), board: document.getElementById('pad-board'), entry: document.getElementById('pad-entry') };
   window.setPadMode = (m) => {
     padEl.className = m === 'entry' ? 'keypad' : m;
-    for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' ? 'contents' : (m === 'entry' ? 'grid' : 'flex')) : 'none';
+    for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' || m === 'entry' ? 'contents' : 'flex') : 'none';
   };
   
   const kbd = 'QWERTYUIOPASDFGHJKLZXCVBNM1234567890.-'.split('');
@@ -699,11 +810,11 @@
     const k = b.dataset.key;
     if (k) {
       const up = () => { if (!b.classList.contains('held')) return; b.classList.remove('held'); if (window.marioFeed) window.marioFeed(release(k, k)); };
-      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (window.marioFeed) window.marioFeed(PRESS[k] || kittyPress(k)); });
+      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(PRESS[k] || kittyPress(k)); });
       b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     }
     const t = b.dataset.tap;
-    if (t) b.addEventListener('pointerdown', e => { e.preventDefault(); if (window.marioFeed) window.marioFeed(t); b.classList.add('held'); setTimeout(()=>b.classList.remove('held'), 80); });
+    if (t) b.addEventListener('pointerdown', e => { e.preventDefault(); if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(t); b.classList.add('held'); setTimeout(()=>b.classList.remove('held'), 80); });
   };
   padEl.querySelectorAll('.pbtn').forEach(bindPad);
 
