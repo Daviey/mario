@@ -56,7 +56,7 @@ git clone https://github.com/Daviey/mario && cd mario
 make run          # or: make build && ./mario
 ```
 
-Or grab a static binary, a `.deb`, the Android APK or the web bundle from the
+Or grab a static binary, a `.deb`/`.rpm`, the Android APK or the web bundle from the
 [latest release](https://github.com/Daviey/mario/releases/latest). Nix users:
 `nix build` from the flake in this repo; Arch users: `makepkg -p packaging/aur/PKGBUILD`.
 
@@ -115,7 +115,7 @@ leaderboard.
   replay verifier leans on the same property.
 * **One codebase, many targets.** `make release` cross-compiles 17 OS/arch
   pairs; `make web` produces the static PWA; `make apk` wraps it for Android;
-  `make deb` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
+  `make deb` / `make rpm` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
   builds the bootable image. The Windows exe icon is rendered from the game's
   own sprite data.
 * **Importable as a library.** The root package is a facade — `mario.New`,

@@ -39,7 +39,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk ipa shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -94,6 +94,39 @@ deb/i386: linux/386
 		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.deb
 
 deb: deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386
+
+# RPM packages via the pure-Go packager (tools/mkrpm) — same contract as
+# mkdeb, no rpm toolchain on the build host. Installs /usr/bin/mario
+# (Fedora has no /usr/games convention) + man6 + hicolor icon +
+# desktop entry. Output names use the RPM arch (x86_64, …) so they never
+# match the dist/mario-* binary globs. Targets take the GOARCH name;
+# the tool maps to the RPM architecture internally.
+rpm/amd64: linux/amd64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch amd64 \
+		-bin $(DIST)/$(BINARY)-linux-amd64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_x86_64.rpm
+
+rpm/arm64: linux/arm64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch arm64 \
+		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_aarch64.rpm
+
+rpm/riscv64: linux/riscv64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch riscv64 \
+		-bin $(DIST)/$(BINARY)-linux-riscv64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_riscv64.rpm
+
+rpm/arm: linux/arm
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch arm \
+		-bin $(DIST)/$(BINARY)-linux-arm -out $(DIST)/$(BINARY)_$(PKGVERSION)_armhfp.rpm
+
+rpm/386: linux/386
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch 386 \
+		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.rpm
+
+rpm: rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386
 
 # Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
 # initramfs (tools/mkcpio) and embedded in an EFI-stub Linux kernel by the
