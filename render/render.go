@@ -573,7 +573,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				continue
 			}
 			t := g.Level.At(tx, ty)
-			if t == engine.Empty {
+			if t == engine.Empty || t == engine.HiddenCoin || t == engine.HiddenLife {
 				continue
 			}
 			x := tx*Pix - ox
@@ -586,7 +586,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				drawGround(f, p, x, y, tx, ty, g.Level.At(tx, ty-1) != engine.Ground)
 			case engine.Brick:
 				drawBrick(f, p, x, y, tx)
-			case engine.Question, engine.QuestionMush:
+			case engine.Question, engine.QuestionMush, engine.QuestionStar:
 				drawQuestion(f, p, x, y, g.Tick%48 < 24)
 			case engine.Used:
 				drawUsed(f, p, x, y)
@@ -636,7 +636,14 @@ func drawMushrooms(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX
 		}
 		cx := int(math.Round((m.Pos.X + engine.MushroomW/2 - camX) * Pix))
 		bottom := int(math.Round((m.Pos.Y + engine.MushroomH - camY) * Pix))
-		f.DrawSprite(sprMushroom, rc, cx-sprW(sprMushroom)/2, bottom-sprH(sprMushroom), false, 1)
+		art := sprMushroom
+		switch m.Kind {
+		case engine.MushLife:
+			art = sprMushroom1UP
+		case engine.MushStar:
+			art = sprStar
+		}
+		f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), false, 1)
 	}
 }
 
@@ -797,6 +804,9 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	if pl.Power == engine.PowerFire {
 		rc = fireRuneColors(p)
 	}
+	if pl.Star > 0 {
+		rc = starRuneColors(p, rc, g.Tick)
+	}
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
@@ -808,6 +818,24 @@ func fireRuneColors(p *Palette) map[rune]Color {
 	rc := runeColors(p)
 	rc['R'] = p.White
 	rc['B'] = p.FlagRed
+	return rc
+}
+
+// starRuneColors flickers mario's colors while star power runs: four
+// phases cycled off the world tick — deterministic, no RNG.
+func starRuneColors(p *Palette, base map[rune]Color, tick int) map[rune]Color {
+	rc := make(map[rune]Color, len(base)+2)
+	for k, v := range base {
+		rc[k] = v
+	}
+	switch (tick / 3) % 4 {
+	case 1:
+		rc['R'], rc['B'] = p.White, p.GoldLight
+	case 2:
+		rc['R'], rc['B'] = p.Coin, p.White
+	case 3:
+		rc['R'], rc['B'] = p.Green, p.Coin
+	}
 	return rc
 }
 

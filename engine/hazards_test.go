@@ -17,7 +17,7 @@ func TestFireBarSpinsBothWays(t *testing.T) {
 	if d := math.Hypot(p0.X-quarter.X, p0.Y-quarter.Y); d < 1.0 {
 		t.Errorf("ball barely moved in a quarter turn: dist=%f", d)
 	}
-	rev := int(2*math.Pi/math.Abs(a.Speed))
+	rev := int(2 * math.Pi / math.Abs(a.Speed))
 	p1 := a.BallPos(0, rev)
 	if d := math.Hypot(p0.X-p1.X, p0.Y-p1.Y); d > 0.1 {
 		t.Errorf("ball did not complete an orbit: residual=%f", d)

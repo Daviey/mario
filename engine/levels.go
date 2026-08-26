@@ -153,6 +153,7 @@ func level1() *Level {
 	b.Plant(34, 3)
 	b.Set(38, 12, 'G')
 	b.Pipe(41, 3)
+	b.Set(30, 8, '1') // hidden 1-UP above the third pipe (jump from the rim)
 	b.Set(46, 12, 'G')
 
 	b.Coins(9, 56, 57, 58)
@@ -203,6 +204,7 @@ func level2() *Level {
 	b.Set(24, 9, 'U')
 	b.Set(25, 9, 'B')
 	b.Set(26, 9, 'B')
+	b.Set(25, 5, 'H') // hidden coin high above the brick row
 	b.Set(28, 12, 'K')
 
 	// Tiered climb with coins on the high route.
@@ -282,6 +284,7 @@ func level3() *Level {
 	b.Set(70, 12, 'G')
 	b.Fill(74, 9, 78, 9, 'B')
 	b.Set(76, 9, '?')
+	b.Set(75, 9, 'S') // star power in the brick run
 
 	b.Pipe(86, 3)
 	b.Plant(86, 3)
@@ -348,6 +351,7 @@ func level4() *Level {
 	b.Set(78, 12, 'G')
 	b.Set(80, 12, 'G')
 	b.Set(84, 12, 'K')
+	b.Set(85, 5, '1') // hidden 1-UP before the pipe gauntlet
 
 	b.Fill(88, 9, 92, 9, 'B')
 	b.Set(89, 9, '?')
@@ -416,6 +420,7 @@ func level5() *Level {
 	b.Fill(86, 10, 90, 10, 'B')
 	b.Coins(9, 86, 87, 88, 89, 90)
 	b.Fill(94, 8, 98, 8, 'B')
+	b.Set(95, 4, 'H') // hidden coin above the upper tier — bump from the platform
 	b.Coins(7, 94, 95, 96, 97, 98)
 
 	b.Set(100, 12, 'W')
@@ -470,6 +475,7 @@ func level6() *Level {
 	b.Set(44, 12, 'W')
 
 	b.Fill(54, 9, 58, 9, 'B')
+	b.Set(66, 5, 'H') // hidden coin over the mid-stretch
 	b.Set(56, 9, 'f')
 	b.Coins(8, 54, 55, 56, 57, 58)
 	b.Set(62, 12, 'G')
@@ -561,6 +567,7 @@ func level7() *Level {
 
 	b.Set(110, 12, 'W')
 	b.Fill(116, 9, 120, 9, 'B')
+	b.Set(122, 8, '1') // hidden 1-UP past the pillar bars
 	b.Set(118, 9, 'U')
 	b.Coins(8, 116, 117, 118, 119, 120)
 	pillar(112)

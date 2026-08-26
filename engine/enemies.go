@@ -102,6 +102,14 @@ func (g *Game) playerEnemyInteractions() {
 		if !overlap(p.Pos.X, p.Pos.Y, p.W, p.H, e.Pos.X, e.Pos.Y, e.W, e.H) {
 			continue
 		}
+		if p.Star > 0 {
+			// Star power: any contact flips the enemy, no questions asked.
+			g.flipEnemy(e)
+			g.Score += StompScore
+			g.spawnScorePop(e.Pos.X, e.Pos.Y, StompScore, false)
+			g.emit("stomp")
+			continue
+		}
 		stomping := p.Vel.Y > 0.02 && (p.Pos.Y+p.H) < (e.Pos.Y+e.H*0.7)
 		switch {
 		case stomping && e.State == EnemyWalking:

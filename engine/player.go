@@ -85,6 +85,9 @@ func (g *Game) updatePlayer(in Input) {
 	if p.Invincible > 0 {
 		p.Invincible--
 	}
+	if p.Star > 0 {
+		p.Star--
+	}
 	if p.StretchT > 0 {
 		p.StretchT--
 	}
@@ -93,10 +96,8 @@ func (g *Game) updatePlayer(in Input) {
 	}
 
 	// Gravity and integration.
+	rising := p.Vel.Y < -0.01
 	p.Vel.Y += Gravity
-	if p.Vel.Y > MaxFall {
-		p.Vel.Y = MaxFall
-	}
 	if g.moveX(&p.Pos, p.W, p.H, p.Vel.X) {
 		p.Vel.X = 0
 	}
@@ -123,6 +124,31 @@ func (g *Game) updatePlayer(in Input) {
 			g.hitBlock(best, ceilTy, p)
 		}
 	}
+	if rising {
+		g.bumpHidden(p)
+	}
+}
+
+// bumpHidden resolves a rising head-bump against invisible blocks: hidden
+// blocks are not solid — bodies pass through them every other way — but a
+// head rising into their cell from below triggers them, classic style.
+func (g *Game) bumpHidden(p *Player) {
+	headRow := int(math.Floor(p.Pos.Y + skin))
+	x0 := int(math.Floor(p.Pos.X + skin))
+	x1 := int(math.Floor(p.Pos.X + p.W - skin))
+	for tx := x0; tx <= x1; tx++ {
+		t := g.Level.At(tx, headRow)
+		if t != HiddenCoin && t != HiddenLife {
+			continue
+		}
+		if horizontalOverlap(p.Pos.X, p.W, float64(tx)) < 0.15 {
+			continue
+		}
+		p.Pos.Y = float64(headRow) + 1
+		p.Vel.Y = 0
+		g.hitBlock(tx, headRow, p)
+		return
+	}
 }
 
 // hitBlock resolves a player head-bump against the tile at (tx, ty).
@@ -146,6 +172,47 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 		g.emit("bump")
 	case QuestionFire:
 		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = 8
+		// SMB rule: a small player gets a mushroom, a powered one the flower.
+		if p.Power == PowerSmall {
+			g.Mushrooms = append(g.Mushrooms, &Mushroom{
+				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+				Dir:    1,
+				Emerge: MushroomEmergeTicks,
+			})
+		} else {
+			g.FireFlowers = append(g.FireFlowers, &FireFlower{
+				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+				Emerge: FlowerEmergeTicks,
+			})
+		}
+		g.emit("bump")
+	case QuestionStar:
+		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = 8
+		g.Mushrooms = append(g.Mushrooms, &Mushroom{
+			Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+			Dir:    1,
+			Emerge: MushroomEmergeTicks,
+			Kind:   MushStar,
+		})
+		g.emit("bump")
+	case HiddenCoin:
+		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = 8
+		g.addCoin()
+		g.spawnCoinPop(float64(tx)+0.35, float64(ty))
+		g.emit("bump")
+	case HiddenLife:
+		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = 8
+		g.Mushrooms = append(g.Mushrooms, &Mushroom{
+			Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+			Dir:    1,
+			Emerge: MushroomEmergeTicks,
+			Kind:   MushLife,
+		})
+		g.emit("bump")
 		g.bumps[idx] = 8
 		// SMB rule: a small player gets a mushroom, a powered one the flower.
 		if p.Power == PowerSmall {
@@ -188,10 +255,10 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 }
 
 // hurtPlayer applies enemy contact damage: fire and super shrink to small,
-// small dies.
+// small dies. Star power absorbs everything.
 func (g *Game) hurtPlayer() {
 	p := g.Player
-	if p.Invincible > 0 {
+	if p.Invincible > 0 || p.Star > 0 {
 		return
 	}
 	if p.Power >= PowerSuper {

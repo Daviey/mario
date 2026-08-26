@@ -371,6 +371,22 @@ var sprMushroom = []string{ // 6×5 on a 0.9×0.9 hitbox
 	".SSSS.",
 }
 
+var sprMushroom1UP = []string{ // 6×5: the green-capped extra life
+	".GGGG.",
+	"GWWGGG",
+	"GGWWGG",
+	".SDDS.",
+	".SSSS.",
+}
+
+var sprStar = []string{ // 5×5: star power, eyes wide
+	"..Y..",
+	".YYY.",
+	"YYYYY",
+	"YDYDY",
+	".Y.Y.",
+}
+
 var sprCoin = []string{ // 4×6, full face
 	".YY.",
 	"YLLY",

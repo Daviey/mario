@@ -22,9 +22,12 @@ const (
 	Question     // question block containing a coin
 	QuestionMush // question block containing a mushroom
 	QuestionFire // question block containing a fire flower
+	QuestionStar // question block containing a star
 	Used         // spent question block
 	Pipe
-	Lava // castle hazard: not solid, kills on touch
+	Lava       // castle hazard: not solid, kills on touch
+	HiddenCoin // invisible block: only bumps from below, pays a coin
+	HiddenLife // invisible block: only bumps from below, pays a 1-UP
 	FlagPole
 	FlagTop
 )
@@ -32,7 +35,7 @@ const (
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, Question, QuestionMush, QuestionFire, Used, Pipe:
+	case Ground, Brick, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe:
 		return true
 	}
 	return false
@@ -85,8 +88,11 @@ var tileChars = map[byte]Tile{
 	'?': Question,
 	'U': QuestionMush,
 	'f': QuestionFire,
+	'S': QuestionStar,
 	'P': Pipe,
 	'L': Lava,
+	'H': HiddenCoin,
+	'1': HiddenLife,
 	'F': FlagPole,
 	'T': FlagTop,
 }
@@ -95,7 +101,9 @@ var tileChars = map[byte]Tile{
 //
 //	' ' empty    '#' ground   'B' brick   '?' question (coin)
 //	'U' question (mushroom)   'f' question (fire flower)
-//	'P' pipe     'L' lava (castle)   'F' flag pole   'T' flag top
+//	'S' question (star)       'P' pipe     'L' lava (castle)
+//	'H' hidden coin block     '1' hidden 1-UP block (bump from below only)
+//	'F' flag pole   'T' flag top
 //	'G' goomba   'K' koopa   'W' flying koopa   'c' coin   'M' player start
 //	'V' piranha plant (on the pipe below its cell)
 //	'h' fire-bar hub (rotating hazard anchored at the cell centre)
