@@ -44,6 +44,7 @@ stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plai
 | `packaging/` | Distro payload shared by .deb and AUR: `mario.6` manpage, `mario.desktop`, Debian `copyright`; `packaging/aur/` = AUR `PKGBUILD` + `.SRCINFO` |
 | `internal/art/` | Standalone Mario-icon renderer (`art.IconPNG`) shared by genicon, mkdeb and the AUR build |
 | `tools/mkdeb/` | Pure-stdlib .deb builder (manual ar + tar + gzip; deterministic — tests parse the archive back) |
+| `tools/shots/` | README screenshot generator (`make shots` → `docs/img/*.png`): drives a real game with the attract script and dumps truecolor ANSI frames; `ansi2png.py` (Pillow) rasterizes them — no parallel drawing path |
 | root `*.go` | The library facade and its thin entries only: `mario.go` (App), `demo.go` (LoadLevels/RunDemo), `preview.go` (ui-preview). Input routing lives in `internal/ui/router.go`, calibration/identity persistence in `internal/persist/` (`keys.go`, `player.go`), the leaderboard machine in `internal/ui/ui.go` |
 |`packaging/android/`|APK wrapper (WebView shell hosting `dist/web`), manifest, Java activity, self-signed keystore|
 

@@ -26,7 +26,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk shots $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -152,6 +152,24 @@ web:
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \
 		cp "$$wasm_exec" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
 	@echo "static site in $(WEBDIST) — drop it on GitHub Pages (or any static host)"
+
+# Regenerate the README screenshots (docs/img) from the current build —
+# real rendered frames, no parallel drawing path (tools/shots). The
+# rasterizer needs Pillow: pip install pillow, or on NixOS
+#   nix-shell -p python3Packages.pillow --run 'make shots'
+shots:
+	@mkdir -p docs/img dist/shots
+	$(GOFLAGS) go build -ldflags '$(LDFLAGS)' -o dist/shots/shots ./tools/shots
+	dist/shots/shots -scene title -out dist/shots/title.ansi
+	dist/shots/shots -scene play -level 1 -tick 600 -out dist/shots/overworld.ansi
+	dist/shots/shots -scene play -level 2 -tick 600 -out dist/shots/underground.ansi
+	dist/shots/shots -scene play -level 6 -tick 900 -out dist/shots/sky.ansi
+	dist/shots/shots -scene play -level 7 -tick 700 -out dist/shots/castle.ansi
+	dist/shots/shots -scene board -out dist/shots/board.ansi
+	@for f in title overworld underground sky castle board; do \
+		python3 tools/shots/ansi2png.py dist/shots/$$f.ansi docs/img/$$f.png 8 || exit 1; \
+	done
+	@echo "docs/img refreshed (demo.gif and web-*.png are captured separately)"
 
 web-serve: web
 	@echo "serving $(WEBDIST) at http://127.0.0.1:8417/"
