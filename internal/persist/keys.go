@@ -1,4 +1,4 @@
-package mario
+package persist
 
 // Key-calibration persistence: the input mapper learns the terminal's OS
 // key-repeat delay and per-key hold habits (see the input package). Learning
@@ -29,7 +29,7 @@ func keyCalibrationPath() (string, error) {
 
 // loadKeyCalibration applies any previously stored learning to the mapper.
 // Best-effort: a missing or unreadable file just means starting cold.
-func loadKeyCalibration(m *input.Mapper) {
+func LoadCalibration(m *input.Mapper) {
 	path, err := keyCalibrationPath()
 	if err != nil {
 		return
@@ -46,7 +46,7 @@ func loadKeyCalibration(m *input.Mapper) {
 
 // saveKeyCalibration stores the mapper's current learning for the next run.
 // Best-effort: failures are ignored, same as the player name save.
-func saveKeyCalibration(m *input.Mapper) {
+func SaveCalibration(m *input.Mapper) {
 	path, err := keyCalibrationPath()
 	if err != nil {
 		return

@@ -1,4 +1,4 @@
-package mario
+package ui
 
 // Live integration test: drives the real in-game UI machine (game-over
 // prompt → name entry → submit) against the configured Supabase project.
@@ -31,17 +31,17 @@ func TestLiveUISubmit(t *testing.T) {
 		t.Fatalf("script should end game over with a score, got %v score=%d", g.State, g.Score)
 	}
 
-	ui := newScoreUI(nil, nil) // real board client from env
+	ui := NewUI(nil, nil) // real board client from env
 	if ui.submit == nil {
 		t.Fatal("no leaderboard configured")
 	}
 
-	snap := ui.tick(g)
+	snap := ui.Tick(g)
 	if snap == nil || snap.Mode != render.UIAsk {
 		t.Fatalf("expected ask prompt, got %+v", snap)
 	}
-	ui.feedKeys([]byte("yLIVEUI\r"))
-	snap = ui.tick(g)
+	ui.FeedKeys([]byte("yLIVEUI\r"))
+	snap = ui.Tick(g)
 	if snap.Mode != render.UIBoard || snap.Status != "SUBMITTING" {
 		t.Fatalf("expected submitting board, got %+v", snap)
 	}

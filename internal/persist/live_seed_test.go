@@ -1,4 +1,4 @@
-package mario
+package persist
 
 // Seeds one real leaderboard row so the in-game board has content to
 // display. Skipped unless LIVE=1 (write path — the row is named SEEDCHK,
@@ -23,7 +23,7 @@ func TestLiveSeedOneRow(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pc, _ := loadPlayer()
+	pc, _ := LoadPlayer()
 	if err := c.Submit(ctx, board.Entry{Name: "SEEDCHK", Score: 12300, DeviceID: pc.DeviceID}); err != nil {
 		t.Fatalf("submit: %v", err)
 	}

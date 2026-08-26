@@ -1,4 +1,4 @@
-package mario
+package ui
 
 // The in-game leaderboard UI state machine: game-over flows into a
 // submit prompt, pixel-font name entry, then the board screen (also
@@ -12,6 +12,7 @@ import (
 
 	"mario/board"
 	"mario/engine"
+	"mario/internal/persist"
 	"mario/render"
 )
 
@@ -23,14 +24,14 @@ const nameCharSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-"
 
 const maxNameLen = 8
 
-type scoreUI struct {
+type UI struct {
 	mu      sync.Mutex
 	mode    render.UIMode
 	keys    []byte // captured while a UI screen owns input
 	noted   []byte // bytes seen while inactive (title 'l' trigger)
 	name    []byte
 	score   int
-	player  playerConfig
+	player  persist.PlayerConfig
 	status  string
 	rows    []render.ScoreRow
 	loading bool
@@ -43,10 +44,10 @@ type scoreUI struct {
 	fetch  func() ([]board.Row, error)
 }
 
-// newScoreUI wires the machine. Nil submit/fetch default to the real
+// NewUI wires the machine. Nil submit/fetch default to the real
 // board client from the environment (a nil pair stays offline).
-func newScoreUI(submit func(board.Entry) error, fetch func() ([]board.Row, error)) *scoreUI {
-	u := &scoreUI{mode: render.UIOff, submit: submit, fetch: fetch}
+func NewUI(submit func(board.Entry) error, fetch func() ([]board.Row, error)) *UI {
+	u := &UI{mode: render.UIOff, submit: submit, fetch: fetch}
 	if u.submit == nil && u.fetch == nil {
 		if client, err := board.FromEnv(); err == nil {
 			u.submit = func(e board.Entry) error {
@@ -56,7 +57,7 @@ func newScoreUI(submit func(board.Entry) error, fetch func() ([]board.Row, error
 			}
 			u.fetch = func() ([]board.Row, error) {
 				dev := ""
-				if pc, err := loadPlayer(); err == nil {
+				if pc, err := persist.LoadPlayer(); err == nil {
 					dev = pc.DeviceID
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
@@ -69,14 +70,14 @@ func newScoreUI(submit func(board.Entry) error, fetch func() ([]board.Row, error
 }
 
 // capturing reports whether a UI screen currently owns the keyboard.
-func (u *scoreUI) capturing() bool {
+func (u *UI) capturing() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.mode != render.UIOff
 }
 
-// feedKeys buffers raw bytes while a UI screen owns input.
-func (u *scoreUI) feedKeys(b []byte) {
+// FeedKeys buffers raw bytes while a UI screen owns input.
+func (u *UI) FeedKeys(b []byte) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -92,7 +93,7 @@ func (u *scoreUI) feedKeys(b []byte) {
 
 // note records bytes seen while the game owns input (bounded: only the
 // newest bytes matter for the 'l' trigger).
-func (u *scoreUI) note(b []byte) {
+func (u *UI) note(b []byte) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if n := len(u.noted) + len(b); n > 64 {
@@ -102,7 +103,7 @@ func (u *scoreUI) note(b []byte) {
 	u.noted = append(u.noted, b...)
 }
 
-func (u *scoreUI) quitRequested() bool {
+func (u *UI) quitRequested() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.quit
@@ -110,7 +111,7 @@ func (u *scoreUI) quitRequested() bool {
 
 // takeRestart reports and clears a pending restart request from the
 // board screen ('r'): consumed as a single edge, like a mapped key press.
-func (u *scoreUI) takeRestart() bool {
+func (u *UI) takeRestart() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	r := u.restart
@@ -119,7 +120,7 @@ func (u *scoreUI) takeRestart() bool {
 }
 
 // showBoard switches to the board screen and starts a fetch.
-func (u *scoreUI) showBoard() {
+func (u *UI) ShowBoard() {
 	u.mu.Lock()
 	if u.fetch == nil {
 		// Offline build (no credentials): still show the screen, with a
@@ -133,13 +134,13 @@ func (u *scoreUI) showBoard() {
 	u.mode = render.UIBoard
 	u.loading = true
 	u.status = ""
-	u.player, _ = loadPlayer()
+	u.player, _ = persist.LoadPlayer()
 	fetch := u.fetch
 	u.mu.Unlock()
 	go u.fetchInto(fetch)
 }
 
-func (u *scoreUI) fetchInto(fetch func() ([]board.Row, error)) {
+func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 	defer func() {
 		if r := recover(); r != nil {
 			u.mu.Lock()
@@ -181,7 +182,7 @@ func boardRowsFor(rows []board.Row) []render.ScoreRow {
 
 // tick advances the machine one game tick and returns the render snapshot
 // (nil when no UI screen is showing).
-func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
+func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -191,7 +192,7 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
 			u.noted = nil
 			u.mode = render.UIBoard
-			u.player, _ = loadPlayer()
+			u.player, _ = persist.LoadPlayer()
 			if u.fetch == nil {
 				u.loading = false
 				u.status = "OFFLINE"
@@ -210,7 +211,7 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 	if u.mode == render.UIOff && !u.asked &&
 		(g.State == engine.StateGameOver || g.State == engine.StateWin) && g.Score > 0 {
 		u.asked = true
-		u.player, _ = loadPlayer()
+		u.player, _ = persist.LoadPlayer()
 		u.score = g.Score
 		u.mode = render.UIAsk
 	}
@@ -227,7 +228,7 @@ func (u *scoreUI) tick(g *engine.Game) *render.ScoreUI {
 	return u.snapshotLocked(g)
 }
 
-func (u *scoreUI) keyLocked(b byte) {
+func (u *UI) keyLocked(b byte) {
 	switch u.mode {
 	case render.UIAsk:
 		switch {
@@ -272,12 +273,12 @@ func (u *scoreUI) keyLocked(b byte) {
 	}
 }
 
-func (u *scoreUI) submitLocked() {
+func (u *UI) submitLocked() {
 	name := string(u.name)
 	if name == "" {
 		name = u.player.Name
 	}
-	if s, ok := sanitizeName(name); ok {
+	if s, ok := persist.SanitizeName(name); ok {
 		name = s
 	} else {
 		name = "MARIO"
@@ -302,7 +303,7 @@ func (u *scoreUI) submitLocked() {
 			u.status = "SUBMIT FAILED"
 		} else {
 			u.status = "SUBMITTED!"
-			player.saveName(name)
+			player.SaveName(name)
 		}
 		u.mu.Unlock()
 		if fetch != nil {
@@ -311,7 +312,7 @@ func (u *scoreUI) submitLocked() {
 	}()
 }
 
-func (u *scoreUI) snapshotLocked(g *engine.Game) *render.ScoreUI {
+func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {
 	return &render.ScoreUI{
 		Mode:     u.mode,
 		Score:    u.score,

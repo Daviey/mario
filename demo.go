@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"mario/engine"
+	"mario/internal/ui"
 	"mario/render"
 )
 
@@ -52,22 +53,11 @@ func baseName(path string) string {
 	return path
 }
 
-// scriptInput is the deterministic demo script: hold right, run most ticks,
-// hop regularly, dismiss the title screen on tick 0.
-func scriptInput(t int) engine.Input {
-	return engine.Input{
-		Right:  true,
-		Run:    t%3 != 0,
-		Up:     t%97 < 22,
-		AnyKey: t == 0, // dismiss the title screen
-	}
-}
-
 // RunDemo plays a deterministic scripted session with no terminal needed.
 func RunDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) {
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
 	for t := range ticks {
-		g.Update(scriptInput(t))
+		g.Update(ui.ScriptInput(t))
 	}
 	fmt.Fprintf(w, "demo: ticks=%d score=%d coins=%d lives=%d state=%s level=%s\n",
 		ticks, g.Score, g.CoinCount, g.Lives, g.State, g.LevelName())

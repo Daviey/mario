@@ -1,4 +1,4 @@
-package mario
+package ui
 
 // Leaderboard UI state machine tests. Network is faked; the engine is
 // driven to game over with the deterministic demo script.
@@ -12,6 +12,7 @@ import (
 	"mario/board"
 	"mario/engine"
 	"mario/input"
+	"mario/internal/persist"
 	"mario/render"
 )
 
@@ -20,7 +21,7 @@ func gameOverGame(t *testing.T) *engine.Game {
 	t.Helper()
 	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
 	for t := range 6000 {
-		g.Update(scriptInput(t))
+		g.Update(ScriptInput(t))
 	}
 	if g.State != engine.StateGameOver || g.Score == 0 {
 		t.Fatalf("script should end game over with a score, got %v score=%d", g.State, g.Score)
@@ -28,11 +29,11 @@ func gameOverGame(t *testing.T) *engine.Game {
 	return g
 }
 
-func tickUntil(t *testing.T, ui *scoreUI, g *engine.Game, n int) *render.ScoreUI {
+func tickUntil(t *testing.T, ui *UI, g *engine.Game, n int) *render.ScoreUI {
 	t.Helper()
 	var snap *render.ScoreUI
 	for range n {
-		snap = ui.tick(g)
+		snap = ui.Tick(g)
 	}
 	return snap
 }
@@ -56,7 +57,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 	var mu sync.Mutex
 	var got board.Entry
 	submitted := make(chan struct{})
-	ui := newScoreUI(func(e board.Entry) error {
+	ui := NewUI(func(e board.Entry) error {
 		mu.Lock()
 		got = e
 		mu.Unlock()
@@ -77,13 +78,13 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 		t.Fatalf("expected auto ask prompt, got %+v", snap)
 	}
 
-	ui.feedKeys([]byte("y"))
+	ui.FeedKeys([]byte("y"))
 	snap = tickUntil(t, ui, g, 1)
 	if snap.Mode != render.UIEntry {
 		t.Fatalf("y should open entry, got %v", snap.Mode)
 	}
 
-	ui.feedKeys([]byte("dave!2\r")) // lowercase up, '!' dropped by charset
+	ui.FeedKeys([]byte("dave!2\r")) // lowercase up, '!' dropped by charset
 	snap = tickUntil(t, ui, g, 1)
 	if snap.Mode != render.UIBoard || snap.Status != "SUBMITTING" {
 		t.Fatalf("enter should submit and show board, got %+v", snap)
@@ -125,7 +126,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 	}
 
 	// Board q after submitting quits the game.
-	ui.feedKeys([]byte("q"))
+	ui.FeedKeys([]byte("q"))
 	tickUntil(t, ui, g, 1)
 	if !ui.quitRequested() {
 		t.Fatal("q on the board after submit should quit")
@@ -136,10 +137,10 @@ func TestDeclineDoesNotSubmitOrQuit(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	called := false
-	ui := newScoreUI(func(board.Entry) error { called = true; return nil }, nil)
+	ui := NewUI(func(board.Entry) error { called = true; return nil }, nil)
 	g := gameOverGame(t)
 	tickUntil(t, ui, g, 1)
-	ui.feedKeys([]byte("n"))
+	ui.FeedKeys([]byte("n"))
 	snap := tickUntil(t, ui, g, 1)
 	if snap != nil || called {
 		t.Fatalf("decline must close UI without submitting: snap=%+v called=%v", snap, called)
@@ -156,17 +157,17 @@ func TestDeclineDoesNotSubmitOrQuit(t *testing.T) {
 func TestEntryEditing(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	ui := newScoreUI(nil, nil)
+	ui := NewUI(nil, nil)
 	g := gameOverGame(t)
 	tickUntil(t, ui, g, 1)
-	ui.feedKeys([]byte("y"))
+	ui.FeedKeys([]byte("y"))
 	tickUntil(t, ui, g, 1)
 
-	ui.feedKeys([]byte("abc"))
+	ui.FeedKeys([]byte("abc"))
 	tickUntil(t, ui, g, 1)
-	ui.feedKeys([]byte{0x08}) // backspace
+	ui.FeedKeys([]byte{0x08}) // backspace
 	tickUntil(t, ui, g, 1)
-	ui.feedKeys([]byte("DE"))
+	ui.FeedKeys([]byte("DE"))
 	tickUntil(t, ui, g, 1)
 	ui.mu.Lock()
 	name := string(ui.name)
@@ -176,7 +177,7 @@ func TestEntryEditing(t *testing.T) {
 	}
 
 	// Max length enforced.
-	ui.feedKeys([]byte("FGHIJKLMNOP"))
+	ui.FeedKeys([]byte("FGHIJKLMNOP"))
 	tickUntil(t, ui, g, 1)
 	ui.mu.Lock()
 	name = string(ui.name)
@@ -186,7 +187,7 @@ func TestEntryEditing(t *testing.T) {
 	}
 
 	// ESC returns to the ask prompt.
-	ui.feedKeys([]byte{0x1b})
+	ui.FeedKeys([]byte{0x1b})
 	snap := tickUntil(t, ui, g, 1)
 	if snap.Mode != render.UIAsk {
 		t.Fatalf("esc should return to ask, got %v", snap.Mode)
@@ -196,13 +197,13 @@ func TestEntryEditing(t *testing.T) {
 func TestEmptyNameUsesStoredDefault(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	pc, _ := loadPlayer()
-	pc.saveName("REGULAR")
+	pc, _ := persist.LoadPlayer()
+	pc.SaveName("REGULAR")
 
 	var mu sync.Mutex
 	var name string
 	done := make(chan struct{})
-	ui := newScoreUI(func(e board.Entry) error {
+	ui := NewUI(func(e board.Entry) error {
 		mu.Lock()
 		name = e.Name
 		mu.Unlock()
@@ -211,7 +212,7 @@ func TestEmptyNameUsesStoredDefault(t *testing.T) {
 	}, nil)
 	g := gameOverGame(t)
 	tickUntil(t, ui, g, 1)
-	ui.feedKeys([]byte("y\r")) // accept prompt, enter with empty name
+	ui.FeedKeys([]byte("y\r")) // accept prompt, enter with empty name
 	tickUntil(t, ui, g, 1)
 	select {
 	case <-done:
@@ -229,7 +230,7 @@ func TestTitleLOpensBoard(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	fetched := make(chan struct{}, 1)
-	ui := newScoreUI(nil, func() ([]board.Row, error) {
+	ui := NewUI(nil, func() ([]board.Row, error) {
 		fetched <- struct{}{}
 		return []board.Row{{Name: "KIM", Score: 900}}, nil
 	})
@@ -256,7 +257,7 @@ func TestTitleLOpensBoard(t *testing.T) {
 		return len(ui.rows) == 1
 	})
 	// Closing returns to the title, not quit (nothing was submitted).
-	ui.feedKeys([]byte("l"))
+	ui.FeedKeys([]byte("l"))
 	if s := tickUntil(t, ui, g, 1); s != nil {
 		t.Fatalf("board should close: %+v", s)
 	}
@@ -272,13 +273,13 @@ func TestOfflineStillShowsPrompt(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("SUPABASE_KEY", "")
-	ui := newScoreUI(nil, nil)
+	ui := NewUI(nil, nil)
 	g := gameOverGame(t)
 	snap := tickUntil(t, ui, g, 1)
 	if snap == nil || snap.Mode != render.UIAsk {
 		t.Fatalf("offline should still ask: %+v", snap)
 	}
-	ui.feedKeys([]byte("yX\r"))
+	ui.FeedKeys([]byte("yX\r"))
 	snap = tickUntil(t, ui, g, 2)
 	if snap.Mode != render.UIBoard || snap.Status != "OFFLINE" {
 		t.Fatalf("offline submit = %+v", snap)
@@ -300,9 +301,9 @@ func TestBoardRowsForKeepsMineFlag(t *testing.T) {
 func TestSnapshotFields(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	ui := newScoreUI(nil, nil)
+	ui := NewUI(nil, nil)
 	g := gameOverGame(t)
-	ui.feedKeys([]byte("y"))
+	ui.FeedKeys([]byte("y"))
 	snap := tickUntil(t, ui, g, 1)
 	if !strings.Contains(snap.Name, "") && snap.Name != "" {
 		t.Fatal("fresh entry name should be empty")
@@ -322,13 +323,13 @@ func TestTitleLOpensBoardOffline(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	for _, key := range []byte{'l', 'L'} {
 		g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-		io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
-		io.feed([]byte{key})
+		io := NewRouter(input.NewMapper(), NewUI(nil, nil))
+		io.Feed([]byte{key})
 		opened := false
 		for range 100 {
 			time.Sleep(1 * time.Millisecond) // Let fetchInto goroutine run
-			g.Update(io.poll())
-			ui := io.uiTick(g)
+			g.Update(io.Poll())
+			ui := io.UITick(g)
 			if ui != nil && ui.Mode == render.UIBoard && !ui.Loading {
 				if g.State != engine.StateTitle {
 					t.Fatalf("%q: game left title: %v", key, g.State)
@@ -356,35 +357,35 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	g := gameOverGame(t)
-	io := newGameIO(input.NewMapper(), newScoreUI(nil, nil))
+	io := NewRouter(input.NewMapper(), NewUI(nil, nil))
 	step := func(n int) *render.ScoreUI {
 		var s *render.ScoreUI
 		for range n {
-			g.Update(io.poll())
-			s = io.uiTick(g)
+			g.Update(io.Poll())
+			s = io.UITick(g)
 		}
 		return s
 	}
 	if s := step(1); s == nil || s.Mode != render.UIAsk {
 		t.Fatalf("game over should ask, got %+v", s)
 	}
-	io.feed([]byte("y"))
+	io.Feed([]byte("y"))
 	if s := step(1); s.Mode != render.UIEntry {
 		t.Fatalf("y should open entry, got %v", s.Mode)
 	}
-	io.feed([]byte("\r"))
+	io.Feed([]byte("\r"))
 	if s := step(1); s.Mode != render.UIBoard || s.Status != "OFFLINE" {
 		t.Fatalf("submit should show board, got %+v", s)
 	}
 
-	io.feed([]byte("r"))
+	io.Feed([]byte("r"))
 	if s := step(1); s != nil {
 		t.Fatalf("r should close the board: %+v", s)
 	}
-	if io.quitRequested() {
+	if io.QuitRequested() {
 		t.Fatal("restart must not quit")
 	}
-	in := io.poll()
+	in := io.Poll()
 	if !in.Restart {
 		t.Fatal("restart edge missing from polled input")
 	}
@@ -392,7 +393,7 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 	if g.State != engine.StatePlaying {
 		t.Fatalf("restart should reset the game, got %v", g.State)
 	}
-	if io.poll().Restart {
+	if io.Poll().Restart {
 		t.Fatal("restart edge should be one-shot")
 	}
 

@@ -24,7 +24,7 @@ stdin bytes ──▶ gameIO.feed() ──┬─(UI active)──▶ io.plain �
 - **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes are decoded via `input.PlainDecoder` and passed to the UI. The mapper speaks `CSI u` natively, but the UI is strictly byte-oriented (`gameio.go`).
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StatePlaying ↔ StateDying/StateLevelClear → StateGameOver/StateWin`. Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go`.
 - **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw` take an optional `*ScoreUI` that swaps the world for the leaderboard screens, drawn as **real text cells** (not the pixel font); the browser build receives the same snapshot as JSON (`marioBoard`) and renders a DOM panel.
-- **Leaderboard** (`lbui.go`, `board/`): `scoreUI` state machine (`UIOff/UIAsk/UIEntry/UIBoard`) driven by `tick(g)`; network runs off the tick loop via injectable `submit`/`fetch` funcs (nil → real `board.Client` from env). `board.Client` is a thin PostgREST wrapper (`Submit`, `Top`); RLS allows anon insert + public read only.
+- **Leaderboard** (`internal/ui`, `board/`): `ui.UI` state machine (`UIOff/UIAsk/UIEntry/UIBoard`) driven by `Tick(g)`; network runs off the tick loop via injectable `submit`/`fetch` funcs (nil → real `board.Client` from env). `board.Client` is a thin PostgREST wrapper (`Submit`, `Top`); RLS allows anon insert + public read only.
 - **Platform split** by build tags: `term_unix.go` (`!windows`), `term_windows.go` (`windows`), `wasm.go` (`js`).
 
 ## Key Directories
@@ -65,7 +65,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 
 - **Stdlib only.** Adding a dependency needs strong justification; even the leaderboard client is plain `net/http` + `encoding/json`.
 - **Determinism is load-bearing.** No `math/rand`, no `time.Now()` in engine or render logic; blink/pulse effects key off `g.Tick`.
-- **Purity split**: `engine.Update` mutates state; `render.*` is a pure function of state (no I/O, no clocks). UI/network side effects live in `lbui.go` behind injectable funcs.
+- **Purity split**: `engine.Update` mutates state; `render.*` is a pure function of state (no I/O, no clocks). UI/network side effects live in `internal/ui` behind injectable funcs.
 - **Error handling**: gameplay never fails on leaderboard errors — submit/fetch failures degrade to `OFFLINE` status strings; `maybeSubmit`-style flows swallow config errors and stay silent.
 - **Arcade-string constraint** (world/HUD overlays only — the leaderboard screens are real text now): anything drawn through the 3×5 pixel font may use `A-Z 0-9 space . - + / : ! ?` only. Uppercase everything; no `_`, no lowercase; long lines ladder down via `pickTextPx(candidates, maxW)`.
 - **Names**: max 8 chars, charset `A-Z0-9 . -` (enforced by `sanitizeName` in `player.go`, by a DB CHECK regex, AND by `sanitizeDisplayName` in `board` to protect the terminal/DOM from peer-stored legacy rows).
@@ -84,9 +84,9 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Leaderboard rate limits** (`supabase/migrations/20260825000002_rate_limits.sql`, applied live): a BEFORE INSERT trigger caps anon submissions at 10/min per source address (from Cloudflare's `cf-connecting-ip` via the `request.headers` setting) and 2/min per device_id. Bursty probes or LIVE tests must pace themselves or they get `400 too many submissions`. The peer-filled `scores.ip` column is hidden from anon by column-scoped SELECT grants — `select=*` fails for anon by design.
 - **Leaderboard hardening** (`20260825000003_pow_and_privacy.sql`): submissions require 20-bit SHA-256 proof-of-work over `<device_id>:<score>:<nonce>` (solver in `board/pow.go`, verifier in `verify_pow()` trigger — keep difficulty in sync); `device_id` is NOT readable by anon (mine-ness arrives precomputed via the `board_rows` RPC, so don't reach for `Row.DeviceID`); nightly pg_cron job keeps top-500 rows / drops >60d. Reads go through POST `/rest/v1/rpc/board_rows`, inserts must carry `pow_nonce`.
 - `wasm.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)` and `marioBoard(json)` (leaderboard DOM text) before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
-- `gameio.go` — the one-keyboard-one-owner input router (includes `PlainDecoder` for UI text entry)
-- `lbui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
-- `keys.go` — loading/saving of `keys.json` input calibration to prevent legacy repeat-delay stutters across sessions
+- `internal/ui/router.go` — the one-keyboard-one-owner input router (includes `PlainDecoder` for UI text entry)
+- `internal/ui/lbui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
+- `internal/persist/` — loading/saving of `keys.json` input calibration to prevent legacy repeat-delay stutters across sessions
 - `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`, falling back to build-time `DefaultURL`/`DefaultKey` embedded by `make web` so the WASM build can reach the board), `LoadDotEnv`
 - `supabase/migrations/20260825000000_scores.sql` — live table schema; apply changes here AND to the live DB
 - `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_KEY` (publishable key — safe to embed), `SUPABASE_DB_PASSWORD`

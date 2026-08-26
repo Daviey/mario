@@ -12,13 +12,14 @@ import (
 
 	"mario/board"
 	"mario/engine"
+	"mario/internal/ui"
 	"mario/render"
 )
 
 func UIPreview(w io.Writer, mode string, trueColor bool) error {
 	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 	for t := range 6000 {
-		g.Update(scriptInput(t))
+		g.Update(ui.ScriptInput(t))
 	}
 	if g.Score == 0 {
 		return fmt.Errorf("demo script scored 0; cannot preview")
@@ -29,29 +30,29 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 		{Name: "DAVE", Score: 12500, Mine: true}, // "you"
 		{Name: "KIM", Score: 9900},
 	}
-	ui := newScoreUI(nil, func() ([]board.Row, error) { return canned, nil })
+	ui := ui.NewUI(nil, func() ([]board.Row, error) { return canned, nil })
 
 	var frameG *engine.Game
 	switch mode {
 	case "ask":
-		ui.tick(g) // game over auto-asks
+		ui.Tick(g) // game over auto-asks
 	case "entry":
-		ui.tick(g)
-		ui.feedKeys([]byte("yDAVE")) // a half-typed name, cursor after it
-		ui.tick(g)
+		ui.Tick(g)
+		ui.FeedKeys([]byte("yDAVE")) // a half-typed name, cursor after it
+		ui.Tick(g)
 		frameG = g
 	case "board":
 		// Direct board view (the submit path needs a real backend).
-		ui.tick(g)
-		ui.showBoard()
+		ui.Tick(g)
+		ui.ShowBoard()
 		time.Sleep(100 * time.Millisecond) // let the fake fetch land
-		ui.tick(g)
+		ui.Tick(g)
 	case "title-board":
 		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-		ui.tick(g2)
-		ui.showBoard()
+		ui.Tick(g2)
+		ui.ShowBoard()
 		time.Sleep(100 * time.Millisecond)
-		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.tick(g2)))
+		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.Tick(g2)))
 		return nil
 	default:
 		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board)", mode)
@@ -59,6 +60,6 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 	if frameG == nil {
 		frameG = g
 	}
-	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.tick(frameG)))
+	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.Tick(frameG)))
 	return nil
 }

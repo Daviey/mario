@@ -1,4 +1,4 @@
-package mario
+package persist
 
 // Player identity for the leaderboard: a stable device UUID (generated once,
 // stored in the OS config dir) and a display name. No accounts anywhere.
@@ -13,14 +13,14 @@ import (
 	"unicode"
 )
 
-type playerConfig struct {
+type PlayerConfig struct {
 	DeviceID string `json:"device_id"`
 	Name     string `json:"name"`
 }
 
-// playerConfigPath returns <UserConfigDir>/mario/player.json, creating the
+// PlayerConfigPath returns <UserConfigDir>/mario/player.json, creating the
 // directory if needed.
-func playerConfigPath() (string, error) {
+func PlayerConfigPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -34,18 +34,18 @@ func playerConfigPath() (string, error) {
 
 // loadPlayer loads the stored player identity, creating a fresh one on first
 // run.
-func loadPlayer() (playerConfig, error) {
-	path, err := playerConfigPath()
+func LoadPlayer() (PlayerConfig, error) {
+	path, err := PlayerConfigPath()
 	if err != nil {
-		return playerConfig{}, err
+		return PlayerConfig{}, err
 	}
 	if data, err := os.ReadFile(path); err == nil {
-		var pc playerConfig
+		var pc PlayerConfig
 		if json.Unmarshal(data, &pc) == nil && pc.DeviceID != "" {
 			return pc, nil
 		}
 	}
-	pc := playerConfig{DeviceID: newDeviceID()}
+	pc := PlayerConfig{DeviceID: newDeviceID()}
 	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
 		os.WriteFile(path, data, 0o600)
 		os.Chmod(path, 0o600) // Ensure tight permissions if file existed
@@ -53,9 +53,9 @@ func loadPlayer() (playerConfig, error) {
 	return pc, nil
 }
 
-func (pc *playerConfig) saveName(name string) {
+func (pc *PlayerConfig) SaveName(name string) {
 	pc.Name = name
-	if path, err := playerConfigPath(); err == nil {
+	if path, err := PlayerConfigPath(); err == nil {
 		if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
 			os.WriteFile(path, data, 0o600)
 			os.Chmod(path, 0o600)
@@ -79,7 +79,7 @@ func newDeviceID() string {
 
 // sanitizeName trims and validates a leaderboard display name against the
 // database CHECK constraints (1-8 chars) plus a conservative charset.
-func sanitizeName(s string) (string, bool) {
+func SanitizeName(s string) (string, bool) {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
 			return ' '

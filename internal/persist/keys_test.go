@@ -1,4 +1,4 @@
-package mario
+package persist
 
 import (
 	"os"
@@ -14,13 +14,13 @@ func TestKeyCalibrationRoundTrip(t *testing.T) {
 	m := input.NewMapper()
 	// kLeft..kRun: only right is a proven holder, delay measured at 22 ticks.
 	m.ApplyCalibration(input.Calibration{OSDelay: 22, HeldHabit: []bool{false, true, false, false, false}})
-	saveKeyCalibration(m)
+	SaveCalibration(m)
 
 	if _, err := os.Stat(filepath.Join(dir, "mario", "keys.json")); err != nil {
 		t.Fatalf("calibration file: %v", err)
 	}
 	next := input.NewMapper()
-	loadKeyCalibration(next)
+	LoadCalibration(next)
 	got := next.Calibration()
 	if got.OSDelay != 22 || len(got.HeldHabit) != 5 || !got.HeldHabit[1] {
 		t.Fatalf("round trip got %+v", got)
@@ -30,7 +30,7 @@ func TestKeyCalibrationRoundTrip(t *testing.T) {
 func TestKeyCalibrationColdStart(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no file: must stay cold, not fail
 	m := input.NewMapper()
-	loadKeyCalibration(m)
+	LoadCalibration(m)
 	if c := m.Calibration(); c.OSDelay != 0 {
 		t.Fatalf("cold start unexpectedly calibrated: %+v", c)
 	}
@@ -42,7 +42,7 @@ func TestKeyCalibrationColdStart(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "keys.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loadKeyCalibration(m)
+	LoadCalibration(m)
 	if c := m.Calibration(); c.OSDelay != 0 {
 		t.Fatalf("corrupt file applied: %+v", c)
 	}

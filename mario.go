@@ -26,6 +26,8 @@ import (
 
 	"mario/engine"
 	"mario/input"
+	"mario/internal/persist"
+	"mario/internal/ui"
 	"mario/render"
 )
 
@@ -49,7 +51,7 @@ type Options struct {
 type App struct {
 	Game   *engine.Game // the simulation; render reads its state each frame
 	mapper *input.Mapper
-	io     *gameIO
+	io     *ui.Router
 	ui     *render.ScoreUI // latest leaderboard snapshot (nil when off)
 	quit   bool
 }
@@ -87,29 +89,29 @@ func New(opts *Options) *App {
 	mapper := opts.Mapper
 	if mapper == nil {
 		mapper = input.NewMapper()
-		loadKeyCalibration(mapper)
+		persist.LoadCalibration(mapper)
 	}
 
 	return &App{
 		Game:   engine.NewGame(levels, viewW, viewH),
 		mapper: mapper,
-		io:     newGameIO(mapper, newScoreUI(nil, nil)),
+		io:     ui.NewRouter(mapper, ui.NewUI(nil, nil)),
 	}
 }
 
 // Feed routes one chunk of raw input bytes: to the leaderboard UI while a
 // UI screen holds the keyboard, to the game mapper otherwise. Call this
 // from the reader side; the game never blocks on it.
-func (a *App) Feed(b []byte) { a.io.feed(b) }
+func (a *App) Feed(b []byte) { a.io.Feed(b) }
 
 // Step advances the game exactly one tick: polls input, updates the
 // engine and the leaderboard UI. Drive it from your own clock (the
 // terminal runner uses 60 Hz) and read Game/UI afterwards.
 func (a *App) Step() {
-	in := a.io.poll()
+	in := a.io.Poll()
 	a.Game.Update(in)
-	a.ui = a.io.uiTick(a.Game)
-	a.quit = in.Quit || a.io.quitRequested()
+	a.ui = a.io.UITick(a.Game)
+	a.quit = in.Quit || a.io.QuitRequested()
 }
 
 // UI returns the latest leaderboard render snapshot, or nil when no UI
@@ -140,4 +142,4 @@ func (a *App) Run(st *render.Stream) {
 // SaveCalibration persists the input mapper's learning (OS key-repeat
 // delay, per-key hold habits) so the next session starts warm. Best-effort:
 // failures are ignored.
-func (a *App) SaveCalibration() { saveKeyCalibration(a.mapper) }
+func (a *App) SaveCalibration() { persist.SaveCalibration(a.mapper) }

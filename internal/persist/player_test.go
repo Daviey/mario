@@ -1,4 +1,4 @@
-package mario
+package persist
 
 import (
 	"os"
@@ -17,15 +17,15 @@ func TestSanitizeName(t *testing.T) {
 		{"12345678", "12345678"},
 	}
 	for _, c := range ok {
-		if got, ok := sanitizeName(c.in); !ok || got != c.want {
-			t.Errorf("sanitizeName(%q) = %q,%v want %q,true", c.in, got, ok, c.want)
+		if got, ok := SanitizeName(c.in); !ok || got != c.want {
+			t.Errorf("SanitizeName(%q) = %q,%v want %q,true", c.in, got, ok, c.want)
 		}
 	}
 	// '_' has no pixel-font glyph: rejected like any other unsupported rune.
 	bad := []string{"", " ", "123456789", "héllo", "x@y", "n:o", "semi;colon", "under_score"}
 	for _, in := range bad {
-		if _, ok := sanitizeName(in); ok {
-			t.Errorf("sanitizeName(%q) should fail", in)
+		if _, ok := SanitizeName(in); ok {
+			t.Errorf("SanitizeName(%q) should fail", in)
 		}
 	}
 }
@@ -48,7 +48,7 @@ func TestNewDeviceID(t *testing.T) {
 func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	pc1, err := loadPlayer()
+	pc1, err := LoadPlayer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 	}
 
 	// Second load must return the same identity from disk.
-	pc2, err := loadPlayer()
+	pc2, err := LoadPlayer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +65,8 @@ func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 		t.Fatalf("device id not persisted: %q vs %q", pc1.DeviceID, pc2.DeviceID)
 	}
 
-	pc2.saveName("DAVE")
-	pc3, _ := loadPlayer()
+	pc2.SaveName("DAVE")
+	pc3, _ := LoadPlayer()
 	if pc3.Name != "DAVE" {
 		t.Fatalf("name not persisted: %+v", pc3)
 	}
@@ -74,7 +74,7 @@ func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 	// Corrupt config regenerates rather than failing.
 	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "mario", "player.json")
 	os.WriteFile(path, []byte(`{"device_id":`), 0o644)
-	pc4, err := loadPlayer()
+	pc4, err := LoadPlayer()
 	if err != nil || pc4.DeviceID == "" {
 		t.Fatalf("corrupt config must regenerate: %+v, %v", pc4, err)
 	}

@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"mario/engine"
-	"mario/input"
-	"mario/render"
 )
 
 func TestRunDemo(t *testing.T) {
@@ -30,79 +28,6 @@ func TestRunDemo(t *testing.T) {
 	RunDemo(&buf2, engine.DefaultLevels(), true, 6000)
 	if buf.String() != buf2.String() {
 		t.Error("demo output is not deterministic")
-	}
-}
-
-func TestGameIOKeyboardOwnership(t *testing.T) {
-	// While the leaderboard UI captures input, keystrokes must never reach
-	// the game mapper — typing a name with 'p' in it must not pause, 'r'
-	// must not restart. One consumer owns the keyboard at a time.
-	m := input.NewMapper()
-	ui := newScoreUI(nil, nil)
-	io := newGameIO(m, ui)
-
-	io.feed([]byte("p"))
-	if in := io.poll(); !in.Pause {
-		t.Fatal("during play the mapper must receive keys")
-	}
-
-	ui.mu.Lock()
-	ui.mode = render.UIEntry
-	ui.mu.Unlock()
-	io.feed([]byte("p")) // also a valid name letter
-	if in := io.poll(); in.Pause {
-		t.Fatal("key leaked to the mapper during name entry")
-	}
-	ui.mu.Lock()
-	got := string(ui.keys)
-	ui.mu.Unlock()
-	if got != "p" {
-		t.Fatalf("UI captured %q; want %q", got, "p")
-	}
-}
-
-// With kitty flags 1|2|8 pushed, letters arrive as CSI-u events. The
-// byte-oriented UI and the title 'l' trigger must still see plain bytes,
-// while the mapper consumes the raw stream natively.
-func TestGameIODecodesKittyForUI(t *testing.T) {
-	m := input.NewMapper()
-	ui := newScoreUI(nil, nil)
-	io := newGameIO(m, ui)
-
-	io.feed([]byte("\x1b[100;1:1u")) // press 'd'
-	if in := io.poll(); !in.Right {
-		t.Fatal("kitty press must reach the mapper during play")
-	}
-	ui.mu.Lock()
-	if noted := string(ui.noted); noted != "d" {
-		ui.mu.Unlock()
-		t.Fatalf("title trigger noted %q; want %q", noted, "d")
-	}
-	ui.mu.Unlock()
-
-	ui.mu.Lock()
-	ui.mode = render.UIEntry
-	ui.mu.Unlock()
-	io.feed([]byte("\x1b[112;1:1u")) // press 'p': a valid name letter
-	if in := io.poll(); in.Pause {
-		t.Fatal("kitty key leaked to the mapper during name entry")
-	}
-	ui.mu.Lock()
-	got := string(ui.keys)
-	ui.mu.Unlock()
-	if got != "p" {
-		t.Fatalf("UI captured %q; want %q", got, "p")
-	}
-	ui.mu.Lock()
-	ui.keys = nil // drain: only the release event follows
-	ui.mu.Unlock()
-
-	io.feed([]byte("\x1b[112;1:3u")) // release 'p': no edge, no effect
-	ui.mu.Lock()
-	got = string(ui.keys)
-	ui.mu.Unlock()
-	if got != "" {
-		t.Fatalf("release event reached the UI as %q", got)
 	}
 }
 
