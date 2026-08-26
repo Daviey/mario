@@ -30,14 +30,14 @@
                   "-s"
                   "-w"
                   "-X github.com/Daviey/mario/render.Version=v${version}"
-                  install -m 0755 ${efiInit}/bin/efi $d/init
+                ];
                 meta.description = "mario as initramfs /init — the EFI-stub boot payload";
               };
               efiInitrd = pkgs.runCommand "mario-efi-initramfs"
                 { nativeBuildInputs = [ pkgs.cpio ]; }
                 ''
                   d=$(mktemp -d)
-                  install -m 0755 ${efiInit}/bin/mario-efi-init $d/init
+                  install -m 0755 ${efiInit}/bin/efi $d/init
                   (cd $d && echo init | cpio -o -H newc -R 0:0 > $out)
                 '';
             in
