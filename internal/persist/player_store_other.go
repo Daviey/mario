@@ -40,7 +40,5 @@ func storePlayerBytes(data []byte) {
 	if err != nil {
 		return
 	}
-	if os.WriteFile(path, data, 0o600) == nil {
-		os.Chmod(path, 0o600) // ensure tight permissions if the file existed
-	}
+	writeAtomic(path, data)
 }

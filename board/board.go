@@ -139,7 +139,7 @@ func (c *Client) TopMode(ctx context.Context, n int, deviceID, mode, day string)
 		return nil, fmt.Errorf("decode scores: %w", err)
 	}
 	for i, r := range rows {
-		rows[i].Name = sanitizeDisplayName(r.Name)
+		rows[i].Name = SanitizeDisplayName(r.Name)
 		rows[i].Level = clampLevel(r.Level)
 	}
 	return rows, nil
@@ -168,7 +168,7 @@ func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 		"order":    {"created_at.asc"},
 		"limit":    {strconv.Itoa(n)},
 	}
-	out, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)
+	out, err := c.doCap(ctx, http.MethodGet, "/rest/v1/scores", q, nil, 8<<20)
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +209,9 @@ func clampLevel(n int) int {
 	return n
 }
 
-// sanitizeDisplayName clamps a peer-supplied name to the documented safe charset
-// and length before it reaches the terminal or DOM.
-func sanitizeDisplayName(s string) string {
+// SanitizeDisplayName clamps a peer-supplied name to the documented safe
+// charset and length before it reaches the terminal, DOM or operator log.
+func SanitizeDisplayName(s string) string {
 	var b []rune
 	for _, r := range s {
 		if r >= 'a' && r <= 'z' {
@@ -233,7 +233,16 @@ func sanitizeDisplayName(s string) string {
 	return string(b)
 }
 
+// do performs a request with the default 1 MiB response cap.
 func (c *Client) do(ctx context.Context, method, path string, q url.Values, body []byte, hdr ...string) ([]byte, error) {
+	return c.doCap(ctx, method, path, q, body, 1<<20, hdr...)
+}
+
+// doCap is do with an explicit response-size cap. Endpoints that legitimately
+// return more (Pending carries 256 KB replay strings per row) must pass a cap
+// strictly larger than the worst case, or a big row silently truncates the
+// body and the JSON decode fails with a confusing error.
+func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, body []byte, cap int64, hdr ...string) ([]byte, error) {
 	u := c.BaseURL + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -259,7 +268,7 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 		return nil, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, cap))
 	if err != nil {
 		return nil, err
 	}

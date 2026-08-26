@@ -12,14 +12,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-scores
+  cancel-in-progress: false
+
 jobs:
   verify:
     runs-on: [self-hosted, mario]
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
       - name: Verify pending scores
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

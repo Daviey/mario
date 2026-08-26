@@ -132,6 +132,17 @@ func decode(data string) ([]engine.Input, error) {
 	if s.V != 1 {
 		return nil, fmt.Errorf("replay: unknown format version %d", s.V)
 	}
+	// Bounds come from the peer-controlled wire, so validate everything
+	// BEFORE allocating: ticks and the run count are capped up front and
+	// each run length is checked against the remaining budget (int64-safe,
+	// no len+run overflow) so a hostile header can never drive the make()
+	// or the expansion loop past MaxTicks.
+	if s.Ticks < 0 || s.Ticks > MaxTicks {
+		return nil, fmt.Errorf("replay: %d ticks exceeds cap %d", s.Ticks, MaxTicks)
+	}
+	if len(s.Runs) > MaxTicks {
+		return nil, fmt.Errorf("replay: %d runs exceeds cap %d", len(s.Runs), MaxTicks)
+	}
 	inputs := make([]engine.Input, 0, s.Ticks)
 	for _, run := range s.Runs {
 		if run[0] >= 1<<16 {
@@ -139,6 +150,9 @@ func decode(data string) ([]engine.Input, error) {
 		}
 		if run[1] <= 0 {
 			return nil, fmt.Errorf("replay: non-positive run length %d", run[1])
+		}
+		if run[1] > MaxTicks || int64(len(inputs)) > int64(MaxTicks)-run[1] {
+			return nil, fmt.Errorf("replay: runs exceed tick cap %d", MaxTicks)
 		}
 		in := inputOf(uint16(run[0]))
 		for i := int64(0); i < run[1]; i++ {

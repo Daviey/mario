@@ -125,6 +125,8 @@ jobs:
     steps:
       # pattern mario-* merges every per-OS binary artifact AND the
       # mario-android APK artifact (its name matches the pattern).
+      - name: Wipe workspace before artifact download
+        run: rm -rf dist web-dist && mkdir dist web-dist
       - name: Gather binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -190,17 +192,25 @@ jobs:
           # so skip inside the step until AUR_SSH_KEY is configured.
           if [ -z "$AUR_SSH_KEY" ]; then echo "AUR_SSH_KEY not set — skipping AUR publish"; exit 0; fi
           ver="${GITHUB_REF_NAME#v}"
+          # Key lives only in per-job temp and is cleaned up on exit.
+          mkdir -p "$RUNNER_TEMP/.ssh"
+          key="$RUNNER_TEMP/.ssh/aur_key"
+          printf '%s\n' "$AUR_SSH_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'rm -f "$key"' EXIT
+          # Clean up any legacy persisted key from past runs
+          rm -f "$HOME/.ssh/aur_key"
+          # Pin AUR static host keys (prevent keyscan TOFU MITM)
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$AUR_SSH_KEY" > "$HOME/.ssh/aur_key"
-          chmod 600 "$HOME/.ssh/aur_key"
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> "$HOME/.ssh/known_hosts" 2>/dev/null
-          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes"
+          echo "aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtFSFxQG/+2I8e9iQ6U8e65T//N6J115ZcWc/Hw6eEw" >> "$HOME/.ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o StrictHostKeyChecking=yes"
           git clone ssh://aur@aur.archlinux.org/mario.git aur
           cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO aur/
           cd aur
           sed -i "s/^pkgver=.*/pkgver=$ver/" PKGBUILD
           sed -i "s/^pkgver = .*/pkgver = $ver/" .SRCINFO
-          sed -i "s|#tag=v[^']*|#tag=v$ver|" .SRCINFO
+          sed -i "s|#tag=v[^']*|#commit=$GITHUB_SHA|" .SRCINFO
+          sed -i "s|#tag=v[^\"]*|#commit=$GITHUB_SHA|" PKGBUILD
           git config user.name "Dave Walker"
           git config user.email "dave@daviey.com"
           git add -A

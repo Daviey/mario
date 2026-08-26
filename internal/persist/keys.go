@@ -55,5 +55,5 @@ func SaveCalibration(m *input.Mapper) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o644)
+	_ = writeAtomic(path, data)
 }

@@ -41,11 +41,15 @@ func TestVerifyPendingKeepAndDrop(t *testing.T) {
 	liar := `{"id":"drop-1","name":"LIAR","score":999999,"level":9,` +
 		`"mode":"classic","engine_version":"` + board.EngineVersion + `","replay":` + jq(rec.JSON()) + `}`
 
-	var patched, deleted atomic.Int32
+	var patched, deleted, fetched atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			w.Write([]byte("[" + honest + "," + liar + "]"))
+			if fetched.Add(1) == 1 {
+				w.Write([]byte("[" + honest + "," + liar + "]"))
+			} else {
+				w.Write([]byte("[]"))
+			}
 		case http.MethodPatch:
 			patched.Add(1)
 			w.WriteHeader(204)

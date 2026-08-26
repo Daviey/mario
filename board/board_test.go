@@ -221,8 +221,8 @@ func TestSanitizeDisplayName(t *testing.T) {
 		{"\x01\x02\x03", "-"},        // nothing left -> placeholder
 	}
 	for _, c := range cases {
-		if got := sanitizeDisplayName(c.in); got != c.want {
-			t.Errorf("sanitizeDisplayName(%q) = %q want %q", c.in, got, c.want)
+		if got := SanitizeDisplayName(c.in); got != c.want {
+			t.Errorf("SanitizeDisplayName(%q) = %q want %q", c.in, got, c.want)
 		}
 	}
 }
