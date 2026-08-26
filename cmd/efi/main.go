@@ -69,6 +69,7 @@ func main() {
 		}
 		if app.Quit() {
 			logf("mario-efi: quit requested, powering off")
+			time.Sleep(100 * time.Millisecond) // let the serial write drain
 			powerOff(log)
 		}
 	}

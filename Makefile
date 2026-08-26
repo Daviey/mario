@@ -73,11 +73,15 @@ deb: deb/amd64 deb/arm64
 # flake — dist/mario.efi boots straight into the game from any UEFI boot
 # menu. Needs nix (the kernel build); x86_64 only. The leaderboard is
 # offline in this target (the boot image has no network stack).
-EFI_INIT   := $(DIST)/efi-init
-EFI_INITRD := $(DIST)/init.cpio
+ EFI_INIT   := $(DIST)/efi-init
+ EFI_INITRD := $(DIST)/init.cpio
+# Hermetic flake source: the committed git tree (not path:., which would
+# copy dist/ build outputs and .env into the store). From a worktree the
+# branch ref resolves through the shared git dir.
+EFI_FLAKE  := git+file://$$(pwd)?ref=$$(git branch --show-current)
 efi:
 	@command -v nix >/dev/null 2>&1 || { echo "make efi: nix is required (builds the EFI-stub kernel)"; exit 1; }
-	nix build path:.#mario-efi -o $(DIST)/mario-efi-kernel
+	nix build "$(EFI_FLAKE)#mario-efi" -o $(DIST)/mario-efi-kernel
 	cp $(DIST)/mario-efi-kernel/bzImage $(DIST)/mario.efi
 	mkdir -p $(DIST)/esp/EFI/BOOT
 	cp $(DIST)/mario.efi $(DIST)/esp/EFI/BOOT/BOOTX64.EFI
@@ -92,7 +96,7 @@ efi-initrd:
 
 efi-qemu: efi-initrd
 	@command -v qemu-system-x86_64 >/dev/null 2>&1 || { echo "make efi-qemu: qemu-system-x86_64 not found"; exit 1; }
-	nix build path:.#mario-efi -o $(DIST)/mario-efi-kernel
+	nix build "$(EFI_FLAKE)#mario-efi" -o $(DIST)/mario-efi-kernel
 	qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std \
 	  -kernel $(DIST)/mario-efi-kernel/bzImage -initrd $(EFI_INITRD) \
 	  -append "console=tty0 console=ttyS0 vga=791" -serial stdio
@@ -102,11 +106,11 @@ efi-qemu: efi-initrd
 # (screendump / sendkey). Quit the game to power off the VM.
 efi-qemu-ovmf: efi
 	@set -e; \
-	 ovmf=$$(nix path-info --no-link nixpkgs#OVMF); \
-	 code=$$(ls $$ovmf/OVMF_CODE.4m.fd $$ovmf/OVMF_CODE.fd 2>/dev/null | head -n 1); \
-	 vars=$$(ls $$ovmf/OVMF_VARS.4m.fd $$ovmf/OVMF_VARS.fd 2>/dev/null | head -n 1); \
-	 test -n "$$code" || { echo "OVMF firmware not found in $$ovmf"; exit 1; }; \
-	 cp $$vars $(DIST)/OVMF_VARS.fd; \
+	 ovmf=$$(nix build --no-link --print-out-paths nixpkgs#OVMF.fd); \
+	 code=$$(ls $$ovmf/FV/OVMF_CODE.4m.fd $$ovmf/FV/OVMF_CODE.fd 2>/dev/null | head -n 1); \
+	 vars=$$(ls $$ovmf/FV/OVMF_VARS.4m.fd $$ovmf/FV/OVMF_VARS.fd 2>/dev/null | head -n 1); \
+	 test -n "$$code" || { echo "OVMF firmware not found in $$ovmf/FV"; exit 1; }; \
+	 cp $$vars $(DIST)/OVMF_VARS.fd; chmod 644 $(DIST)/OVMF_VARS.fd; \
 	 echo "booting $(DIST)/mario.efi under $$(basename $$code)"; \
 	 qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std -monitor stdio \
 	   -serial file:$(DIST)/efi-serial.log \
