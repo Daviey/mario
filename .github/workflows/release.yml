@@ -97,7 +97,9 @@ jobs:
   apk:
     needs: test
     runs-on: [self-hosted, mario]
-    timeout-minutes: 20
+    # 40min: the first run materialises the Android SDK (auto-patchelf
+    # over every SDK binary is slow); later runs reuse the store paths.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
 
