@@ -7,6 +7,7 @@
 #   make cover      coverage summary per package
 #   make apk        Android APK (WebView shell around the web build)
 #   make ipa        unsigned iOS .ipa (WKWebView shell; Linux clang+lld build)
+#   make app        macOS .app bundle + universal darwin binary (tools/mkapp)
 #   make vet / fmt / fmtcheck / clean / run / demo
 
 BINARY    := mario
@@ -39,7 +40,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -127,6 +128,18 @@ rpm/386: linux/386
 		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.rpm
 
 rpm: rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386
+
+# macOS .app bundle: tools/mkapp glues the two darwin cross-builds into
+# one universal (fat) Mach-O, renders the icns icon set from internal/art
+# and packs Contents/{MacOS,Resources} into a deterministic zip — pure
+# Go, no Xcode. Also writes the bare universal binary (same bytes as the
+# bundle's Contents/MacOS/mario).
+app: darwin/amd64 darwin/arm64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkapp -version $(VERSION) \
+		-amd64 $(DIST)/$(BINARY)-darwin-amd64 -arm64 $(DIST)/$(BINARY)-darwin-arm64 \
+		-universal $(DIST)/$(BINARY)-darwin-universal \
+		-out $(DIST)/$(BINARY)_$(PKGVERSION)_macos.app.zip
 
 # Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
 # initramfs (tools/mkcpio) and embedded in an EFI-stub Linux kernel by the

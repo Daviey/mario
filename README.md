@@ -56,9 +56,13 @@ git clone https://github.com/Daviey/mario && cd mario
 make run          # or: make build && ./mario
 ```
 
-Or grab a static binary, a `.deb`/`.rpm`, the Android APK or the web bundle from the
+Or grab a static binary, a `.deb`/`.rpm`, the Android APK, the macOS app or the web bundle from the
 [latest release](https://github.com/Daviey/mario/releases/latest). Nix users:
 `nix build` from the flake in this repo; Arch users: `makepkg -p packaging/aur/PKGBUILD`.
+
+**macOS app:** grab `mario_<version>_macos.app.zip` from the release, unzip it, then
+right-click → **Open** the first time (Gatekeeper has to bless the unsigned binary) — or
+skip the bundle and run the binary from Terminal: `Mario.app/Contents/MacOS/mario`.
 
 **Browser:** play it at **[daviey.github.io/mario](https://daviey.github.io/mario/)** — no install, works offline once loaded, touch controls on phones.
 

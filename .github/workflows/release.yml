@@ -1,10 +1,12 @@
 # On tag push (v*): test, cross-compile every platform binary (one matrix
 # job per GOOS/GOARCH so a broken target is visible on its own), build
 # Debian and RPM packages for all five Linux arches, build the web bundle, build an
-# Android APK (WebView shell around that web bundle) and an unsigned iOS
-# .ipa (WKWebView shell built on this Linux runner with clang+lld+ldid),
-# then a tag-gated release job merges the artifacts into a GitHub Release
-# (binaries + debs + RPMs + APK + IPA + SHA256SUMS + mario-web.zip) and attaches
+# Android APK (WebView shell around that web bundle), an unsigned iOS
+# .ipa (WKWebView shell built on this Linux runner with clang+lld+ldid)
+# and a macOS .app bundle (universal darwin binary + icns + Info.plist,
+# built by the pure-Go tools/mkapp), then a tag-gated release job merges
+# the artifacts into a GitHub Release (binaries + debs + RPMs + APK + IPA +
+# macOS app + SHA256SUMS + mario-web.zip) and attaches
 # an omp-generated RELEASE_NOTES.md asset. The web-dist artifact is picked
 # up from this run by pages.yml (workflow_run), which deploys from a
 # default-branch context because the github-pages environment's
@@ -169,17 +171,47 @@ jobs:
           path: dist/mario_*_ios_unsigned.ipa
           if-no-files-found: error
 
+  # macOS .app: tools/mkapp glues the two darwin cross-builds into one
+  # universal (fat) Mach-O, renders the icns icon set and packs
+  # Contents/{MacOS,Resources} + Info.plist into a deterministic zip —
+  # pure Go, no Xcode, so this is a normal gating job. Rebuilds both
+  # darwin binaries itself (no artifact dependency). Two uploads: the
+  # bare universal binary (name matches the mario-* download pattern;
+  # the dist/mario-darwin-* SHA256SUMS glob sweeps it in) and the app
+  # zip (underscore name, listed explicitly below — apk/ipa style).
+  macos-app:
+    needs: test
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Build macOS .app + universal binary
+        run: make app
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
+        with:
+          name: mario-darwin-universal
+          path: dist/mario-darwin-universal
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
+        with:
+          name: mario-macos-app
+          path: dist/mario_*_macos.app.zip
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, web, apk, ipa]
+    needs: [build, web, apk, ipa, macos-app]
     runs-on: [self-hosted, mario]
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
       # pattern mario-* merges every per-OS binary artifact AND the
-      # mario-android APK + mario-ios IPA artifacts (their names match
-      # the pattern).
+      # mario-android APK + mario-ios IPA + mario-darwin-universal +
+      # mario-macos-app artifacts (their names match the pattern).
       - name: Wipe workspace before artifact download
         run: rm -rf dist web-dist && mkdir dist web-dist
       - name: Gather binaries
@@ -195,17 +227,21 @@ jobs:
           name: web-dist
           path: web-dist
 
-      # SHA256SUMS lists the 17 platform binaries, the five debs + RPMs,
-      # the Android APK, the iOS IPA + the web zip; mario-web.zip is picked up
-      # by the dist/mario-* glob below (do not list it twice). The debs are
-      # mario_<ver>_<arch>.deb, the RPMs mario_<ver>_<rpmarch>.rpm, the APK
-      # mario_<ver>_android.apk and the IPA mario_<ver>_ios_unsigned.ipa
-      # — underscores, so they never collide with that glob.
+      # SHA256SUMS lists the 17 platform binaries (mario-darwin-* sweeps
+      # in the universal), the five debs + RPMs, the Android APK, the iOS
+      # IPA, the macOS app zip + the web zip; mario-web.zip is picked up
+      # by the dist/mario-* glob below (do not list it twice). The debs
+      # are mario_<ver>_<arch>.deb, the RPMs mario_<ver>_<rpmarch>.rpm,
+      # the APK mario_<ver>_android.apk, the IPA
+      # mario_<ver>_ios_unsigned.ipa and the app zip
+      # mario_<ver>_macos.app.zip — underscores, so they never collide
+      # with that glob.
       - name: Checksums + web zip
         run: |
           cd dist && sha256sum mario-linux-* mario-darwin-* mario-freebsd-* mario-openbsd-* mario-netbsd-* mario-solaris-* mario-windows-* mario_*_*.deb mario_*_*.rpm > SHA256SUMS
           ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
           ls mario_*_ios_unsigned.ipa >/dev/null 2>&1 && sha256sum mario_*_ios_unsigned.ipa >> SHA256SUMS || echo no-ipa-this-run
+          ls mario_*_macos.app.zip >/dev/null 2>&1 && sha256sum mario_*_macos.app.zip >> SHA256SUMS || echo no-macos-app-this-run
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -213,11 +249,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Asset list; the APK joins only when the best-effort apk job
+          # Asset list; best-effort artifacts join only when their jobs
           # produced one (set -- keeps this shellcheck-clean POSIX sh).
           set -- dist/mario-* dist/mario_*_*.deb dist/mario_*_*.rpm dist/SHA256SUMS
           ls dist/mario_*_android.apk >/dev/null 2>&1 && set -- "$@" dist/mario_*_android.apk
           ls dist/mario_*_ios_unsigned.ipa >/dev/null 2>&1 && set -- "$@" dist/mario_*_ios_unsigned.ipa
+          ls dist/mario_*_macos.app.zip >/dev/null 2>&1 && set -- "$@" dist/mario_*_macos.app.zip
           if gh release create "$GITHUB_REF_NAME" "$@" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
