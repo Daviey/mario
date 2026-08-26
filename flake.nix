@@ -33,7 +33,10 @@
                 ];
                 meta.description = "mario as initramfs /init — the EFI-stub boot payload";
               };
-              efiInitrd = pkgs.runCommand "mario-efi-initramfs"
+              # The .cpio suffix matters: the kernel's gen_initramfs.sh
+              # only consumes INITRAMFS_SOURCE verbatim (vs. parsing it
+              # as a text description) when the filename ends in .cpio.
+              efiInitrd = pkgs.runCommand "mario-efi-initramfs.cpio"
                 { nativeBuildInputs = [ pkgs.cpio ]; }
                 ''
                   d=$(mktemp -d)
