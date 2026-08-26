@@ -13,16 +13,23 @@ func (g *Game) updateMushrooms() {
 			m.Emerge--
 			m.Pos.Y -= MushroomEmergeStep
 		} else {
+			walk := MushroomWalk
+			if m.Kind == MushStar {
+				walk = StarWalk
+			}
 			m.Vel.Y += Gravity
 			if m.Vel.Y > MaxFall {
 				m.Vel.Y = MaxFall
 			}
-			if g.moveX(&m.Pos, MushroomW, MushroomH, float64(m.Dir)*MushroomWalk) {
+			if g.moveX(&m.Pos, MushroomW, MushroomH, float64(m.Dir)*walk) {
 				m.Dir = -m.Dir
 			}
 			landed, _, _ := g.moveY(&m.Pos, MushroomW, MushroomH, m.Vel.Y)
 			if landed {
 				m.Vel.Y = 0
+				if m.Kind == MushStar {
+					m.Vel.Y = StarBounce // the star never rests
+				}
 			}
 			if m.Pos.Y > float64(g.Level.Height)+2 {
 				m.Gone = true
@@ -31,10 +38,21 @@ func (g *Game) updateMushrooms() {
 		}
 		if overlap(p.Pos.X, p.Pos.Y, p.W, p.H, m.Pos.X, m.Pos.Y, MushroomW, MushroomH) {
 			m.Gone = true
-			g.Score += MushroomScore
-			p.grow()
-			g.spawnSparkle(m.Pos.X+0.2, m.Pos.Y)
-			g.emit("powerup")
+			switch m.Kind {
+			case MushLife:
+				g.oneUp()
+				g.spawnScorePop(m.Pos.X, m.Pos.Y, 0, true)
+			case MushStar:
+				g.Score += StarScore
+				p.Star = StarTicks
+				g.spawnSparkle(m.Pos.X+0.2, m.Pos.Y)
+				g.emit("star")
+			default:
+				g.Score += MushroomScore
+				p.grow()
+				g.spawnSparkle(m.Pos.X+0.2, m.Pos.Y)
+				g.emit("powerup")
+			}
 		}
 	}
 }
@@ -189,7 +207,15 @@ func (g *Game) updatePlants() {
 		}
 		if pl.State != PlantHidden &&
 			overlap(p.Pos.X, p.Pos.Y, p.W, p.H, pl.Pos.X, pl.Pos.Y, PlantW, PlantH) {
-			g.hurtPlayer()
+			if p.Star > 0 {
+				pl.Gone = true
+				g.Score += StompScore
+				g.spawnScorePop(pl.Pos.X, pl.Pos.Y, StompScore, false)
+				g.spawnSparkle(pl.Pos.X, pl.Pos.Y)
+				g.emit("stomp")
+			} else {
+				g.hurtPlayer()
+			}
 		}
 	}
 }

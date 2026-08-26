@@ -126,9 +126,9 @@ func mustLevel(name string, b *Builder) *Level {
 	return l
 }
 
-// DefaultLevels returns the four built-in levels.
+// DefaultLevels returns the seven built-in levels (worlds 1 and 2).
 func DefaultLevels() []*Level {
-	return []*Level{level1(), level2(), level3(), level4()}
+	return []*Level{level1(), level2(), level3(), level4(), level5(), level6(), level7()}
 }
 
 func level1() *Level {
@@ -153,6 +153,7 @@ func level1() *Level {
 	b.Plant(34, 3)
 	b.Set(38, 12, 'G')
 	b.Pipe(41, 3)
+	b.Set(30, 8, '1') // hidden 1-UP above the third pipe (jump from the rim)
 	b.Set(46, 12, 'G')
 
 	b.Coins(9, 56, 57, 58)
@@ -203,6 +204,7 @@ func level2() *Level {
 	b.Set(24, 9, 'U')
 	b.Set(25, 9, 'B')
 	b.Set(26, 9, 'B')
+	b.Set(25, 5, 'H') // hidden coin high above the brick row
 	b.Set(28, 12, 'K')
 
 	// Tiered climb with coins on the high route.
@@ -282,6 +284,7 @@ func level3() *Level {
 	b.Set(70, 12, 'G')
 	b.Fill(74, 9, 78, 9, 'B')
 	b.Set(76, 9, '?')
+	b.Set(75, 9, 'S') // star power in the brick run
 
 	b.Pipe(86, 3)
 	b.Plant(86, 3)
@@ -348,6 +351,7 @@ func level4() *Level {
 	b.Set(78, 12, 'G')
 	b.Set(80, 12, 'G')
 	b.Set(84, 12, 'K')
+	b.Set(85, 5, '1') // hidden 1-UP before the pipe gauntlet
 
 	b.Fill(88, 9, 92, 9, 'B')
 	b.Set(89, 9, '?')
@@ -374,4 +378,208 @@ func level4() *Level {
 	b.StairsUp(166, 8)
 	b.Flag(182)
 	return mustLevel("2-1", b)
+}
+
+// level5 is world 2's underground gauntlet: pipes bite, paratroopas hop.
+func level5() *Level {
+	b := NewBuilder(190, LevelHeight)
+	b.Theme(ThemeUnderground)
+	b.Ground(0, 39)
+	b.Ground(43, 79)          // pit 40-42
+	b.Ground(84, 119)         // pit 80-83 (running jump)
+	b.Ground(123, 189)        // pit 120-122
+	b.Fill(0, 0, 189, 0, 'B') // the underground brick ceiling
+	b.Set(3, 12, 'M')
+
+	b.Set(10, 9, '?')
+	b.Set(14, 9, 'U')
+	b.Pipe(18, 2)
+	b.Pipe(24, 3)
+	b.Plant(24, 3)
+	b.Set(22, 12, 'G')
+	b.Set(30, 12, 'G')
+	b.Set(34, 12, 'W')
+
+	b.Fill(36, 9, 38, 9, 'B')
+	b.Coins(8, 36, 37, 38)
+
+	b.Pipe(46, 2)
+	b.Pipe(52, 3)
+	b.Plant(52, 3)
+	b.Set(50, 12, 'W')
+	b.Set(56, 12, 'K')
+	b.Set(60, 12, 'G')
+	b.Set(62, 12, 'G')
+
+	for x, ch := range map[int]byte{66: 'B', 67: '?', 68: 'B', 69: 'f', 70: 'B'} {
+		b.Set(x, 9, ch)
+	}
+	b.Coins(8, 66, 67, 68, 69, 70)
+
+	// Tiered climb out of the second pit landing.
+	b.Fill(86, 10, 90, 10, 'B')
+	b.Coins(9, 86, 87, 88, 89, 90)
+	b.Fill(94, 8, 98, 8, 'B')
+	b.Set(95, 4, 'H') // hidden coin above the upper tier — bump from the platform
+	b.Coins(7, 94, 95, 96, 97, 98)
+
+	b.Set(100, 12, 'W')
+	b.Set(102, 12, 'G')
+	b.Set(104, 12, 'G')
+	b.Pipe(108, 3)
+	b.Plant(108, 3)
+	b.Set(114, 12, 'K')
+
+	b.Fill(126, 9, 130, 9, 'B')
+	b.Set(128, 9, 'U')
+	b.Coins(8, 126, 127, 128, 129, 130)
+	b.Set(134, 12, 'W')
+	b.Set(138, 12, 'G')
+	b.Set(140, 12, 'G')
+	b.Set(144, 12, 'K')
+
+	b.Fill(148, 9, 152, 9, 'B')
+	b.Coins(8, 148, 149, 150, 151, 152)
+	b.Pipe(156, 2)
+
+	b.StairsUp(160, 8)
+	b.Flag(176)
+	return mustLevel("2-2", b)
+}
+
+// level6 is the athletic sky world: floating platforms, coin runs and
+// hopping paratroopas over wide running-jump gaps.
+func level6() *Level {
+	b := NewBuilder(200, LevelHeight)
+	b.Theme(ThemeSky)
+	b.Ground(0, 24)   // pit 25-28 (running jump)
+	b.Ground(29, 47)  // pit 48-51 (running jump)
+	b.Ground(52, 83)  // pit 84-87 (running jump)
+	b.Ground(88, 119) // pit 120-123 (running jump)
+	b.Ground(124, 199)
+	b.Set(3, 12, 'M')
+
+	b.Set(8, 9, '?')
+	b.Set(12, 9, 'U')
+	b.Pipe(16, 2)
+	b.Set(20, 12, 'G')
+
+	// High coin route over the first gap.
+	b.Fill(30, 9, 34, 9, 'B')
+	b.Coins(8, 30, 31, 32, 33, 34)
+	b.Fill(38, 7, 42, 7, 'B')
+	b.Coins(6, 38, 39, 40, 41, 42)
+	b.Set(40, 6, 'W') // paratroopa patrols the high coin platform
+	b.Set(32, 12, 'G')
+	b.Set(40, 12, 'K')
+	b.Set(44, 12, 'W')
+
+	b.Fill(54, 9, 58, 9, 'B')
+	b.Set(66, 5, 'H') // hidden coin over the mid-stretch
+	b.Set(56, 9, 'f')
+	b.Coins(8, 54, 55, 56, 57, 58)
+	b.Set(62, 12, 'G')
+	b.Set(68, 12, 'K')
+	b.Set(58, 12, 'W')
+	b.Set(72, 12, 'G')
+	b.Set(74, 12, 'G')
+
+	b.Fill(78, 10, 82, 10, 'B')
+	b.Coins(9, 78, 79, 80, 81, 82)
+
+	b.Set(90, 12, 'W')
+	b.Fill(92, 8, 96, 8, 'B')
+	b.Coins(7, 92, 93, 94, 95, 96)
+	b.Set(94, 7, 'K')
+	b.Set(100, 12, 'G')
+	b.Set(104, 12, 'W')
+	b.Set(108, 12, 'G')
+	b.Set(110, 12, 'G')
+
+	b.Fill(112, 9, 116, 9, 'B')
+	b.Set(114, 9, 'U')
+	b.Coins(8, 112, 113, 114, 115, 116)
+
+	b.Set(128, 12, 'W')
+	b.Set(132, 12, 'G')
+	b.Set(136, 12, 'K')
+	b.Set(140, 12, 'G')
+	b.Pipe(144, 3)
+	b.Plant(144, 3)
+
+	b.Fill(150, 10, 154, 10, 'B')
+	b.Coins(9, 150, 151, 152, 153, 154)
+	b.Set(152, 9, 'W')
+	b.Set(158, 12, 'G')
+	b.Set(162, 12, 'K')
+
+	b.StairsUp(168, 8)
+	b.Flag(184)
+	return mustLevel("2-3", b)
+}
+
+// level7 is the castle finale: grey stone, lava pools and fire bars.
+func level7() *Level {
+	b := NewBuilder(170, LevelHeight)
+	b.Theme(ThemeCastle)
+	b.Ground(0, 29)
+	b.Ground(33, 64)          // lava 30-32
+	b.Ground(69, 104)         // lava 65-68 (running jump)
+	b.Ground(108, 169)        // lava 105-107
+	b.Fill(0, 0, 169, 0, 'B') // the castle brick ceiling
+	b.Fill(30, 13, 32, 14, 'L')
+	b.Fill(65, 13, 68, 14, 'L')
+	b.Fill(105, 13, 107, 14, 'L')
+	b.Set(3, 12, 'M')
+
+	// Fire bars: a brick pillar with a rotating hub on top. Alternate
+	// hub columns spin opposite ways (see NewFireBar).
+	pillar := func(x int) {
+		b.Fill(x, 11, x, 12, 'B')
+		b.Set(x, 10, 'h')
+	}
+
+	b.Set(8, 9, '?')
+	b.Set(12, 9, 'U')
+	b.Set(14, 12, 'G')
+	pillar(21)
+	b.Set(24, 12, 'K')
+	b.Set(26, 12, 'G')
+
+	b.Fill(34, 9, 38, 9, 'B')
+	b.Set(34, 9, '?')
+	b.Set(40, 12, 'W')
+	pillar(44)
+	b.Set(48, 12, 'G')
+	b.Set(52, 12, 'K')
+	b.Set(56, 12, 'G')
+	pillar(61)
+
+	b.Coins(9, 72, 73, 74, 75, 76)
+	b.Set(72, 12, 'W')
+	b.Set(76, 9, 'f')
+	b.Set(80, 12, 'K')
+	pillar(82)
+	b.Set(88, 12, 'G')
+	pillar(97)
+	b.Set(92, 12, 'K')
+	b.Set(100, 12, 'G')
+
+	b.Set(110, 12, 'W')
+	b.Fill(116, 9, 120, 9, 'B')
+	b.Set(122, 8, '1') // hidden 1-UP past the pillar bars
+	b.Set(118, 9, 'U')
+	b.Coins(8, 116, 117, 118, 119, 120)
+	pillar(112)
+	b.Set(124, 12, 'G')
+	b.Set(128, 12, 'K')
+	pillar(129)
+	b.Set(136, 12, 'G')
+	b.Set(140, 12, 'W')
+	b.Set(144, 12, 'K')
+	b.Set(148, 12, 'G')
+
+	b.StairsUp(150, 8)
+	b.Flag(160)
+	return mustLevel("2-4", b)
 }

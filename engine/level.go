@@ -8,6 +8,8 @@ type Theme uint8
 const (
 	ThemeOverworld Theme = iota
 	ThemeUnderground
+	ThemeSky    // athletic: pale sky, sandstone terrain, clouds only
+	ThemeCastle // finale: black sky, grey stone, lava pools, fire bars
 )
 
 // Tile is a single grid cell of a level.
@@ -20,8 +22,12 @@ const (
 	Question     // question block containing a coin
 	QuestionMush // question block containing a mushroom
 	QuestionFire // question block containing a fire flower
+	QuestionStar // question block containing a star
 	Used         // spent question block
 	Pipe
+	Lava       // castle hazard: not solid, kills on touch
+	HiddenCoin // invisible block: only bumps from below, pays a coin
+	HiddenLife // invisible block: only bumps from below, pays a 1-UP
 	FlagPole
 	FlagTop
 )
@@ -29,7 +35,7 @@ const (
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, Question, QuestionMush, QuestionFire, Used, Pipe:
+	case Ground, Brick, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe:
 		return true
 	}
 	return false
@@ -49,8 +55,10 @@ type Level struct {
 	PlayerStart  Vec
 	GoombaSpawns []Vec
 	KoopaSpawns  []Vec
+	ParaSpawns   []Vec // flying koopas (hop while walking)
 	CoinSpawns   []Vec
-	PlantSpawns  []Vec // piranha plants; Y is the pipe-mouth row
+	PlantSpawns  []Vec     // piranha plants; Y is the pipe-mouth row
+	BarSpawns    []FireBar // castle fire bars; hub centre in tile coords
 }
 
 // At returns the tile at a grid position. Out-of-level sides act as solid
@@ -80,7 +88,11 @@ var tileChars = map[byte]Tile{
 	'?': Question,
 	'U': QuestionMush,
 	'f': QuestionFire,
+	'S': QuestionStar,
 	'P': Pipe,
+	'L': Lava,
+	'H': HiddenCoin,
+	'1': HiddenLife,
 	'F': FlagPole,
 	'T': FlagTop,
 }
@@ -89,9 +101,12 @@ var tileChars = map[byte]Tile{
 //
 //	' ' empty    '#' ground   'B' brick   '?' question (coin)
 //	'U' question (mushroom)   'f' question (fire flower)
-//	'P' pipe     'F' flag pole   'T' flag top
-//	'G' goomba   'K' koopa   'c' coin   'M' player start
+//	'S' question (star)       'P' pipe     'L' lava (castle)
+//	'H' hidden coin block     '1' hidden 1-UP block (bump from below only)
+//	'F' flag pole   'T' flag top
+//	'G' goomba   'K' koopa   'W' flying koopa   'c' coin   'M' player start
 //	'V' piranha plant (on the pipe below its cell)
+//	'h' fire-bar hub (rotating hazard anchored at the cell centre)
 //
 // Rows are padded with spaces to the width of the longest row. Entity
 // characters are removed from the tile grid and turned into spawn points.
@@ -132,6 +147,10 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 				l.GoombaSpawns = append(l.GoombaSpawns, Vec{float64(x), float64(y) + 1 - GoombaH})
 			case 'K':
 				l.KoopaSpawns = append(l.KoopaSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'W':
+				l.ParaSpawns = append(l.ParaSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'h': // fire-bar hub: rotates about the cell centre
+				l.BarSpawns = append(l.BarSpawns, NewFireBar(float64(x), float64(y)))
 			case 'c':
 				l.CoinSpawns = append(l.CoinSpawns, Vec{float64(x) + 0.2, float64(y) + 0.2})
 			case 'V': // air cell above a pipe's left column

@@ -15,6 +15,7 @@ import (
 	"github.com/Daviey/mario/engine"
 	"github.com/Daviey/mario/internal/persist"
 	"github.com/Daviey/mario/render"
+	"github.com/Daviey/mario/replay"
 )
 
 func TestLiveUISubmit(t *testing.T) {
@@ -25,14 +26,27 @@ func TestLiveUISubmit(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // fresh player identity
 
 	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	var rec replay.Recorder
 	for i := range 6000 {
-		g.Update(engine.Input{Right: true, Run: i%3 != 0, Up: i%97 < 22, AnyKey: i == 0})
+		in := engine.Input{Right: true, Run: i%3 != 0, Up: i%97 < 22, AnyKey: i == 0}
+		g.Update(in)
+		if i >= 1 { // tick 0 dismissed the title; the recording starts at the card
+			if i == 1 {
+				rec.Start()
+			}
+			rec.Record(in)
+		}
 	}
 	if g.State != engine.StateGameOver || g.Score == 0 {
 		t.Fatalf("script should end game over with a score, got %v score=%d", g.State, g.Score)
 	}
+	rec.Finish()
+	if res, err := replay.Run(engine.DefaultLevels(), "classic", rec.JSON()); err != nil || res.Score != g.Score {
+		t.Fatalf("replay must reproduce the live run: %v %+v vs %d", err, res, g.Score)
+	}
 
 	ui := NewUI(nil, nil) // real board client from env
+	ui.SetReplaySource(func() (string, bool) { return rec.JSON(), true })
 	if ui.submit == nil {
 		t.Fatal("no leaderboard configured")
 	}
@@ -106,8 +120,25 @@ func TestLiveDailyRoundTrip(t *testing.T) {
 	defer cancel()
 
 	day := time.Now().UTC().Format("2006-01-02")
+	y, m, d := time.Now().UTC().Date()
+	levels := []*engine.Level{engine.DailyLevelFor(y, int(m), d)}
+	g := engine.NewGame(levels, 20, engine.LevelHeight)
+	g.Daily = true
+	g.BeginDaily()
+	var rec replay.Recorder
+	rec.Start()
+	for t := 0; g.State != engine.StateGameOver && g.State != engine.StateWin && t < 6000; t++ {
+		in := engine.Input{Right: true, Run: t%3 != 0, Up: t%97 < 22}
+		g.Update(in)
+		rec.Record(in)
+	}
+	rec.Finish()
+	if res, err := replay.Run(levels, "daily", rec.JSON()); err != nil || res.Score != g.Score {
+		t.Fatalf("daily replay must reproduce the run: %v %+v vs %d", err, res, g.Score)
+	}
 	if err := client.Submit(ctx, board.Entry{
-		Name: "LIVEDAY", Score: 32100, DeviceID: pc.DeviceID, Mode: "daily", Day: day,
+		Name: "LIVEDAY", Score: g.Score, Level: g.LevelIndex() + 1, DeviceID: pc.DeviceID, Mode: "daily", Day: day,
+		Replay: rec.JSON(),
 	}); err != nil {
 		t.Fatalf("daily submit: %v", err)
 	}
@@ -118,7 +149,7 @@ func TestLiveDailyRoundTrip(t *testing.T) {
 	}
 	found := false
 	for _, r := range rows {
-		if r.Name == "LIVEDAY" && r.Score == 32100 {
+		if r.Name == "LIVEDAY" && r.Score == g.Score {
 			found = r.Mine
 		}
 	}
@@ -131,7 +162,7 @@ func TestLiveDailyRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range classic {
-		if r.Name == "LIVEDAY" && r.Score == 32100 {
+		if r.Name == "LIVEDAY" && r.Score == g.Score {
 			t.Fatal("daily row leaked into the classic board")
 		}
 	}

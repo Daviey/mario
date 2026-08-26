@@ -53,7 +53,7 @@ func testClient(t *testing.T, resp func(*http.Request, string) (int, string)) (*
 
 func TestSubmitWire(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
-	e := Entry{Name: "DAVE", Score: 12500, Level: 3, DeviceID: "d"}
+	e := Entry{Name: "DAVE", Score: 12500, Level: 3, DeviceID: "d", Replay: `{"v":1,"ticks":2,"runs":[[0,2]]}`}
 	if err := client.Submit(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,8 @@ func TestSubmitWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"name": "DAVE", "score": float64(12500), "level": float64(3), "device_id": "d", "pow_nonce": sent["pow_nonce"], "mode": "classic"}
+	want := map[string]any{"name": "DAVE", "score": float64(12500), "level": float64(3), "device_id": "d", "pow_nonce": sent["pow_nonce"], "mode": "classic",
+		"engine_version": EngineVersion, "replay": e.Replay}
 	if len(sent) != len(want) {
 		t.Errorf("body = %v, want exactly %v", sent, want)
 	}

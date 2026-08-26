@@ -14,9 +14,13 @@
 //	-scores N     print the top N leaderboard scores and exit
 //	-daily        with -scores: the daily board; alone: play today's challenge
 //	-ui-preview M render a leaderboard UI screen headless (ask|entry|board|title-board)
+//	-verify-pending service tool: replay-verify pending scores (needs the service key)
 //
 // Scores can be submitted to a Supabase-backed leaderboard after game over;
-// see the board package and .env.
+// every submission carries the run's input recording — a GitHub Action
+// replays it and keeps only rows that reproduce their score. See the board
+// and replay packages and .env.
+
 package main
 
 import (
@@ -55,11 +59,18 @@ func main() {
 	topN := flag.Int("scores", 0, "print the top `N` leaderboard scores and exit")
 	daily := flag.Bool("daily", false, "play today's daily challenge (or with -scores, print the daily board)")
 	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (`MODE`: ask, entry, board, title-board)")
+	verifyPending := flag.Bool("verify-pending", false, "verify pending replay-backed scores (service key) and exit")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
 	board.LoadDotEnv(".env")
-
+	if *verifyPending {
+		if err := runVerifyPending(); err != nil {
+			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *topN > 0 {
 		client, err := board.FromEnv()
 		if err != nil {
@@ -176,6 +187,7 @@ func usage(w io.Writer) {
 	row("mario -level lvl.txt", "play a custom ASCII level")
 	row("mario -demo", "headless scripted demo (no TTY needed)")
 	row("mario -scores 10", "print the online top 10")
+	row("mario -verify-pending", "service tool: replay-verify pending scores")
 	row("mario -ui-preview board", "render a leaderboard screen")
 
 	fmt.Fprintln(w, "")

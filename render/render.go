@@ -99,6 +99,7 @@ func NewPalette(trueColor bool) *Palette {
 		GoldLight:    color(0xFFF3B0, 11),
 		Player:       color(0xFF3B30, 9),
 		Skin:         color(0xFFC89E, 6),
+		UsedBG:       color(0x9C5A24, 3),
 		Overall:      color(0x2B5DD7, 12),
 		Dark:         color(0x1A0E04, 0),
 		Goomba:       color(0xC86428, 3),
@@ -135,10 +136,43 @@ func underground(p *Palette) *Palette {
 	return &q
 }
 
+// skyTheme re-skins the athletic world: pale sky, sandstone terrain.
+func skyTheme(p *Palette) *Palette {
+	q := *p
+	q.Sky = color(0x88C8F8, 12)
+	q.GroundLight = color(0xF8F0D0, 15)
+	q.GroundMid = color(0xD8B070, 11)
+	q.GroundDark = color(0x8A6230, 3)
+	q.BrickLight = color(0xE8C890, 11)
+	q.BrickDark = color(0x8A6230, 3)
+	return &q
+}
+
+// castleTheme re-skins the finale: black sky, grey stone, dead air.
+func castleTheme(p *Palette) *Palette {
+	q := *p
+	q.Sky = color(0x000000, 0)
+	q.GroundLight = color(0xC8C8C8, 7)
+	q.GroundMid = color(0x909098, 7)
+	q.GroundDark = color(0x484850, 8)
+	q.BrickLight = color(0xA8A8B0, 7)
+	q.BrickDark = color(0x404048, 8)
+	q.Cloud = color(0x2A2A2A, 8)
+	return &q
+}
+
 // paletteFor returns the palette for the current level's theme.
 func paletteFor(g *engine.Game, p *Palette) *Palette {
-	if g.Level != nil && g.Level.Theme == engine.ThemeUnderground {
+	if g.Level == nil {
+		return p
+	}
+	switch g.Level.Theme {
+	case engine.ThemeUnderground:
 		return underground(p)
+	case engine.ThemeSky:
+		return skyTheme(p)
+	case engine.ThemeCastle:
+		return castleTheme(p)
 	}
 	return p
 }
@@ -400,6 +434,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
+	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
 	drawPlayerPx(f, g, p, rc, camX, camY)
 	drawOverlayPx(f, g, p)
@@ -468,9 +503,13 @@ func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	txOf, tyOf func(int) int) {
-	if g.Level.Theme == engine.ThemeUnderground {
-		return // no sky dressing underground
+	switch g.Level.Theme {
+	case engine.ThemeUnderground, engine.ThemeCastle:
+		return // no sky dressing underground or inside the castle
 	}
+	// Only the overworld grows hills and bushes; the sky world keeps its
+	// clouds but floats over open air.
+	overworld := g.Level.Theme == engine.ThemeOverworld
 	// On the title screen clouds also keep clear of the stacked text —
 	// white cloud art would dissolve the white SUPER CLI subtitle.
 	var bands [][4]int
@@ -484,12 +523,14 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 				f.DrawSprite(sprCloud, rc, x, y, false, 1)
 			}
 		}
-		if HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
+		if overworld && HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
 			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprHill)), false, 1)
 		}
-		if w, ok := BushAt(tx); ok && g.Level.At(tx, engine.GroundTop).Solid() {
-			_ = w
-			f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
+		if overworld {
+			if w, ok := BushAt(tx); ok && g.Level.At(tx, engine.GroundTop).Solid() {
+				_ = w
+				f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
+			}
 		}
 	}
 }
@@ -532,7 +573,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				continue
 			}
 			t := g.Level.At(tx, ty)
-			if t == engine.Empty {
+			if t == engine.Empty || t == engine.HiddenCoin || t == engine.HiddenLife {
 				continue
 			}
 			x := tx*Pix - ox
@@ -545,13 +586,15 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				drawGround(f, p, x, y, tx, ty, g.Level.At(tx, ty-1) != engine.Ground)
 			case engine.Brick:
 				drawBrick(f, p, x, y, tx)
-			case engine.Question, engine.QuestionMush:
+			case engine.Question, engine.QuestionMush, engine.QuestionStar:
 				drawQuestion(f, p, x, y, g.Tick%48 < 24)
 			case engine.Used:
 				drawUsed(f, p, x, y)
 			case engine.Pipe:
 				_, col := pipeCol(g, tx, ty)
 				drawPipe(f, p, x, y, col, g.Level.At(tx, ty-1) != engine.Pipe)
+			case engine.Lava:
+				drawLava(f, p, x, y, tx, g.Level.At(tx, ty-1) != engine.Lava, g.Tick)
 			case engine.FlagPole:
 				drawFlagPole(f, p, x, y)
 			case engine.FlagTop:
@@ -593,7 +636,14 @@ func drawMushrooms(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX
 		}
 		cx := int(math.Round((m.Pos.X + engine.MushroomW/2 - camX) * Pix))
 		bottom := int(math.Round((m.Pos.Y + engine.MushroomH - camY) * Pix))
-		f.DrawSprite(sprMushroom, rc, cx-sprW(sprMushroom)/2, bottom-sprH(sprMushroom), false, 1)
+		art := sprMushroom
+		switch m.Kind {
+		case engine.MushLife:
+			art = sprMushroom1UP
+		case engine.MushStar:
+			art = sprStar
+		}
+		f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), false, 1)
 	}
 }
 
@@ -652,11 +702,30 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 			walk := sprGoombaWalk
 			if e.Kind == engine.KindKoopa {
 				art, walk = sprKoopa, sprKoopaWalk
+			} else if e.Kind == engine.KindPara {
+				art, walk = sprPara, sprParaWalk
 			}
 			if int(e.WalkDist/engine.EnemyFrameLen)%2 == 1 {
 				art = walk
 			}
 			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
+		}
+	}
+}
+
+// drawFireBars paints the rotating castle hazards: a chain of fireballs
+// per bar, spinning frames alternating along the chain.
+func drawFireBars(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, fb := range g.FireBars {
+		for i := range engine.FireBarLen {
+			b := fb.BallPos(i, g.Tick)
+			cx := int(math.Round((b.X - camX) * Pix))
+			cy := int(math.Round((b.Y - camY) * Pix))
+			art := sprFireball
+			if (i+g.Tick/6)%2 == 1 {
+				art = sprFireballSpin
+			}
+			f.DrawSprite(art, rc, cx-sprW(art)/2, cy-sprH(art)/2, false, 1)
 		}
 	}
 }
@@ -735,6 +804,9 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	if pl.Power == engine.PowerFire {
 		rc = fireRuneColors(p)
 	}
+	if pl.Star > 0 {
+		rc = starRuneColors(p, rc, g.Tick)
+	}
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
@@ -746,6 +818,24 @@ func fireRuneColors(p *Palette) map[rune]Color {
 	rc := runeColors(p)
 	rc['R'] = p.White
 	rc['B'] = p.FlagRed
+	return rc
+}
+
+// starRuneColors flickers mario's colors while star power runs: four
+// phases cycled off the world tick — deterministic, no RNG.
+func starRuneColors(p *Palette, base map[rune]Color, tick int) map[rune]Color {
+	rc := make(map[rune]Color, len(base)+2)
+	for k, v := range base {
+		rc[k] = v
+	}
+	switch (tick / 3) % 4 {
+	case 1:
+		rc['R'], rc['B'] = p.White, p.GoldLight
+	case 2:
+		rc['R'], rc['B'] = p.Coin, p.White
+	case 3:
+		rc['R'], rc['B'] = p.Green, p.Coin
+	}
 	return rc
 }
 

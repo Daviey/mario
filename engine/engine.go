@@ -74,6 +74,7 @@ type Game struct {
 	Player       *Player
 	Enemies      []*Enemy
 	Plants       []*Plant
+	FireBars     []FireBar
 	CoinItems    []*CoinItem
 	Mushrooms    []*Mushroom
 	FireFlowers  []*FireFlower
@@ -322,8 +323,13 @@ func (g *Game) updatePlaying(in Input) {
 
 	g.updateEnemies()
 	g.updatePlants()
+	g.updateFireBars()
 	g.playerEnemyInteractions()
 	if g.State != StatePlaying {
+		return
+	}
+	if g.touchingLava() {
+		g.kill()
 		return
 	}
 
@@ -492,8 +498,10 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	copy(lvl.Tiles, src.Tiles)
 	lvl.GoombaSpawns = append([]Vec(nil), src.GoombaSpawns...)
 	lvl.KoopaSpawns = append([]Vec(nil), src.KoopaSpawns...)
+	lvl.ParaSpawns = append([]Vec(nil), src.ParaSpawns...)
 	lvl.CoinSpawns = append([]Vec(nil), src.CoinSpawns...)
 	lvl.PlantSpawns = append([]Vec(nil), src.PlantSpawns...)
+	lvl.BarSpawns = append([]FireBar(nil), src.BarSpawns...)
 
 	g.Level = lvl
 	g.levelIndex = i
@@ -514,10 +522,14 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	for _, s := range lvl.KoopaSpawns {
 		g.Enemies = append(g.Enemies, newKoopa(s))
 	}
+	for _, s := range lvl.ParaSpawns {
+		g.Enemies = append(g.Enemies, newPara(s))
+	}
 	g.Plants = nil
 	for _, s := range lvl.PlantSpawns {
 		g.Plants = append(g.Plants, newPlant(s))
 	}
+	g.FireBars = append([]FireBar(nil), lvl.BarSpawns...)
 	g.CoinItems = nil
 	for _, s := range lvl.CoinSpawns {
 		g.CoinItems = append(g.CoinItems, &CoinItem{Pos: s})

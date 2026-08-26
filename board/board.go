@@ -1,7 +1,8 @@
 // Package board talks to the Supabase-hosted high score table over its
 // PostgREST API. The publishable key (SUPABASE_URL/SUPABASE_KEY, typically
 // in .env) is embedded in every client; RLS limits it to inserting and
-// reading score rows. Scores are client-attested — no verification layer.
+// reading score rows. Every submission carries a replay recording that the
+// verifier (GitHub Action, service key) replays to confirm the score.
 package board
 
 import (
@@ -13,9 +14,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// EngineVersion marks the gameplay build a replay was recorded on. Bump it
+// on ANY engine/level change — the verifier rejects rows it cannot trust.
+const EngineVersion = "2026.08.26"
 
 // Client is a configured PostgREST endpoint.
 type Client struct {
@@ -53,24 +59,30 @@ func FromEnv() (*Client, error) {
 }
 
 // Entry is a score submission from a player. PowNonce is filled in by
-// Submit (the server's proof-of-work gate rejects rows without a valid one).
+// Submit (the server's proof-of-work gate rejects rows without a valid one);
+// so is EngineVersion. Replay is the run's input log (replay package wire
+// format) — the server requires it on every new row.
 type Entry struct {
-	Name     string `json:"name"`
-	Score    int    `json:"score"`
-	Level    int    `json:"level"` // 1-based level reached (0 reads as 1)
-	DeviceID string `json:"device_id"`
-	PowNonce string `json:"pow_nonce"`
-	Mode     string `json:"mode,omitempty"` // "" / "classic" / "daily"
-	Day      string `json:"day,omitempty"`  // daily rows: YYYY-MM-DD
+	Name          string `json:"name"`
+	Score         int    `json:"score"`
+	Level         int    `json:"level"` // 1-based level reached (0 reads as 1)
+	DeviceID      string `json:"device_id"`
+	PowNonce      string `json:"pow_nonce"`
+	Mode          string `json:"mode,omitempty"` // "" / "classic" / "daily"
+	Day           string `json:"day,omitempty"`  // daily rows: YYYY-MM-DD
+	EngineVersion string `json:"engine_version"`
+	Replay        string `json:"replay"`
 }
 
 // Row is a leaderboard entry as served by the board_rows RPC. The raw
-// device_id never leaves the database; mine-ness arrives precomputed.
+// device_id never leaves the database; mine-ness arrives precomputed;
+// verified rows carry a replay-confirmed mark.
 type Row struct {
 	Name      string    `json:"name"`
 	Score     int       `json:"score"`
 	Level     int       `json:"level"`
 	Mine      bool      `json:"mine"`
+	Verified  bool      `json:"verified"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -79,6 +91,9 @@ type Row struct {
 func (c *Client) Submit(ctx context.Context, e Entry) error {
 	if e.Mode == "" {
 		e.Mode = "classic"
+	}
+	if e.EngineVersion == "" {
+		e.EngineVersion = EngineVersion
 	}
 	e.PowNonce = solvePow(e.DeviceID, e.Score)
 	e.Level = clampLevel(e.Level)
@@ -128,6 +143,58 @@ func (c *Client) TopMode(ctx context.Context, n int, deviceID, mode, day string)
 		rows[i].Level = clampLevel(r.Level)
 	}
 	return rows, nil
+}
+
+// PendingRow is an unverified submission awaiting replay verification.
+// Only the service-role verifier may see these.
+type PendingRow struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Score         int    `json:"score"`
+	Level         int    `json:"level"`
+	Mode          string `json:"mode"`
+	Day           string `json:"day"`
+	EngineVersion string `json:"engine_version"`
+	Replay        string `json:"replay"`
+}
+
+// Pending fetches up to n unverified rows that carry a replay. Requires a
+// client built with the service-role key.
+func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
+	q := url.Values{
+		"select":   {`id,name,score,level,mode,day,engine_version,replay`},
+		"verified": {"eq.false"},
+		"replay":   {"not.is.null"},
+		"order":    {"created_at.asc"},
+		"limit":    {strconv.Itoa(n)},
+	}
+	out, err := c.do(ctx, http.MethodGet, "/rest/v1/scores", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []PendingRow
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return nil, fmt.Errorf("decode pending: %w", err)
+	}
+	return rows, nil
+}
+
+// SetVerified marks a row's replay as confirmed. Service-role only.
+func (c *Client) SetVerified(ctx context.Context, id string) error {
+	body, err := json.Marshal(map[string]bool{"verified": true})
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, http.MethodPatch, "/rest/v1/scores",
+		url.Values{"id": {"eq." + id}}, body)
+	return err
+}
+
+// DeleteRow removes a row (failed verification). Service-role only.
+func (c *Client) DeleteRow(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, "/rest/v1/scores",
+		url.Values{"id": {"eq." + id}}, nil)
+	return err
 }
 
 // clampLevel bounds a level to the DB CHECK (1..99). Zero maps to 1 —

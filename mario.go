@@ -29,6 +29,7 @@ import (
 	"github.com/Daviey/mario/internal/persist"
 	"github.com/Daviey/mario/internal/ui"
 	"github.com/Daviey/mario/render"
+	"github.com/Daviey/mario/replay"
 )
 
 // Options configures New. The zero value is a playable default game.
@@ -64,6 +65,11 @@ type App struct {
 	idle       int // ticks idle on the title screen (attract mode)
 	demoT      int // attract-demo script tick
 	bestSaved  int // score already persisted this session
+
+	rec          replay.Recorder // this run's input log (leaderboard proof)
+	prevState    engine.State    // state before the last Update
+	levelsTrust  bool            // built-in level set: runs are verifiable
+	dailyTrusted bool            // default daily generator: daily runs verifiable
 }
 
 // New builds an App from opts and draws nothing yet.
@@ -114,12 +120,26 @@ func New(opts *Options) *App {
 	if pc, err := persist.LoadPlayer(); err == nil {
 		g.Best = pc.Best
 	}
-	return &App{
-		Game:       g,
-		mapper:     mapper,
-		io:         ui.NewRouter(mapper, ui.NewUI(nil, nil)),
-		dailyLevel: daily,
+	app := &App{
+		Game:         g,
+		mapper:       mapper,
+		io:           nil, // set below
+		dailyLevel:   daily,
+		levelsTrust:  len(opts.Levels) == 0,
+		dailyTrusted: opts.DailyLevel == nil,
 	}
+	mach := ui.NewUI(nil, nil)
+	mach.SetReplaySource(func() (string, bool) {
+		if !app.rec.Shippable() {
+			return "", false
+		}
+		if g.Daily {
+			return app.rec.JSON(), app.dailyTrusted
+		}
+		return app.rec.JSON(), app.levelsTrust
+	})
+	app.io = ui.NewRouter(mapper, mach)
+	return app
 }
 
 // Feed routes one chunk of raw input bytes: to the leaderboard UI while a
@@ -153,8 +173,27 @@ func (a *App) Step() {
 			a.demoT++
 		}
 	}
-
+	if !g.Demo {
+		switch g.State {
+		case engine.StateWorldCard:
+			// A fresh run begins here — unless the card follows a death
+			// respawn or a level clear, in which case the same run (and
+			// its recording) continues.
+			switch a.prevState {
+			case engine.StateDying, engine.StateScoreTick:
+			default:
+				a.rec.Start()
+			}
+		case engine.StateTitle:
+			a.rec.Reset()
+		}
+		a.rec.Record(in)
+	}
 	g.Update(in)
+	a.prevState = g.State
+	if g.State == engine.StateGameOver || g.State == engine.StateWin {
+		a.rec.Finish()
+	}
 	a.ui = a.io.UITick(g)
 	a.quit = in.Quit || a.io.QuitRequested()
 	if a.quit {
