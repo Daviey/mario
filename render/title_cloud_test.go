@@ -44,8 +44,9 @@ func titleBands(f *Frame) [][4]int {
 			}
 		}
 	}
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1)
-	if hintY := castY + castH + 7; hintY+5 <= f.H-5 {
+	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1)
+	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom
 		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1)
 	}
 	return bands
@@ -141,5 +142,42 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 	}
 	if drawn == 0 {
 		t.Fatal("no cloud pixels on any title screen: clouds were over-suppressed")
+	}
+}
+
+// TestLeaderHintDrawnOnTitle pins the L LEADERBOARD hint across viewport
+// sizes: the element must exist, sit fully inside the frame, and actually
+// light white pixels in its rows. (Regression: the bottom-anchored cascade
+// once pinned the hint to the ground band with an unsatisfiable fit gate,
+// so it silently never rendered at any size.)
+func TestLeaderHintDrawnOnTitle(t *testing.T) {
+	for _, viewH := range []int{4, 9, engine.LevelHeight} {
+		for _, lv := range engine.DefaultLevels() {
+			g := engine.NewGame([]*engine.Level{lv}, 40, viewH) // starts on title
+			f := worldFrame(g, testPal)
+			var hint *titleText
+			for i, e := range titleTextEls(f) {
+				if e.s == "L LEADERBOARD" || e.s == "L BOARD" {
+					hint = &titleTextEls(f)[i]
+				}
+			}
+			if hint == nil {
+				t.Fatalf("%s ViewH=%d: leaderboard hint element missing", lv.Name, viewH)
+			}
+			if hint.y < 0 || hint.y+5 > f.H {
+				t.Fatalf("%s ViewH=%d: hint rows %d..%d exceed frame height %d", lv.Name, viewH, hint.y, hint.y+4, f.H)
+			}
+			white := 0
+			for y := hint.y; y < hint.y+5; y++ {
+				for x := range f.W {
+					if f.At(x, y) == testPal.White {
+						white++
+					}
+				}
+			}
+			if white == 0 {
+				t.Fatalf("%s ViewH=%d: hint drew no white pixels", lv.Name, viewH)
+			}
+		}
 	}
 }

@@ -781,8 +781,9 @@ func titleTextEls(f *Frame) []titleText {
 			}
 		}
 	}
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1, inkGold, true, true)
-	if hintY := castY + castH + 7; hintY+5 <= f.H-5 {
+	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1, inkGold, true, true)
+	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom
 		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false, true)
 	}
 	return els

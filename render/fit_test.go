@@ -127,12 +127,25 @@ func TestTitleCastStandsOnGroundLine(t *testing.T) {
 		if goombaBottom != groundTop-1 {
 			t.Errorf("viewH=%d: goomba feet at row %d, want %d", viewH, goombaBottom, groundTop-1)
 		}
-		// No sprite pixels inside the ground rows.
+		// No sprite pixels inside the ground rows — except inside the
+		// ground-band text lines (PRESS ANY KEY, L LEADERBOARD), whose
+		// white ink is color-identical to goomba art. Bands come from the
+		// world frame: RenderPixels composites HUD above it, so its f.H
+		// would shift every band down by the status band.
+		textBands := titleTextBands(worldFrame(g, testPal))
+		inBand := func(x, y int) bool {
+			for _, b := range textBands {
+				if x >= b[0] && x < b[2] && y >= b[1]+HudBandPx && y < b[3]+HudBandPx {
+					return true
+				}
+			}
+			return false
+		}
 		for y := groundTop; y < f.H; y++ {
-			for x := 0; x < f.W; x++ {
+			for x := range f.W {
 				c := f.At(x, y)
-				if c == testPal.Player || c == testPal.Overall || c == testPal.Skin ||
-					c == testPal.Goomba || c == testPal.White {
+				if (c == testPal.Player || c == testPal.Overall || c == testPal.Skin ||
+					c == testPal.Goomba || c == testPal.White) && !inBand(x, y) {
 					t.Errorf("viewH=%d: sprite pixel at (%d,%d) inside ground", viewH, x, y)
 				}
 			}
