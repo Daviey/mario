@@ -88,6 +88,16 @@ func drawTextPx(f *Frame, x, y int, s string, c Color, scale int) {
 	}
 }
 
+// DrawTextPx stamps s at (x, y) with the 3×5 pixel font at scale 1.
+// Glyphs missing from the font fall back to their upper-case form, then
+// to '?' (same rules as the in-game overlays). This is the drawing API
+// for consumers that render whole screens from pixel text (the EFI
+// framebuffer build's leaderboard screens).
+func (f *Frame) DrawTextPx(s string, x, y int, c Color) { drawTextPx(f, x, y, s, c, 1) }
+
+// TextWidthPx reports the pixel width of s drawn at scale 1.
+func TextWidthPx(s string) int { return textWidthPx(s, 1) }
+
 // drawBannerPx draws a centered banner: solid fill, 2 px padding, then text.
 func drawBannerPx(f *Frame, y int, s string, fg, bg Color, p *Palette) {
 	w := textWidthPx(s, 1) + 4

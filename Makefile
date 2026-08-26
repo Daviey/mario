@@ -22,7 +22,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb $(TARGETS) deb/amd64 deb/arm64
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -62,6 +62,53 @@ deb/arm64: linux/arm64
 		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_arm64.deb
 
 deb: deb/amd64 deb/arm64
+
+# Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
+# initramfs (tools/mkcpio) and embedded in an EFI-stub Linux kernel by the
+# flake — dist/mario.efi boots straight into the game from any UEFI boot
+# menu. Needs nix (the kernel build); x86_64 only. The leaderboard is
+# offline in this target (the boot image has no network stack).
+EFI_INIT   := $(DIST)/efi-init
+EFI_INITRD := $(DIST)/init.cpio
+
+efi:
+	@command -v nix >/dev/null 2>&1 || { echo "make efi: nix is required (builds the EFI-stub kernel)"; exit 1; }
+	nix build .#mario-efi -o $(DIST)/mario-efi-kernel
+	cp $(DIST)/mario-efi-kernel/bzImage $(DIST)/mario.efi
+	mkdir -p $(DIST)/esp/EFI/BOOT
+	cp $(DIST)/mario.efi $(DIST)/esp/EFI/BOOT/BOOTX64.EFI
+	@echo "wrote $(DIST)/mario.efi — drop on an ESP, or: make efi-qemu-ovmf"
+
+# Fast dev loop: rebuild just the initramfs from the working tree and
+# direct-boot it beside the (nix-cached) kernel under QEMU — no OVMF;
+# vesafb 1024x768x16 (the OVMF path exercises efifb 32bpp instead).
+efi-initrd:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '$(LDFLAGS)' -o $(EFI_INIT) ./cmd/efi
+	CGO_ENABLED=0 go run ./tools/mkcpio $(EFI_INITRD) $(EFI_INIT)
+
+efi-qemu: efi-initrd
+	@command -v qemu-system-x86_64 >/dev/null 2>&1 || { echo "make efi-qemu: qemu-system-x86_64 not found"; exit 1; }
+	nix build .#mario-efi -o $(DIST)/mario-efi-kernel
+	qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std \
+	  -kernel $(DIST)/mario-efi-kernel/bzImage -initrd $(EFI_INITRD) \
+	  -append "console=tty0 console=ttyS0 vga=791" -serial stdio
+
+# The real thing: boot dist/mario.efi under OVMF firmware (actual UEFI).
+# Serial log lands in dist/efi-serial.log; the QEMU monitor is on stdio
+# (screendump / sendkey). Quit the game to power off the VM.
+efi-qemu-ovmf: efi
+	@set -e; \
+	 ovmf=$$(nix path-info --no-link nixpkgs#OVMF); \
+	 code=$$(ls $$ovmf/OVMF_CODE.4m.fd $$ovmf/OVMF_CODE.fd 2>/dev/null | head -n 1); \
+	 vars=$$(ls $$ovmf/OVMF_VARS.4m.fd $$ovmf/OVMF_VARS.fd 2>/dev/null | head -n 1); \
+	 test -n "$$code" || { echo "OVMF firmware not found in $$ovmf"; exit 1; }; \
+	 cp $$vars $(DIST)/OVMF_VARS.fd; \
+	 echo "booting $(DIST)/mario.efi under $$(basename $$code)"; \
+	 qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std -monitor stdio \
+	   -serial file:$(DIST)/efi-serial.log \
+	   -drive if=pflash,format=raw,readonly=on,file=$$code \
+	   -drive if=pflash,format=raw,file=$(DIST)/OVMF_VARS.fd \
+	   -drive file=fat:rw:$(DIST)/esp,format=raw,if=ide,index=0,media=disk
 
 # Static browser build (GitHub Pages ready): the game itself compiled to
 # WASM, rendered client-side. All asset paths relative. The Supabase URL
