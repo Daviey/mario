@@ -101,11 +101,11 @@ efi-qemu: efi-initrd
 # (screendump / sendkey). Quit the game to power off the VM.
 efi-qemu-ovmf: efi
 	@set -e; \
-	 ovmf=$$(nix path-info --no-link nixpkgs#OVMF); \
-	 code=$$(ls $$ovmf/OVMF_CODE.4m.fd $$ovmf/OVMF_CODE.fd 2>/dev/null | head -n 1); \
-	 vars=$$(ls $$ovmf/OVMF_VARS.4m.fd $$ovmf/OVMF_VARS.fd 2>/dev/null | head -n 1); \
-	 test -n "$$code" || { echo "OVMF firmware not found in $$ovmf"; exit 1; }; \
-	 cp $$vars $(DIST)/OVMF_VARS.fd; \
+	 ovmf=$$(nix build --no-link --print-out-paths nixpkgs#OVMF.fd); \
+	 code=$$(ls $$ovmf/FV/OVMF_CODE.4m.fd $$ovmf/FV/OVMF_CODE.fd 2>/dev/null | head -n 1); \
+	 vars=$$(ls $$ovmf/FV/OVMF_VARS.4m.fd $$ovmf/FV/OVMF_VARS.fd 2>/dev/null | head -n 1); \
+	 test -n "$$code" || { echo "OVMF firmware not found in $$ovmf/FV"; exit 1; }; \
+	 cp $$vars $(DIST)/OVMF_VARS.fd; chmod 644 $(DIST)/OVMF_VARS.fd; \
 	 echo "booting $(DIST)/mario.efi under $$(basename $$code)"; \
 	 qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std -monitor stdio \
 	   -serial file:$(DIST)/efi-serial.log \
