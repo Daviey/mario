@@ -90,6 +90,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`, falling back to build-time `DefaultURL`/`DefaultKey` embedded by `make web` so the WASM build can reach the board), `LoadDotEnv`
 - `supabase/migrations/20260825000000_scores.sql` — live table schema; apply changes here AND to the live DB
 - `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_KEY` (publishable key — safe to embed), `SUPABASE_DB_PASSWORD`
+- `icon.ico` / `icon.rc` / `mario_windows_amd64.syso` — Windows exe icon. Regenerate via `tools/icongen` (renders `render/sprites.go` art into a PNG-entry .ico) then mingw `windres` (nix shell `pkgsCross.mingwW64.buildPackages.gcc`). The **syso is committed**: every windows/amd64 `go build` links it automatically, so CI needs no mingw toolchain — only regenerate when sprite art changes. The web favicon is NOT a file: `web/index.html` draws it at runtime onto a canvas from the same palette/sprite data (CSP `img-src data:`).
 
 ## Runtime/Tooling Preferences
 
