@@ -1,0 +1,14 @@
+pkgbase = mario
+	pkgdesc = Terminal Mario-style platformer with a replay-verified online leaderboard
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://daviey.github.io/mario/
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = go
+	makedepends = git
+	source = git+ssh://git@github.com/Daviey/mario.git#tag=v0.3.0
+	sha256sums = SKIP
+
+pkgname = mario
