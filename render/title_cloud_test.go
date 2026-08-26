@@ -16,7 +16,7 @@ func sentinelCloudPal() *Palette {
 
 // titleBands recomputes the full-mode title-screen text layout
 // (independently of titleTextEls) as x0,y0,x1,y1 pixel rects: MARIO logo,
-// SUPER CLI subtitle, PRESS ANY KEY blink, L LEADERBOARD hint.
+// SUPER CLI subtitle, build version, PRESS ANY KEY blink, L LEADERBOARD hint.
 func titleBands(f *Frame) [][4]int {
 	castY := titleCastY(f)
 	castH := 2 * sprH(sprMarioSmall)
@@ -35,6 +35,13 @@ func titleBands(f *Frame) [][4]int {
 		add("MARIO", logoY, 2)
 		if subY := logoY + 15; subY+5 <= castY {
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1)
+			if vc := versionCandidates(Version); len(vc) > 0 {
+				if v := pickTextPx(vc, f.W-2); v != "" {
+					if verY := subY + 7; verY+5 <= castY {
+						add(v, verY, 1)
+					}
+				}
+			}
 		}
 	}
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1)
