@@ -39,15 +39,25 @@
                 vendorHash = null;
                 meta.description = "mario as initramfs /init — the EFI-stub boot payload";
               };
-              # The .cpio suffix matters: the kernel's gen_initramfs.sh
-              # only consumes INITRAMFS_SOURCE verbatim (vs. parsing it
-              # as a text description) when the filename ends in .cpio.
+              # tools/mkcpio builds the archive (same tool as the make
+              # dev loop): /init plus the /dev/console + /dev/null nodes
+              # PID 1 needs for stdio — cpio(1) can't mknod in the build
+              # sandbox. The .cpio filename suffix matters too: the
+              # kernel's gen_initramfs.sh only consumes INITRAMFS_SOURCE
+              # verbatim (vs. parsing it as a text description) when the
+              # name ends in .cpio.
+              mkcpio = pkgs.buildGoModule {
+                pname = "mkcpio";
+                inherit version;
+                src = self;
+                subPackages = [ "tools/mkcpio" ];
+                vendorHash = null;
+              };
               efiInitrd = pkgs.runCommand "mario-efi-initramfs.cpio"
-                { nativeBuildInputs = [ pkgs.cpio ]; }
+                { nativeBuildInputs = [ mkcpio ]; }
                 ''
-                  d=$(mktemp -d)
-                  install -m 0755 ${efiInit}/bin/efi $d/init
-                  (cd $d && echo init | cpio -o -H newc -R 0:0 > $out)
+                  mkdir -p $out && rmdir $out
+                  mkcpio $out ${efiInit}/bin/efi
                 '';
             in
             {
