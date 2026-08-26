@@ -47,6 +47,7 @@ func TestVersionCandidates(t *testing.T) {
 		}
 		for i := range got {
 			if got[i] != c.want[i] {
+				t.Fatalf("versionCandidates(%q) = %q, want %q", c.in, got, c.want)
 			}
 		}
 	}
