@@ -54,10 +54,10 @@ const (
 	fbiogetVScreeninfo = 0x4600
 	fbiogetFScreeninfo = 0x4602
 )
-
 // framebuffer is one open, mapped fbdev device plus the computed blit
 // geometry (integer scale, letterbox origin).
 type framebuffer struct {
+	fd      int
 	mem     []byte
 	w, h    int
 	bpp     int
@@ -76,17 +76,19 @@ func openFramebuffer(path string) (*framebuffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer syscall.Close(fd)
 
 	var v fbVarScreeninfo
 	if err := ioctlPtr(uintptr(fd), fbiogetVScreeninfo, unsafe.Pointer(&v)); err != nil {
+		syscall.Close(fd)
 		return nil, err
 	}
 	var f fbFixScreeninfo
 	if err := ioctlPtr(uintptr(fd), fbiogetFScreeninfo, unsafe.Pointer(&f)); err != nil {
+		syscall.Close(fd)
 		return nil, err
 	}
 	if v.BitsPerPixel != 32 && v.BitsPerPixel != 16 {
+		syscall.Close(fd)
 		return nil, &unsupportedFBError{bpp: v.BitsPerPixel}
 	}
 	size := int(f.LineLength) * int(v.Yres)
@@ -95,10 +97,12 @@ func openFramebuffer(path string) (*framebuffer, error) {
 	}
 	mem, err := syscall.Mmap(fd, 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
+		syscall.Close(fd)
 		return nil, err
 	}
+	// Do NOT close fd — simpledrm's fbdev emulation defio needs the file open to process page faults.
 	return &framebuffer{
-		mem: mem, w: int(v.Xres), h: int(v.Yres),
+		fd: fd, mem: mem, w: int(v.Xres), h: int(v.Yres),
 		bpp: int(v.BitsPerPixel), lineLen: int(f.LineLength),
 		red: v.Red, green: v.Green, blue: v.Blue,
 	}, nil
@@ -136,7 +140,6 @@ func channelScale(v byte, length uint32) uint32 {
 		return uint32(v) >> 2
 	case 5:
 		return uint32(v) >> 3
-	case 4:
 		return uint32(v) >> 4
 	}
 	return uint32(v) >> 3

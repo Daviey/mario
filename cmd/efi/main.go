@@ -31,6 +31,8 @@ func main() {
 
 	log := bootLog()
 	logFile = log
+	syscall.Dup2(int(log.Fd()), 1)
+	syscall.Dup2(int(log.Fd()), 2)
 	logf("mario-efi: init starting (pid %d)", syscall.Getpid())
 	fb, err := openFramebuffer("/dev/fb0")
 	if err != nil {
@@ -52,16 +54,23 @@ func main() {
 
 	ticker := time.NewTicker(time.Second / time.Duration(engine.TicksPerSecond))
 	defer ticker.Stop()
+	logf("mario-efi: entering loop")
 	for range ticker.C {
+		logf("mario-efi: loop start tick=%d", g.Tick)
 		for _, k := range kbs {
 			k.drain(app.Feed)
 		}
+		logf("mario-efi: before step")
 		app.Step()
+		logf("mario-efi: after step")
 		frame := render.RenderPixels(g, pal)
 		if u := app.UI(); u != nil {
 			frame = uiFrame(frame, pal, u, g.Tick)
 		}
 		fb.blit(frame.RGBBytes(), frame.W, frame.H)
+		if g.Tick%60 == 0 {
+			logf("mario-efi: tick %d rendered", g.Tick)
+		}
 		if app.Quit() {
 			logf("mario-efi: quit requested, powering off")
 			powerOff(log)

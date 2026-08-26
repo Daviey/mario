@@ -58,7 +58,7 @@
                   DEVTMPFS = yes;
                   FB_EFI = yes;
                   FB_VESA = yes;
-                  EVDEV = yes;
+                  INPUT_EVDEV = yes;
                   KEYBOARD_ATKBD = yes;
                   SERIAL_8250_CONSOLE = yes;
                 };

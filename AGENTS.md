@@ -18,9 +18,11 @@ stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plai
                      render.Stream.Draw(g, ui) ─▶ worldFrame → Frame (square pixels)
                      native: Diff → ANSI half-blocks to stdout
                      wasm:   RenderPixels → RGB bytes → page's marioFrame()
+                    efi:    RenderPixels → RGB bytes → scaled fbdev blit (/dev/fb0)
 ```
 
-- **Spine**: the importable root package `mario` (library facade, `mario.go`) owns the 60 Hz loop: `App.Run(*render.Stream)` blocks for the native terminal; `App.Step()` drives one tick for clock-owning consumers (the browser build). Both entries are thin: `cmd/mario` (native CLI) and `cmd/web` (WASM).
+ - **Spine**: the importable root package `mario` (library facade, `mario.go`) owns the 60 Hz loop: `App.Run(*render.Stream)` blocks for the native terminal; `App.Step()` drives one tick for clock-owning consumers (the browser build). Both entries are thin: `cmd/mario` (native CLI) and `cmd/web` (WASM).
+- **EFI-stub bootable**: A single-file UEFI boot image (`dist/mario.efi`) compiled via `make efi` that boots straight into the game with no OS. The image embeds a tiny custom Linux kernel (EFISTUB, simpledrm/vesafb, evdev) and an initramfs containing only the static `cmd/efi` binary as `/init`. It drives `App.Step()` at 60 Hz, reads keyboards via evdev, and blits `RenderPixels` directly to `/dev/fb0`. The leaderboard is offline.
 - **Input routing rule**: while any leaderboard screen holds the keyboard (`scoreUI.capturing()`), raw bytes are decoded via `input.PlainDecoder` and passed to the UI. The mapper speaks `CSI u` natively, but the UI is strictly byte-oriented (`internal/ui/router.go`).
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StateWorldCard → StatePlaying → (flag) StateFlagSlide → StateWalkCastle → StateScoreTick → StateWorldCard(next) … StateGameOver/StateWin` (world card skippable with AnyKey; death adds a 30-tick freeze-frame then respawns at `Level.CheckpointX` when reached). Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go` (seven levels: 1-1, underground 1-2, 1-3, 2-1, underground 2-2, sky 2-3, castle 2-4). Power states are `PowerSmall/PowerSuper/PowerFire` plus star power (`Player.Star` ticks: kill-on-touch, absorbs all damage except lava/pits, palette flicker). Fireballs (max 2, Run-key rising edge), piranha plants (rise/sink cycle + mercy rule while the player stands near), paratroopas (`KindPara`: hop while walking; a stomp demotes them to walking koopas), fire bars (`FireBar`: angle is a pure function of the tick; level char 'h'), lava ('L': non-solid, kills on touch), hidden blocks ('H' coin / '1' 1-UP: invisible, non-solid, trigger only on a rising head-bump via `bumpHidden`), the stomp/shell combo ladder (`stompLadder`, 1-UP past the end), HURRY at `Time ≤ 100`, and sound events (`Game.Events`, drained each tick by the host; the WASM build forwards them to the page's `marioSfx`). `daily.go` generates the deterministic daily-challenge level from a date seed (`DailyLevelFor`), with structural solvability tests guarding pit widths and plant placement.
 - **Themes**: `Level.Theme` (`ThemeOverworld`/`ThemeUnderground`/`ThemeSky`/`ThemeCastle`) re-skins the palette in `render.paletteFor` — underground = black sky, blue bricks, brick ceiling; sky = pale sky, sandstone terrain, clouds only; castle = black sky, grey stone, no sky dressing.
@@ -54,7 +56,8 @@ make race         # tests under -race
 make cover / vet / fmt / fmtcheck
 make run          # build + run
 make demo         # ./mario -demo (headless scripted run)
-make release      # cross-compile linux/amd64+arm64, darwin/amd64+arm64, windows/amd64 → dist/
+ make release      # cross-compile linux/amd64+arm64, darwin/amd64+arm64, windows/amd64 → dist/
+make efi          # single-file UEFI bootable linux/amd64 image (mario.efi) via nix
 make deb          # .deb packages (linux amd64+arm64) into dist/ via tools/mkdeb (no dpkg needed)
 make web          # GOOS=js GOARCH=wasm → dist/web/ (embeds Supabase URL/publishable key from env or .env)
 make web-serve    # serve dist/web at http://127.0.0.1:8417/
