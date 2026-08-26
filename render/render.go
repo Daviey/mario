@@ -678,7 +678,12 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 			if e.blink && g.Tick%40 >= 28 {
 				continue
 			}
-			drawCenterShadowPx(f, e.y, e.s, e.ink.color(p), e.scale, p.Dark)
+			if e.shadow { // only the ground-level lines need it; over sky the
+				// shadow fills the letters' counters and wrecks legibility
+				drawCenterShadowPx(f, e.y, e.s, e.ink.color(p), e.scale, p.Dark)
+			} else {
+				drawCenterPx(f, e.y, e.s, e.ink.color(p), e.scale)
+			}
 		}
 	}
 	// Mario and the goomba flank the centre, facing each other.
@@ -713,11 +718,12 @@ func (k titleInk) color(p *Palette) Color {
 
 // titleText is one full-mode title screen line.
 type titleText struct {
-	s     string
-	y     int
-	scale int
-	ink   titleInk
-	blink bool // on-phase of the blink cycle only
+	s      string
+	y      int
+	scale  int
+	ink    titleInk
+	blink  bool // on-phase of the blink cycle only
+	shadow bool // 1px drop shadow: ground-level lines only
 }
 
 // titleTextEls is the single source of truth for full-mode title text:
@@ -728,26 +734,26 @@ func titleTextEls(f *Frame) []titleText {
 	castY := titleCastY(f)
 	castH := 2 * sprH(sprMarioSmall)
 	var els []titleText
-	add := func(s string, y, scale int, ink titleInk, blink bool) {
-		els = append(els, titleText{s: s, y: y, scale: scale, ink: ink, blink: blink})
+	add := func(s string, y, scale int, ink titleInk, blink, shadow bool) {
+		els = append(els, titleText{s: s, y: y, scale: scale, ink: ink, blink: blink, shadow: shadow})
 	}
 	if castY >= 13 { // room for the ×2 logo (10px) above the cast?
 		logoY := max(2, min(f.H/12, castY-10))
-		add("MARIO", logoY, 2, inkFlag, false)
-		if subY := logoY + 15; subY+5 <= castY { // clear gap below logo + its shadow
-			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false)
+		add("MARIO", logoY, 2, inkFlag, false, false)
+		if subY := logoY + 15; subY+5 <= castY { // clear gap below the logo
+			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false, false)
 			if vc := versionCandidates(Version); len(vc) > 0 {
 				if v := pickTextPx(vc, f.W-2); v != "" {
 					if verY := subY + 7; verY+5 <= castY { // build tag under the subtitle
-						add(v, verY, 1, inkDim, false)
+						add(v, verY, 1, inkDim, false, false)
 					}
 				}
 			}
 		}
 	}
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1, inkGold, true)
+	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1, inkGold, true, true)
 	if hintY := castY + castH + 7; hintY+5 <= f.H-5 {
-		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false)
+		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false, true)
 	}
 	return els
 }
