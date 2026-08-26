@@ -1,0 +1,6 @@
+#!/bin/sh
+# AppImage entry point (copied to dist/appdir/AppRun): the AppImage
+# runtime mounts the AppDir squashfs and execs this from the root, so
+# resolve the bundled game relative to $0 — works from any mount point
+# and from appimage-run's extracted cache dir alike.
+exec "$(dirname "$0")/usr/bin/mario" "$@"

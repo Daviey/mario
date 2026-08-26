@@ -8,6 +8,7 @@
 #   make apk        Android APK (WebView shell around the web build)
 #   make ipa        unsigned iOS .ipa (WKWebView shell; Linux clang+lld build)
 #   make app        macOS .app bundle + universal darwin binary (tools/mkapp)
+#   make appimage  Linux AppImage (linux/amd64; needs nix)
 #   make vet / fmt / fmtcheck / clean / run / demo
 
 BINARY    := mario
@@ -40,7 +41,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -140,6 +141,37 @@ app: darwin/amd64 darwin/arm64
 		-amd64 $(DIST)/$(BINARY)-darwin-amd64 -arm64 $(DIST)/$(BINARY)-darwin-arm64 \
 		-universal $(DIST)/$(BINARY)-darwin-universal \
 		-out $(DIST)/$(BINARY)_$(PKGVERSION)_macos.app.zip
+
+# Linux AppImage (amd64): the static binary + desktop entry + icon in an
+# AppDir squashfs wrapped in the AppImageKit runtime. appimagetool left
+# nixpkgs entirely, so the recipe runs the official AppImageKit release
+# — the hash-pinned appimagetool-x86_64.AppImage that nixpkgs' own
+# appimage-run test fetches — under nix's appimage-run; that tool embeds
+# its AppImage runtime, so no APPIMAGE_RUNTIME/--runtime-file is needed
+# (verified: conversion + appimage-run smoke both work on NixOS).
+# AppDir mtimes are zeroed first: appimagetool's mksquashfs pins only
+# the superblock time (-mkfs-time 0), so file times must be normalised
+# for byte-identical rebuilds (same-contract determinism as mkdeb).
+# Output uses the underscore form (mario_<ver>_amd64.AppImage) so it
+# never collides with the dist/mario-* binary globs. Needs nix; on
+# NixOS run the result with:
+#   nix shell nixpkgs#appimage-run -c appimage-run dist/mario_*_amd64.AppImage
+APPIMAGETOOL_URL := https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage
+APPIMAGETOOL_SHA := 04ws94q71bwskmhizhwmaf41ma4wabvfgjgkagr8wf3vakgv866r
+
+appimage: linux/amd64
+	@command -v nix >/dev/null 2>&1 || { echo "make appimage: nix is required (appimagetool runs via appimage-run)"; exit 1; }
+	@rm -rf $(DIST)/appdir && mkdir -p $(DIST)/appdir/usr/bin
+	cp packaging/appimage/AppRun $(DIST)/appdir/AppRun
+	chmod 755 $(DIST)/appdir/AppRun
+	cp packaging/mario.desktop $(DIST)/appdir/mario.desktop
+	cp $(DIST)/$(BINARY)-linux-amd64 $(DIST)/appdir/usr/bin/$(BINARY)
+	$(GOFLAGS) go run ./tools/genicon -out $(DIST)/appdir/$(BINARY).png -size 256 -cell 42
+	ln -sf $(BINARY).png $(DIST)/appdir/.DirIcon
+	find $(DIST)/appdir -exec touch -h -d @0 {} +
+	@tool=$$(nix build --no-link --print-out-paths --expr 'builtins.fetchurl { url = "$(APPIMAGETOOL_URL)"; sha256 = "$(APPIMAGETOOL_SHA)"; }'); \
+		nix shell nixpkgs#appimage-run -c appimage-run "$$tool" $(DIST)/appdir $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.AppImage
+	@echo "wrote $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.AppImage"
 
 # Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
 # initramfs (tools/mkcpio) and embedded in an EFI-stub Linux kernel by the

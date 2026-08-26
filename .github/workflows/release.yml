@@ -6,13 +6,13 @@
 # and a macOS .app bundle (universal darwin binary + icns + Info.plist,
 # built by the pure-Go tools/mkapp), then a tag-gated release job merges
 # the artifacts into a GitHub Release (binaries + debs + RPMs + APK + IPA +
-# macOS app + SHA256SUMS + mario-web.zip) and attaches
+# macOS app + AppImage + SHA256SUMS + mario-web.zip) and attaches
 # an omp-generated RELEASE_NOTES.md asset. The web-dist artifact is picked
 # up from this run by pages.yml (workflow_run), which deploys from a
 # default-branch context because the github-pages environment's
 # protection rules reject tag refs.
 #
-# Manual dispatch = test/build/web/apk/ipa only; the release job is
+# Manual dispatch = test/build/web/apk/ipa/appimage only; the release job is
 # tag-gated, so dispatches never publish anything.
 
 on:
@@ -201,9 +201,42 @@ jobs:
           path: dist/mario_*_macos.app.zip
           if-no-files-found: error
 
+  # Linux AppImage (amd64): the static binary + desktop entry + icon in
+  # an AppImageKit-wrapped squashfs. appimagetool is gone from nixpkgs,
+  # so make appimage runs the hash-pinned official AppImageKit release
+  # under nix's appimage-run (see the Makefile recipe). Best-effort like
+  # the APK/IPA: never gates the release; the steps below tolerate a
+  # missing AppImage.
+  appimage:
+    needs: test
+    runs-on: [self-hosted, mario]
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      - name: Build AppImage
+        run: make appimage
+
+      # Real execution smoke: run the packaged AppImage (not the loose
+      # binary) headless and render the leaderboard board — same
+      # -ui-preview mode as local dev.
+      - name: Smoke test (headless board render)
+        run: |
+          nix shell nixpkgs#appimage-run -c appimage-run dist/mario_*_amd64.AppImage \
+            -ui-preview board > dist/appimage-smoke.ansi
+          test -s dist/appimage-smoke.ansi
+          sed 's/\x1b\[[0-9;]*[A-Za-z]//g' dist/appimage-smoke.ansi | grep -q LEADERBOARD
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
+        with:
+          name: mario-appimage
+          path: dist/mario_*_amd64.AppImage
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, web, apk, ipa, macos-app]
+    needs: [build, web, apk, ipa, macos-app, appimage]
     runs-on: [self-hosted, mario]
     timeout-minutes: 10
     permissions:
@@ -211,7 +244,8 @@ jobs:
     steps:
       # pattern mario-* merges every per-OS binary artifact AND the
       # mario-android APK + mario-ios IPA + mario-darwin-universal +
-      # mario-macos-app artifacts (their names match the pattern).
+      # mario-macos-app + mario-appimage AppImage artifacts (their names
+      # match the pattern).
       - name: Wipe workspace before artifact download
         run: rm -rf dist web-dist && mkdir dist web-dist
       - name: Gather binaries
@@ -233,8 +267,9 @@ jobs:
       # by the dist/mario-* glob below (do not list it twice). The debs
       # are mario_<ver>_<arch>.deb, the RPMs mario_<ver>_<rpmarch>.rpm,
       # the APK mario_<ver>_android.apk, the IPA
-      # mario_<ver>_ios_unsigned.ipa and the app zip
-      # mario_<ver>_macos.app.zip — underscores, so they never collide
+      # mario_<ver>_ios_unsigned.ipa, the app zip
+      # mario_<ver>_macos.app.zip and the AppImage
+      # mario_<ver>_amd64.AppImage — underscores, so they never collide
       # with that glob.
       - name: Checksums + web zip
         run: |
@@ -242,6 +277,7 @@ jobs:
           ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
           ls mario_*_ios_unsigned.ipa >/dev/null 2>&1 && sha256sum mario_*_ios_unsigned.ipa >> SHA256SUMS || echo no-ipa-this-run
           ls mario_*_macos.app.zip >/dev/null 2>&1 && sha256sum mario_*_macos.app.zip >> SHA256SUMS || echo no-macos-app-this-run
+          ls mario_*_amd64.AppImage >/dev/null 2>&1 && sha256sum mario_*_amd64.AppImage >> SHA256SUMS || echo no-appimage-this-run
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -255,6 +291,7 @@ jobs:
           ls dist/mario_*_android.apk >/dev/null 2>&1 && set -- "$@" dist/mario_*_android.apk
           ls dist/mario_*_ios_unsigned.ipa >/dev/null 2>&1 && set -- "$@" dist/mario_*_ios_unsigned.ipa
           ls dist/mario_*_macos.app.zip >/dev/null 2>&1 && set -- "$@" dist/mario_*_macos.app.zip
+          ls dist/mario_*_amd64.AppImage >/dev/null 2>&1 && set -- "$@" dist/mario_*_amd64.AppImage
           if gh release create "$GITHUB_REF_NAME" "$@" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
