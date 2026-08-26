@@ -54,6 +54,7 @@ const (
 	fbiogetVScreeninfo = 0x4600
 	fbiogetFScreeninfo = 0x4602
 )
+
 // framebuffer is one open, mapped fbdev device plus the computed blit
 // geometry (integer scale, letterbox origin).
 type framebuffer struct {
@@ -140,6 +141,7 @@ func channelScale(v byte, length uint32) uint32 {
 		return uint32(v) >> 2
 	case 5:
 		return uint32(v) >> 3
+	case 4:
 		return uint32(v) >> 4
 	}
 	return uint32(v) >> 3
