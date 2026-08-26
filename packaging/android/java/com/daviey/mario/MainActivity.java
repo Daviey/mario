@@ -43,6 +43,10 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         web = new WebView(this);
+        // chrome://inspect, debuggable builds only (release ships clean).
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true); // local best + daily pad state
@@ -72,7 +76,9 @@ public class MainActivity extends Activity {
         web.setHapticFeedbackEnabled(false);
 
         setContentView(web);
-        web.loadUrl(ASSETS + "index.html");
+        // ?touch: the shell is touch-only by construction — never let
+        // pointer media queries (wrong on some devices) hide the pad.
+        web.loadUrl(ASSETS + "index.html?touch");
     }
 
     /** Serve one APK asset for a virtual-origin request; null = network. */
