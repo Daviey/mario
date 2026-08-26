@@ -1,13 +1,12 @@
 package persist
 
-// Player identity for the leaderboard: a stable device UUID (generated
-// once, stored per platform) and a display name. No accounts anywhere.
-//
-// The store itself is build-tagged: natively a 0600 JSON file under the
-// OS config dir (player_store_other.go); in the browser, localStorage
-// (player_store_js.go) — js has no filesystem, and without a persistent
-// device id every web submit would send device_id "" and be rejected by
-// the server's uuid column.
+// Player identity for the leaderboard: a device UUID and a display name.
+// No accounts anywhere, and NOTHING is written to the user's machine by
+// native builds — the identity is process-lifetime only (a fresh UUID per
+// launch, cached so every LoadPlayer in one run agrees). The one allowed
+// store is the browser's localStorage (player_store_js.go), the only
+// place a persistent device id is needed: without it every web submit
+// would send device_id "" and be rejected by the server's uuid column.
 
 import (
 	"crypto/rand"
@@ -23,17 +22,27 @@ type PlayerConfig struct {
 	Best     int    `json:"best,omitempty"` // best score ever, local only
 }
 
-// LoadPlayer loads the stored player identity, creating a fresh one on
-// first run. Store failures are best-effort: a fresh in-memory identity
-// is still returned so play (and offline bests) keep working.
+// processPlayer caches this process's identity: with no native disk
+// store, it is the only thing keeping one run on a single device id.
+var processPlayer *PlayerConfig
+
+// LoadPlayer returns the player identity. On first call it loads the
+// store (browser localStorage) or generates a fresh UUID (native, which
+// stores nothing); the result is cached for the process lifetime so the
+// game, the leaderboard UI and submissions all agree on one device id.
 func LoadPlayer() (PlayerConfig, error) {
+	if processPlayer != nil {
+		return *processPlayer, nil
+	}
+	var pc PlayerConfig
 	if data := loadPlayerBytes(); len(data) > 0 {
-		var pc PlayerConfig
 		if json.Unmarshal(data, &pc) == nil && pc.DeviceID != "" {
+			processPlayer = &pc
 			return pc, nil
 		}
 	}
-	pc := PlayerConfig{DeviceID: newDeviceID()}
+	pc = PlayerConfig{DeviceID: newDeviceID()}
+	processPlayer = &pc
 	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
 		storePlayerBytes(data)
 	}
@@ -46,14 +55,19 @@ func SaveBest(score int) {
 	if err != nil || score <= pc.Best {
 		return
 	}
-	name := pc.Name
 	pc.Best = score
-	pc.SaveName(name)
+	pc.SaveName(pc.Name)
 }
 
+// SaveName sets the display name on both the receiver and the process
+// cache, then best-effort stores it (a no-op natively).
 func (pc *PlayerConfig) SaveName(name string) {
 	pc.Name = name
-	if data, err := json.MarshalIndent(pc, "", "  "); err == nil {
+	if processPlayer != nil {
+		processPlayer.Name = name
+		processPlayer.Best = pc.Best
+	}
+	if data, err := json.MarshalIndent(*pc, "", "  "); err == nil {
 		storePlayerBytes(data)
 	}
 }

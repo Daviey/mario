@@ -83,12 +83,12 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Names**: max 8 chars, charset `A-Z0-9 . -` (enforced by `sanitizeName` in `internal/persist/player.go`, by a DB CHECK regex, AND by `sanitizeDisplayName` in `board` to protect the terminal/DOM from peer-stored legacy rows).
 - **Go 1.22 style**: `for i := range n` (project rule); errors wrapped with `%w`; table-driven tests.
 - **Layout invariants**: title screen text positions come from `titleTextEls` (single source of truth); clouds must never paint a pixel inside a title text band (`cloudBlocked` does pixel-level suppression).
-- **Persistence**: Player identity (UUID/name) lives in `player.json`; terminal input learning (OS repeat delay, per-key hold habits) in `keys.json`. Both live in `<UserConfigDir>/mario/` and are best-effort (silent fallback).
+- **Persistence**: NONE on the user's machine — no config files, no input-calibration files (a deliberate privacy choice; the calibration API was removed with `keys.json`). Player identity is process-lifetime only (fresh UUID per native launch, cached so one run = one device id). The single allowed store is browser localStorage (`mario.player`, js build only).
 - **Commit style**: short lowercase imperative subjects (`board: dark band covers header too`).
 
 ## Important Files
 
-- `mario.go` — library facade: `Options`/`App` (`New`, `Feed`, `Step`, `Run`, `UI`, `Quit`, `SaveCalibration`, `StartDaily`); package doc shows the embed-as-easter-egg pattern
+- `mario.go` — library facade: `Options`/`App` (`New`, `Feed`, `Step`, `Run`, `UI`, `Quit`, `StartDaily`); package doc shows the embed-as-easter-egg pattern
 - `demo.go` — `LoadLevels`, `RunDemo` (the deterministic demo script lives in `internal/ui/script.go` and doubles as the attract-mode input)
 - `cmd/mario/main.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
 - `cmd/web/main.go` — WASM entry (`go build ./cmd/web` under GOOS=js)
@@ -99,7 +99,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - `cmd/web/main.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)`, `marioBoard(json)` (leaderboard DOM text), optional `marioSfx(name)` (WebAudio synth; called once per engine sound event) and `marioTitle(bool)` (title-screen enter/exit; the page shows the DAILY pad button only there) before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
 - `web/` PWA: `manifest.webmanifest`, `sw.js` (cache-first, CACHE name seds to the git VERSION at `make web` — same-commit rebuilds serve stale caches in dev; hard-reload or bump to bust), `icons/` (regenerate via `go run ./tools/genicon`)- `internal/ui/router.go` — the one-keyboard-one-owner input router (includes `PlainDecoder` for UI text entry)
 - `internal/ui/ui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
-- `internal/persist/` — loading/saving of `keys.json` input calibration to prevent legacy repeat-delay stutters across sessions
+- `internal/persist/` — process-lifetime player identity (no disk on native, localStorage on js) + name sanitisation
 - `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`, falling back to build-time `DefaultURL`/`DefaultKey` embedded by `make web` so the WASM build can reach the board), `LoadDotEnv`
 - `supabase/migrations/20260825000000_scores.sql` — live table schema; apply changes here AND to the live DB
 - `.env` (gitignored) — `SUPABASE_URL`, `SUPABASE_KEY` (publishable key — safe to embed), `SUPABASE_DB_PASSWORD`, and optionally `SUPABASE_SERVICE_KEY` (the `sb_secret_` dashboard key — NEVER embed or ship; local `mario -verify-pending` and the `verify-scores.yml` Action secret only)

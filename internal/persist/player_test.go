@@ -45,46 +45,49 @@ func TestNewDeviceID(t *testing.T) {
 	}
 }
 
-func TestLoadPlayerCreatesAndPersists(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+func TestLoadPlayerStableInProcessAndWritesNothing(t *testing.T) {
+	// Even if a config dir exists (and even if a stale player.json sits
+	// in it from an older build), native loads must not read or write it.
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	stale := filepath.Join(dir, "github.com/Daviey/mario")
+	os.MkdirAll(stale, 0o755)
+	os.WriteFile(filepath.Join(stale, "player.json"), []byte(`{"device_id":"00000000-0000-4000-8000-000000000000"}`), 0o644)
 
 	pc1, err := LoadPlayer()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pc1.DeviceID == "" {
-		t.Fatal("device id must be generated on first run")
+	if pc1.DeviceID == "" || pc1.DeviceID == "00000000-0000-4000-8000-000000000000" {
+		t.Fatalf("fresh device id expected, got %q", pc1.DeviceID)
 	}
 
-	// Second load must return the same identity from disk.
-	pc2, err := LoadPlayer()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Every load within the process agrees on one identity.
+	pc2, _ := LoadPlayer()
 	if pc1.DeviceID != pc2.DeviceID {
-		t.Fatalf("device id not persisted: %q vs %q", pc1.DeviceID, pc2.DeviceID)
+		t.Fatalf("device id not stable in process: %q vs %q", pc1.DeviceID, pc2.DeviceID)
 	}
 
+	// Name writes go through the cache, not the disk.
 	pc2.SaveName("DAVE")
 	pc3, _ := LoadPlayer()
 	if pc3.Name != "DAVE" {
-		t.Fatalf("name not persisted: %+v", pc3)
+		t.Fatalf("name not kept in process: %+v", pc3)
 	}
 
-	// Corrupt config regenerates rather than failing.
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "github.com/Daviey/mario", "player.json")
-	os.WriteFile(path, []byte(`{"device_id":`), 0o644)
-	pc4, err := LoadPlayer()
-	if err != nil || pc4.DeviceID == "" {
-		t.Fatalf("corrupt config must regenerate: %+v, %v", pc4, err)
+	// Session bests update the cache too.
+	SaveBest(500)
+	if pc4, _ := LoadPlayer(); pc4.Best != 500 {
+		t.Fatalf("best not kept in process: %+v", pc4)
 	}
 
-	// Ensure file permissions are tight (0600)
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
+	// And nothing was written anywhere under the config dir.
+	entries, err := os.ReadDir(stale)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "player.json" {
+		t.Fatalf("native build wrote to the config dir: %v (%v)", entries, err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("file perm is %04o, want 0600", mode)
+	info, err := os.Stat(filepath.Join(stale, "player.json"))
+	if err != nil || info.Size() != int64(len(`{"device_id":"00000000-0000-4000-8000-000000000000"}`)) {
+		t.Fatalf("player.json was rewritten: %v", info)
 	}
 }

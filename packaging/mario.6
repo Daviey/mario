@@ -78,12 +78,11 @@ file in the working directory).
 Service key for
 .BR \-verify\-pending .
 .SH FILES
-.TP
-.I $XDG_CONFIG_HOME/mario/player.json
-Player identity (UUID and display name) and local best score.
-.TP
-.I $XDG_CONFIG_HOME/mario/keys.json
-Terminal input calibration (OS key-repeat delay, per-key habits).
+None. The native binary writes nothing to the user's machine: the player
+identity is per-run (a fresh UUID each launch). The browser build keeps
+its identity and local best in localStorage under
+.I mario.player
+only.
 .SH LICENSE
 MIT \[em] see
 .I /usr/share/doc/mario/copyright

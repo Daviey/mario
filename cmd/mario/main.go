@@ -216,17 +216,11 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 	if err != nil {
 		return 0, fmt.Errorf("cannot set raw mode: %w", err)
 	}
-	var saveCalibration func()
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
 		os.Stdout.WriteString("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[23t\x1b[?1049l\x1b[0m\r\n")
 		os.Stdout.Sync()
 		restore()
-		// Persist input calibration on every exit path, including the
-		// signal handler's os.Exit below (defers don't run there).
-		if saveCalibration != nil {
-			saveCalibration()
-		}
 	})
 	defer cleanup()
 	go func() {
@@ -261,7 +255,6 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 	if daily {
 		app.StartDaily()
 	}
-	saveCalibration = app.SaveCalibration
 
 	// One goroutine owns fd 0 for the life of the process; the app routes
 	// each chunk to the game mapper or the leaderboard UI (never both).

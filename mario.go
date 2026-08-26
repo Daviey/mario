@@ -5,8 +5,9 @@
 // package). Embed it in any Go program as an easter egg:
 //
 //	app := mario.New(nil)          // default levels and viewport
-//	defer app.SaveCalibration()    // persist input learning (best-effort)
-//	go pumpInput(app)              // feed raw key bytes via app.Feed
+//
+// //	go pumpInput(app)              // feed raw key bytes via app.Feed
+//
 //	app.Run(render.NewStream(os.Stdout, render.NewPalette(true)))
 //
 // The package wires together the engine, the kitty-protocol input mapper,
@@ -41,8 +42,7 @@ type Options struct {
 	// ViewH is the viewport height in tiles (0 = the full level height).
 	ViewW, ViewH int
 
-	// Mapper is the input mapper to wire in; nil creates a fresh one and
-	// applies any previously saved calibration (see SaveCalibration).
+	// Mapper is the input mapper to wire in; nil creates a fresh one.
 	Mapper *input.Mapper
 
 	// DailyLevel provides the daily challenge level (called when the
@@ -105,7 +105,6 @@ func New(opts *Options) *App {
 	mapper := opts.Mapper
 	if mapper == nil {
 		mapper = input.NewMapper()
-		persist.LoadCalibration(mapper)
 	}
 
 	daily := opts.DailyLevel
@@ -256,8 +255,3 @@ func (a *App) Run(st *render.Stream) {
 		}
 	}
 }
-
-// SaveCalibration persists the input mapper's learning (OS key-repeat
-// delay, per-key hold habits) so the next session starts warm. Best-effort:
-// failures are ignored.
-func (a *App) SaveCalibration() { persist.SaveCalibration(a.mapper) }
