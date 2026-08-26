@@ -23,6 +23,8 @@
 
 Seven hand-built levels across two worlds and four themes — overworld, underground, sky and castle — with mushrooms, fire flowers, star power, hidden blocks, piranha plants, paratroopas, fire bars and lava. All of it drawn as **true-color pixel art using half-block terminal glyphs**: two square pixels per character cell, a custom 3×5 arcade font for the HUD, and a graceful 16-color fallback for basic terminals.
 
+The engine is **fully deterministic** — no randomness, no wall clock — so the same input sequence always reproduces the same game. That's not just a party trick: it's the backbone of an **online leaderboard where every score is verified by replay** (more on that below).
+
 ## Screenshots
 
 <p>
