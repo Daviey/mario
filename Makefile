@@ -22,7 +22,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve $(TARGETS)
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb $(TARGETS) deb/amd64 deb/arm64
 
 all: build
 
@@ -45,6 +45,23 @@ release:
 	+$(MAKE) -j$(words $(TARGETS)) $(TARGETS)
 	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
 		shasum -a 256 $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS
+
+# Debian packages via the pure-Go packager (tools/mkdeb) — no dpkg on the
+# build host (the CI runner is NixOS). Installs /usr/games/mario + man6 +
+# hicolor icon + desktop entry. PKGVERSION strips git describe's leading v.
+PKGVERSION := $(patsubst v%,%,$(VERSION))
+
+deb/amd64: linux/amd64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch amd64 \
+		-bin $(DIST)/$(BINARY)-linux-amd64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.deb
+
+deb/arm64: linux/arm64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch arm64 \
+		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_arm64.deb
+
+deb: deb/amd64 deb/arm64
 
 # Static browser build (GitHub Pages ready): the game itself compiled to
 # WASM, rendered client-side. All asset paths relative. The Supabase URL

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Mario
+GenericName=Platform Game
+Comment=Terminal Mario-style platformer with a replay-verified online leaderboard
+Exec=mario
+Terminal=true
+Categories=Game;ActionGame;
+Keywords=platformer;mario;terminal;retro;
+Icon=mario

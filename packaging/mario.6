@@ -1,0 +1,94 @@
+.TH MARIO 6 "2026-08-26" "mario" "Games Manual"
+.SH NAME
+mario \- terminal Mario-style platformer with an online leaderboard
+.SH SYNOPSIS
+.B mario
+.RI [ options ]
+.SH DESCRIPTION
+.B mario
+is a Super Mario Bros.-style platformer that renders as square half-block
+pixels in a terminal (or canvas pixels in the browser build).
+The engine is fully deterministic \[em] identical input sequences reproduce
+identical games \[em] and every leaderboard submission carries the run's
+input recording, which a verifier replays to prove the score.
+.PP
+Seven levels are built in (overworld, underground, sky and castle themes),
+plus a deterministic daily challenge generated from the date.
+Power states: super mushroom, fire flower (max two fireballs), and star
+power. Stomping enemies in a chain scores escalating points and eventually
+extra lives.
+.SH OPTIONS
+.TP
+.BR \-demo ", " \-demoticks\ N
+Run a headless scripted demo for
+.I N
+ticks (default 6000) and exit.
+.TP
+.BI \-level\ FILE
+Play a custom ASCII level instead of the built-ins.
+.TP
+.BI \-width\ N
+Viewport width in tiles (0 = terminal width).
+.TP
+.BR \-basic
+Force 16-color ANSI output instead of truecolor.
+.TP
+.BI \-scores\ N
+Print the top
+.I N
+leaderboard scores and exit.
+.TP
+.BR \-daily
+Play today's daily challenge (with
+.BR \-scores ,
+print the daily board).
+.TP
+.BI \-ui\-preview\ MODE
+Render a leaderboard UI screen headless and exit
+.RB ( ask ", " entry ", " board ", " title-board ).
+.TP
+.BR \-verify\-pending
+Service tool: replay-verify pending scores (requires the service key).
+.SH CONTROLS
+.TS
+tab(|);
+l l.
+a/d or left/right|move
+w or space|jump
+x|run (hold), fireball (fire flower)
+p|pause
+r|restart (after game over / win)
+q|quit
+l|leaderboard (on the title screen)
+d|daily challenge (on the title screen)
+.TE
+.SH LEADERBOARD
+After game over the game offers to submit your score to a Supabase-backed
+online board. Rows are replay-verified: an automated verifier re-executes
+each submission's recorded inputs and deletes rows that do not reproduce
+their claimed score. Verified rows show a check mark.
+.SH ENVIRONMENT
+.TP
+.B SUPABASE_URL ", " SUPABASE_KEY
+Leaderboard endpoint and publishable key (also read from a
+.I .env
+file in the working directory).
+.TP
+.B SUPABASE_SERVICE_KEY
+Service key for
+.BR \-verify\-pending .
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/mario/player.json
+Player identity (UUID and display name) and local best score.
+.TP
+.I $XDG_CONFIG_HOME/mario/keys.json
+Terminal input calibration (OS key-repeat delay, per-key habits).
+.SH LICENSE
+MIT \[em] see
+.I /usr/share/doc/mario/copyright
+(Debian) or
+.I /usr/share/licenses/mario/LICENSE
+(Arch).
+.SH AUTHOR
+Dave Walker <dave@daviey.com>
