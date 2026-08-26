@@ -53,6 +53,10 @@ func (g *Game) updatePlayer(in Input) {
 	if p.Grounded {
 		p.WalkDist += math.Abs(p.Vel.X)
 	}
+	// Skids kick up dust behind the direction of travel.
+	if p.Skidding && g.Tick%4 == 0 {
+		g.spawnDustPuff(p.Pos.X+p.W/2+float64(p.Facing)*0.3, p.Pos.Y+p.H-0.05)
+	}
 
 	// Jumping: edge detection, jump buffer and coyote time.
 	jumpPressed := in.Up && !g.prevIn.Up
@@ -73,6 +77,9 @@ func (g *Game) updatePlayer(in Input) {
 		p.Grounded = false
 		p.jumpBuffer = 0
 		p.groundTimer = CoyoteTicks + 1 // consume coyote so the jump cannot re-fire
+		p.StretchT = 6
+		g.spawnDustPuff(p.Pos.X+p.W/2-0.15, p.Pos.Y+p.H)
+		g.spawnDustPuff(p.Pos.X+p.W/2+0.15, p.Pos.Y+p.H)
 	}
 	if jumpReleased && p.jumping && p.Vel.Y < JumpCut {
 		p.Vel.Y = JumpCut
@@ -82,6 +89,12 @@ func (g *Game) updatePlayer(in Input) {
 	}
 	if p.Invincible > 0 {
 		p.Invincible--
+	}
+	if p.StretchT > 0 {
+		p.StretchT--
+	}
+	if p.SquashT > 0 {
+		p.SquashT--
 	}
 
 	// Gravity and integration.
@@ -95,7 +108,13 @@ func (g *Game) updatePlayer(in Input) {
 	landed, ceilTy, ceilCols := g.moveY(&p.Pos, p.W, p.H, p.Vel.Y)
 	p.Grounded = landed
 	if landed {
+		fall := p.Vel.Y
 		p.Vel.Y = 0
+		if fall > 0.12 { // hard landing: squash pose and twin dust puffs
+			p.SquashT = 6
+			g.spawnDustPuff(p.Pos.X+p.W/2-0.2, p.Pos.Y+p.H)
+			g.spawnDustPuff(p.Pos.X+p.W/2+0.2, p.Pos.Y+p.H)
+		}
 	} else if ceilTy >= 0 && len(ceilCols) > 0 {
 		p.Vel.Y = 0
 		best, bestOv := -1, -1.0

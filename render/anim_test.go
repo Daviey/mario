@@ -75,8 +75,11 @@ func TestMarioArtRowsWellFormed(t *testing.T) {
 	arts := map[string][]string{
 		"smallStride": sprMarioSmallStride, "smallPass": sprMarioSmallPass,
 		"smallJump": sprMarioSmallJump, "smallSkid": sprMarioSmallSkid,
+		"smallSquash": sprMarioSmallSquash, "smallStretch": sprMarioSmallStretch,
+		"smallDead":   sprMarioDead,
 		"superStride": sprMarioSuperStride, "superPass": sprMarioSuperPass,
 		"superJump": sprMarioSuperJump, "superSkid": sprMarioSuperSkid,
+		"superSquash": sprMarioSuperSquash, "superStretch": sprMarioSuperStretch,
 	}
 	for name, art := range arts {
 		w := sprW(art)
@@ -108,12 +111,16 @@ func TestDumpWalkCycle(t *testing.T) {
 		}
 		return f
 	}
-	t.Log("\nsmall: stand stride pass jump skid\n" + dumpFrame(sheet(
+	t.Log("\nsmall: stand stride pass jump skid squash stretch dead\n" + dumpFrame(sheet(
 		marioSmallWalk[0], sprMarioSmallStride, sprMarioSmallPass,
-		sprMarioSmallJump, sprMarioSmallSkid)))
-	t.Log("\nsuper: stand stride pass jump skid\n" + dumpFrame(sheet(
+		sprMarioSmallJump, sprMarioSmallSkid,
+		sprMarioSmallSquash, sprMarioSmallStretch, sprMarioDead)))
+	t.Log("\nsuper: stand stride pass jump skid squash stretch\n" + dumpFrame(sheet(
 		marioSuperWalk[0], sprMarioSuperStride, sprMarioSuperPass,
-		sprMarioSuperJump, sprMarioSuperSkid)))
+		sprMarioSuperJump, sprMarioSuperSkid,
+		sprMarioSuperSquash, sprMarioSuperStretch)))
+	t.Log("\nenemies: goomba goombaWalk koopa koopaWalk\n" + dumpFrame(sheet(
+		sprGoomba, sprGoombaWalk, sprKoopa, sprKoopaWalk)))
 }
 
 // End-to-end through worldFrame: with position and camera pinned, cycling
@@ -142,5 +149,98 @@ func TestWalkCycleStampsDistinctPixels(t *testing.T) {
 	}
 	if len(seen) != 3 {
 		t.Errorf("world frame showed %d distinct walk poses, want 3", len(seen))
+	}
+}
+
+// Liftoff stretch outranks the jump pose; landing squash outranks skid.
+func TestMarioArtStretchSquash(t *testing.T) {
+	rising := &engine.Player{StretchT: 4}
+	if got := marioArt(rising); !sameArt(got, sprMarioSmallStretch) {
+		t.Error("rising small player must use the stretch pose")
+	}
+	if got := marioArt(&engine.Player{Super: true, StretchT: 4}); !sameArt(got, sprMarioSuperStretch) {
+		t.Error("rising super player must use the super stretch pose")
+	}
+	landed := &engine.Player{Grounded: true, SquashT: 4, Vel: engine.Vec{X: 0.05}, Skidding: true}
+	if got := marioArt(landed); !sameArt(got, sprMarioSmallSquash) {
+		t.Error("landed player must use the squash pose over skid")
+	}
+	if got := marioArt(&engine.Player{Grounded: true, Super: true, SquashT: 4}); !sameArt(got, sprMarioSuperSquash) {
+		t.Error("landed super player must use the super squash pose")
+	}
+}
+
+// regionHash fingerprints a pixel rect of a rendered frame.
+func regionHash(f *Frame, x0, y0, x1, y1 int) string {
+	var sb strings.Builder
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			c := f.At(x, y).RGB
+			sb.WriteByte(byte(c >> 16))
+			sb.WriteByte(byte(c >> 8))
+			sb.WriteByte(byte(c))
+		}
+	}
+	return sb.String()
+}
+
+func playerRegionHash(g *engine.Game) string {
+	f := worldFrame(g, testPal)
+	pl := g.Player
+	art := marioArt(pl)
+	bottom := int(math.Round((pl.Pos.Y + pl.H - CameraY(g)) * Pix))
+	cx := int(math.Round(pl.Pos.X*Pix)) + int(pl.W*Pix)/2
+	return regionHash(f, cx-4, bottom-sprH(art), cx+5, bottom)
+}
+
+// Dying swaps in the death pose through the real drawPlayerPx path.
+func TestDyingPoseDrawn(t *testing.T) {
+	g := newGame(t)
+	g.Player.Pos.X, g.Player.Grounded = 5, true
+	g.State = engine.StatePlaying
+	alive := playerRegionHash(g)
+	g.State = engine.StateDying
+	dead := playerRegionHash(g)
+	if alive == dead {
+		t.Error("dying player rendered identically to standing player")
+	}
+}
+
+// Enemies waddle: their stamped pixels change with walk distance.
+func TestEnemyWaddleDrawn(t *testing.T) {
+	g := newGame(t) // helper level has a goomba at (14,12) and a koopa at (17,12)
+	var e *engine.Enemy
+	for _, en := range g.Enemies {
+		if en.Kind == engine.KindGoomba {
+			e = en
+		}
+	}
+	if e == nil {
+		t.Fatal("no goomba in helper level")
+	}
+	hash := func() string {
+		f := worldFrame(g, testPal)
+		cx := int((e.Pos.X + e.W/2) * Pix)
+		bottom := int((e.Pos.Y + e.H - CameraY(g)) * Pix)
+		return regionHash(f, cx-4, bottom-6, cx+5, bottom)
+	}
+	e.WalkDist = 0
+	stepA := hash()
+	e.WalkDist = engine.EnemyFrameLen
+	if hash() == stepA {
+		t.Error("goomba pixels identical across waddle frames")
+	}
+}
+
+// The title cast walks in place: frames differ within the blink-steady
+// window, so only the cast animation can explain the change.
+func TestTitleCastAnimates(t *testing.T) {
+	g := engine.NewGame(engine.DefaultLevels(), 30, 12)
+	g.Tick = 0
+	a := regionHash(worldFrame(g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
+	g.Tick = 10
+	b := regionHash(worldFrame(g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
+	if a == b {
+		t.Error("title frames identical 10 ticks apart (cast not animating)")
 	}
 }

@@ -37,6 +37,7 @@ const (
 	MushroomEmergeTicks = 26
 	StompBounce         = -0.28
 	InvincibleTicks     = 120
+	EnemyFrameLen       = 0.16 // tiles travelled per enemy walk-cycle frame
 )
 
 // Scoring.
@@ -58,6 +59,8 @@ type Player struct {
 	Invincible int     // post-hit invincibility ticks
 	WalkDist   float64 // ground distance travelled, drives the leg cycle
 	Skidding   bool    // turning against horizontal motion while grounded
+	StretchT   int     // jump-stretch pose countdown (ticks)
+	SquashT    int     // land-squash pose countdown (ticks)
 
 	groundTimer int // ticks since last grounded (coyote time)
 	jumpBuffer  int // ticks a jump press remains queued
@@ -122,6 +125,7 @@ type Enemy struct {
 	Dir      int // walk direction: 1 or -1
 	Timer    int // squashed animation countdown
 	Gone     bool
+	WalkDist float64 // ground distance travelled, drives the waddle cycle
 }
 
 func newGoomba(p Vec) *Enemy {
@@ -153,6 +157,7 @@ const (
 	ParticleCoin ParticleKind = iota
 	ParticleDebris
 	ParticleSparkle
+	ParticleDust
 )
 
 // Particle is a purely visual effect (coin pop, brick debris, sparkle).

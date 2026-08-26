@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // updateEnemies advances every enemy one tick and resolves shell kills.
 func (g *Game) updateEnemies() {
 	bottom := float64(g.Level.Height) + 2
@@ -41,6 +43,9 @@ func (g *Game) updateEnemies() {
 			}
 			if e.Pos.Y > bottom {
 				e.Gone = true
+			}
+			if vx != 0 {
+				e.WalkDist += math.Abs(vx)
 			}
 		}
 	}
