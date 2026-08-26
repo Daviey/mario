@@ -1,6 +1,6 @@
 # On tag push (v*): test, cross-compile every platform binary (one matrix
 # job per GOOS/GOARCH so a broken target is visible on its own), build
-# Debian packages for both Linux arches, build the web bundle, build an
+# Debian packages for all five Linux arches, build the web bundle, build an
 # Android APK (WebView shell around that web bundle) and an unsigned iOS
 # .ipa (WKWebView shell built on this Linux runner with clang+lld+ldid),
 # then a tag-gated release job merges the artifacts into a GitHub Release
@@ -49,9 +49,21 @@ jobs:
         include:
           - { goos: linux,   goarch: amd64 }
           - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: linux,   goarch: arm }
+          - { goos: linux,   goarch: 386 }
           - { goos: darwin,  goarch: amd64 }
           - { goos: darwin,  goarch: arm64 }
+          - { goos: freebsd, goarch: amd64 }
+          - { goos: freebsd, goarch: arm64 }
+          - { goos: openbsd, goarch: amd64 }
+          - { goos: openbsd, goarch: arm64 }
+          - { goos: netbsd,  goarch: amd64 }
+          - { goos: netbsd,  goarch: arm64 }
+          - { goos: solaris, goarch: amd64 }
           - { goos: windows, goarch: amd64, ext: .exe }
+          - { goos: windows, goarch: arm64, ext: .exe }
+          - { goos: windows, goarch: 386, ext: .exe }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
 
@@ -68,7 +80,9 @@ jobs:
           name: mario-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             dist/mario-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
-            dist/mario_*_${{ matrix.goarch }}.deb
+            # Debian arch != GOARCH for arm (armhf) and 386 (i386); each
+            # job builds exactly one deb, so a bare glob is unambiguous.
+            dist/*.deb
           if-no-files-found: error
 
   web:
@@ -175,15 +189,15 @@ jobs:
           name: web-dist
           path: web-dist
 
-      # SHA256SUMS lists the five binaries, both debs, the Android APK,
-      # the iOS IPA + the web zip; mario-web.zip is picked up by the
-      # dist/mario-* glob below (do not list it twice). The debs are
+      # SHA256SUMS lists the 17 platform binaries, the five debs, the
+      # Android APK, the iOS IPA + the web zip; mario-web.zip is picked up
+      # by the dist/mario-* glob below (do not list it twice). The debs are
       # mario_<ver>_<arch>.deb, the APK mario_<ver>_android.apk and the
       # IPA mario_<ver>_ios_unsigned.ipa — underscores, so they never
       # collide with that glob.
       - name: Checksums + web zip
         run: |
-          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* mario_*_*.deb > SHA256SUMS
+          cd dist && sha256sum mario-linux-* mario-darwin-* mario-freebsd-* mario-openbsd-* mario-netbsd-* mario-solaris-* mario-windows-* mario_*_*.deb > SHA256SUMS
           ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
           ls mario_*_ios_unsigned.ipa >/dev/null 2>&1 && sha256sum mario_*_ios_unsigned.ipa >> SHA256SUMS || echo no-ipa-this-run
           cd ../web-dist && zip -qr ../dist/mario-web.zip .

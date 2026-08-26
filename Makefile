@@ -21,13 +21,25 @@ LDFLAGS   := -s -w -X github.com/Daviey/mario/render.Version=$(VERSION)
 # Every release target: OS, ARCH, binary suffix.
 TARGETS := linux/amd64   \
            linux/arm64   \
+           linux/riscv64 \
+           linux/arm     \
+           linux/386     \
            darwin/amd64  \
            darwin/arm64  \
-           windows/amd64
+           freebsd/amd64 \
+           freebsd/arm64 \
+           openbsd/amd64 \
+           openbsd/arm64 \
+           netbsd/amd64  \
+           netbsd/arm64  \
+           solaris/amd64 \
+           windows/amd64 \
+           windows/arm64 \
+           windows/386
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk ipa shots $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk ipa shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -48,8 +60,8 @@ $(TARGETS):
 # capped at one job per target).
 release:
 	+$(MAKE) -j$(words $(TARGETS)) $(TARGETS)
-	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
-		shasum -a 256 $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-windows-* > SHA256SUMS
+	@cd $(DIST) && sha256sum $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-freebsd-* $(BINARY)-openbsd-* $(BINARY)-netbsd-* $(BINARY)-solaris-* $(BINARY)-windows-* > SHA256SUMS 2>/dev/null || \
+		shasum -a 256 $(BINARY)-linux-* $(BINARY)-darwin-* $(BINARY)-freebsd-* $(BINARY)-openbsd-* $(BINARY)-netbsd-* $(BINARY)-solaris-* $(BINARY)-windows-* > SHA256SUMS
 
 # Debian packages via the pure-Go packager (tools/mkdeb) — no dpkg on the
 # build host (the CI runner is NixOS). Installs /usr/games/mario + man6 +
@@ -66,7 +78,22 @@ deb/arm64: linux/arm64
 	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch arm64 \
 		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_arm64.deb
 
-deb: deb/amd64 deb/arm64
+deb/riscv64: linux/riscv64
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch riscv64 \
+		-bin $(DIST)/$(BINARY)-linux-riscv64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_riscv64.deb
+
+deb/armhf: linux/arm
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch armhf \
+		-bin $(DIST)/$(BINARY)-linux-arm -out $(DIST)/$(BINARY)_$(PKGVERSION)_armhf.deb
+
+deb/i386: linux/386
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch i386 \
+		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.deb
+
+deb: deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386
 
 # Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
 # initramfs (tools/mkcpio) and embedded in an EFI-stub Linux kernel by the

@@ -49,7 +49,7 @@ The same code compiles to a browser build (Go → WebAssembly, installable PWA w
 
 ## Quick start
 
-**Terminal** (Linux/macOS/Windows, x86-64 + arm64):
+**Terminal** (Linux, macOS, Windows, the BSDs, Solaris/illumos; x86-64, arm64, riscv64, 32-bit arm/x86):
 
 ```sh
 git clone https://github.com/Daviey/mario && cd mario
@@ -113,7 +113,7 @@ leaderboard.
 * **Deterministic engine.** Fixed 60 Hz tick, pure `Game.Update(Input)`
   transition — the determinism tests byte-compare full rendered runs, and the
   replay verifier leans on the same property.
-* **One codebase, many targets.** `make release` cross-compiles five OS/arch
+* **One codebase, many targets.** `make release` cross-compiles 17 OS/arch
   pairs; `make web` produces the static PWA; `make apk` wraps it for Android;
   `make deb` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
   builds the bootable image. The Windows exe icon is rendered from the game's

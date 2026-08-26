@@ -40,14 +40,16 @@ const (
 	maintainer = "Dave Walker <dave@daviey.com>"
 )
 
-// debs maps the Go arch names we ship (also the Debian names) to the
-// Debian architecture written into the control file. Anything else is a
-// caller mistake, caught early rather than by dpkg at install time.
-var debs = map[string]bool{"amd64": true, "arm64": true}
+// debs is the set of Debian architectures we ship (amd64, arm64, riscv64
+// map 1:1 from Go arch names; GOARCH=arm → armhf, GOARCH=386 → i386 — the
+// Makefile deb/<goarch>-shaped targets pass the Debian name). Anything
+// else is a caller mistake, caught early rather than by dpkg at install
+// time.
+var debs = map[string]bool{"amd64": true, "arm64": true, "riscv64": true, "armhf": true, "i386": true}
 
 func main() {
 	version := flag.String("version", "", "package version (leading 'v' stripped), e.g. v0.3.0")
-	arch := flag.String("arch", "", "Debian architecture: amd64 or arm64")
+	arch := flag.String("arch", "", "Debian architecture: amd64, arm64, riscv64, armhf or i386")
 	bin := flag.String("bin", "", "path to the built static binary")
 	pkgdir := flag.String("pkgdir", "packaging", "directory holding mario.6, mario.desktop, copyright")
 	out := flag.String("out", "", "output .deb path")
@@ -64,7 +66,7 @@ func run(version, arch, bin, pkgdir, out string) error {
 		return fmt.Errorf("-version, -arch, -bin and -out are all required")
 	}
 	if !debs[arch] {
-		return fmt.Errorf("unsupported Debian architecture %q (want amd64 or arm64)", arch)
+		return fmt.Errorf("unsupported Debian architecture %q (want amd64, arm64, riscv64, armhf or i386)", arch)
 	}
 	ver, err := sanitizeVersion(version)
 	if err != nil {
