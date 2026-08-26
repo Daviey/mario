@@ -9,7 +9,7 @@ A fully playable SMB-style platformer rendered as half-block terminal pixels (na
 ## Architecture & Data Flow
 
 ```text
-stdin bytes ──▶ router.Feed() ──┬─(UI active)──▶ io.plain ──▶ scoreUI.keys (lbui.go)
+stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plain ──▶ UI.keys (internal/ui/ui.go)
                                ├─(title 'l')──▶ io.plain ──▶ scoreUI.note
                                └─(playing)───▶ input.Mapper.Feed
                                                 │ Poll() each tick
@@ -25,7 +25,7 @@ stdin bytes ──▶ router.Feed() ──┬─(UI active)──▶ io.plain �
 - **Engine** (`engine/`): `Game.Update(Input)` advances one tick through states `StateTitle → StateWorldCard → StatePlaying → (flag) StateFlagSlide → StateWalkCastle → StateScoreTick → StateWorldCard(next) … StateGameOver/StateWin` (world card skippable with AnyKey; death adds a 30-tick freeze-frame then respawns at `Level.CheckpointX` when reached). Shared body/vec types in `entity.go`; physics in `physics.go`; levels are ASCII grids parsed by `ParseLevel`, built-ins in `levels.go` (four worlds: 1-1, underground 1-2, 1-3, 2-1). Power states are `PowerSmall/PowerSuper/PowerFire` (`Player.Power`; the old `Player.Super` bool is gone). Fireballs (max 2, Run-key rising edge), piranha plants (rise/sink cycle + mercy rule while the player stands near), the stomp/shell combo ladder (`stompLadder`, 1-UP past the end), HURRY at `Time ≤ 100`, and sound events (`Game.Events`, drained each tick by the host; the WASM build forwards them to the page's `marioSfx`). `daily.go` generates the deterministic daily-challenge level from a date seed (`DailyLevelFor`), with structural solvability tests guarding pit widths and plant placement.
 - **Themes**: `Level.Theme` (`ThemeOverworld`/`ThemeUnderground`) re-skins the palette in `render.paletteFor` — underground = black sky, blue bricks, brick ceiling, no clouds/hills/bushes.- **Render** (`render/`): pure function of engine state — `worldFrame()` paints a `Frame` (W×H pixel grid) using rune-art sprites (`sprites.go`) and the 3×5 pixel font (`font.go`); `blit()` packs 2 pixels per terminal cell (`▀`); `Diff()`/`Stream` emit only changed cells wrapped in synchronized-output mode. WASM uses `RenderPixels()` (RGB triplets for canvas). `Render`/`FrameANSI`/`Stream.Draw` take an optional `*ScoreUI` that swaps the world for the leaderboard screens, drawn as **real text cells** (not the pixel font); the browser build receives the same snapshot as JSON (`marioBoard`) and renders a DOM panel.
 - **Leaderboard** (`internal/ui`, `board/`): `ui.UI` state machine (`UIOff/UIAsk/UIEntry/UIBoard`) driven by `Tick(g)`; network runs off the tick loop via injectable `submit`/`fetch` funcs (nil → real `board.Client` from env). `board.Client` is a thin PostgREST wrapper (`Submit` carries `mode`/`day`, `Top` = classic, `TopMode` filters daily by UTC day). After a submit the board shows `YOU ARE #N` (rank = first Mine row). Local best lives in `player.json` (`persist.SaveBest`) and shows on the title + game-over screens; the engine keeps it live in `Game.Best`.
-- **Platform split** by build tags: `term_unix.go` (`!windows`), `term_windows.go` (`windows`), `wasm.go` (`js`).
+- **Platform split** by build tags: `cmd/mario/term_unix.go` (`!windows`), `cmd/mario/term_windows.go` (`windows`), `cmd/web/main.go` (`js`, the WASM entry).
 
 ## Key Directories
 
@@ -37,7 +37,7 @@ stdin bytes ──▶ router.Feed() ──┬─(UI active)──▶ io.plain �
 | `board/` | Supabase PostgREST client + `.env` loader |
 | `supabase/migrations/` | SQL schema for the `scores` table (RLS + grants) — source of truth for the live DB |
 | `web/` | Static browser shell: `index.html` (canvas + boot-screen loader), builds to `dist/web/` |
-| root `*.go` | Entry points, input routing (`internal/ui/router.go`), calibration/identity persistence (`keys.go`, `player.go`), leaderboard UI (`lbui.go`) |
+| root `*.go` | The library facade and its thin entries only: `mario.go` (App), `demo.go` (LoadLevels/RunDemo), `preview.go` (ui-preview). Input routing lives in `internal/ui/router.go`, calibration/identity persistence in `internal/persist/` (`keys.go`, `player.go`), the leaderboard machine in `internal/ui/ui.go` |
 
 ## Development Commands
 
@@ -69,7 +69,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Purity split**: `engine.Update` mutates state; `render.*` is a pure function of state (no I/O, no clocks). UI/network side effects live in `internal/ui` behind injectable funcs.
 - **Error handling**: gameplay never fails on leaderboard errors — submit/fetch failures degrade to `OFFLINE` status strings; `maybeSubmit`-style flows swallow config errors and stay silent.
 - **Arcade-string constraint** (world/HUD overlays only — the leaderboard screens are real text now): anything drawn through the 3×5 pixel font may use `A-Z 0-9 space . - + / : ! ?` only. Uppercase everything; no `_`, no lowercase; long lines ladder down via `pickTextPx(candidates, maxW)`.
-- **Names**: max 8 chars, charset `A-Z0-9 . -` (enforced by `sanitizeName` in `player.go`, by a DB CHECK regex, AND by `sanitizeDisplayName` in `board` to protect the terminal/DOM from peer-stored legacy rows).
+- **Names**: max 8 chars, charset `A-Z0-9 . -` (enforced by `sanitizeName` in `internal/persist/player.go`, by a DB CHECK regex, AND by `sanitizeDisplayName` in `board` to protect the terminal/DOM from peer-stored legacy rows).
 - **Go 1.22 style**: `for i := range n` (project rule); errors wrapped with `%w`; table-driven tests.
 - **Layout invariants**: title screen text positions come from `titleTextEls` (single source of truth); clouds must never paint a pixel inside a title text band (`cloudBlocked` does pixel-level suppression).
 - **Persistence**: Player identity (UUID/name) lives in `player.json`; terminal input learning (OS repeat delay, per-key hold habits) in `keys.json`. Both live in `<UserConfigDir>/mario/` and are best-effort (silent fallback).
@@ -87,7 +87,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - **Daily mode** (`20260826000000_daily_mode.sql`, merged with the level column in `20260826000001_board_rows_union.sql`): scores carry `mode` ('classic'|'daily') and `day`; `board_rows(p_device_id, p_limit, p_mode, p_day)` — null/`classic` reads the classic board only, `'daily'`+day reads one challenge board. Enter via title `'d'` (terminal key or the web DAILY pad button) or `mario -daily`. The UI's default fetch branches to `TopMode` when the run was daily — keep that wired through `UI.dailyMode()`.
 - `cmd/web/main.go` — browser entry; page contract: page provides `marioFrame(w,h,rgb)`, `marioBoard(json)` (leaderboard DOM text), optional `marioSfx(name)` (WebAudio synth; called once per engine sound event) and `marioTitle(bool)` (title-screen enter/exit; the page shows the DAILY pad button only there) before load; game exports `marioFeed(keys)`, `marioSize(worldPxW, worldPxH)`
 - `web/` PWA: `manifest.webmanifest`, `sw.js` (cache-first, CACHE name seds to the git VERSION at `make web` — same-commit rebuilds serve stale caches in dev; hard-reload or bump to bust), `icons/` (regenerate via `go run ./tools/genicon`)- `internal/ui/router.go` — the one-keyboard-one-owner input router (includes `PlainDecoder` for UI text entry)
-- `internal/ui/lbui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
+- `internal/ui/ui.go` — leaderboard state machine; entry keys: `ENTER` accept, `BS` delete, `ESC` back; board keys: `L`/`Q` close; title `l` opens
 - `internal/persist/` — loading/saving of `keys.json` input calibration to prevent legacy repeat-delay stutters across sessions
 - `board/board.go` — `Client.Submit/Top`, `FromEnv` (`SUPABASE_URL`+`SUPABASE_KEY`, falling back to build-time `DefaultURL`/`DefaultKey` embedded by `make web` so the WASM build can reach the board), `LoadDotEnv`
 - `supabase/migrations/20260825000000_scores.sql` — live table schema; apply changes here AND to the live DB
