@@ -22,6 +22,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -36,13 +37,22 @@ import (
 )
 
 func main() {
+	// Explicit help prints to stdout; usage after a parse error stays on
+	// flag's default stderr. flag.Usage closes over out, so flipping it
+	// before Parse covers both paths.
+	out := io.Writer(os.Stderr)
+	flag.Usage = func() { usage(out) }
+	if helpRequested(os.Args[1:]) {
+		out = os.Stdout
+	}
+
 	demo := flag.Bool("demo", false, "run a headless scripted demo and exit")
-	demoTicks := flag.Int("demoticks", 6000, "demo length in ticks (with -demo)")
-	levelPath := flag.String("level", "", "play a custom ASCII level file")
-	width := flag.Int("width", 0, "viewport width in tiles (0 = terminal width)")
+	demoTicks := flag.Int("demoticks", 6000, "run demo for `N` ticks (with -demo)")
+	levelPath := flag.String("level", "", "play a custom ASCII level `FILE`")
+	width := flag.Int("width", 0, "viewport `WIDTH` in tiles (0 = terminal width)")
 	basic := flag.Bool("basic", false, "force 16-color ANSI output instead of truecolor")
-	topN := flag.Int("scores", 0, "print the top N leaderboard scores and exit")
-	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (ask, entry, board, title-board)")
+	topN := flag.Int("scores", 0, "print the top `N` leaderboard scores and exit")
+	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (`MODE`: ask, entry, board, title-board)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -88,6 +98,82 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// helpRequested reports whether any argument explicitly asks for help.
+// flag.Parse would print usage for these too (exit 0), but only to its
+// default stderr stream.
+func helpRequested(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "-help" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// usage prints the CLI help. The flag reference is generated from the
+// registered flag definitions (VisitAll plus the backquoted-placeholder
+// convention UnquoteUsage implements), so it cannot drift from them.
+func usage(w io.Writer) {
+	fmt.Fprintf(w, "mario %s — SUPER CLI MARIO, a terminal Mario-style platformer\n", render.Version)
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "usage: mario [flags]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "flags:")
+	flag.VisitAll(func(f *flag.Flag) {
+		name, text := flag.UnquoteUsage(f)
+		var b strings.Builder
+		fmt.Fprintf(&b, "-%s", f.Name)
+		if name != "" {
+			fmt.Fprintf(&b, " %s", name)
+		}
+		pad := 22 - b.Len()
+		if pad < 2 {
+			pad = 2
+		}
+		if f.DefValue != "" && f.DefValue != "0" && f.DefValue != "false" {
+			text += fmt.Sprintf(" (default %s)", f.DefValue)
+		}
+		fmt.Fprintf(w, "  %s%s%s\n", b.String(), strings.Repeat(" ", pad), text)
+	})
+
+	row := func(keys, what string) {
+		fmt.Fprintf(w, "  %-23s  %s\n", keys, what)
+	}
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "game controls:")
+	row("a/d, arrows", "move")
+	row("w, space, up", "jump")
+	row("x (hold)", "run")
+	row("p", "pause")
+	row("q", "quit")
+	row("r", "restart after game over or win")
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "leaderboard keys:")
+	row("l", "open board from the title screen; close it (q/esc too)")
+	row("y / n", "after game over: submit score / skip")
+	row("letters, digits", "type a name (A-Z 0-9 . -, max 8 chars)")
+	row("enter", "submit name (saved player name if left blank)")
+	row("backspace", "delete a character")
+	row("esc", "back out")
+	row("r", "on the board: restart a new game")
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "examples:")
+	row("mario", "play in this terminal")
+	row("mario -width 30", "fixed narrow viewport")
+	row("mario -level lvl.txt", "play a custom ASCII level")
+	row("mario -demo", "headless scripted demo (no TTY needed)")
+	row("mario -scores 10", "print the online top 10")
+	row("mario -ui-preview board", "render a leaderboard screen")
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Scores submit to a Supabase-backed leaderboard after game over;")
+	fmt.Fprintln(w, "server config comes from .env or SUPABASE_URL/SUPABASE_KEY")
+	fmt.Fprintln(w, "in the environment (see the board package).")
 }
 
 // run plays the game on the real terminal and returns the final score.
