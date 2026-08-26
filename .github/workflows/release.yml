@@ -97,6 +97,11 @@ jobs:
   apk:
     needs: test
     runs-on: [self-hosted, mario]
+    # Best-effort: an APK build failure (SDK/toolchain trouble on the
+    # runner) must never gate the release or the Pages deploy — the same
+    # policy that made AUR local-build only. The release steps below
+    # tolerate a missing APK.
+    continue-on-error: true
     # 40min: the first run materialises the Android SDK (auto-patchelf
     # over every SDK binary is slow); later runs reuse the store paths.
     timeout-minutes: 40
@@ -147,7 +152,8 @@ jobs:
       # underscores, so they never collide with that glob.
       - name: Checksums + web zip
         run: |
-          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* mario_*_*.deb mario_*_android.apk > SHA256SUMS
+          cd dist && sha256sum mario-linux-* mario-darwin-* mario-windows-* mario_*_*.deb > SHA256SUMS
+          ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -155,8 +161,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release create "$GITHUB_REF_NAME" \
-              dist/mario-* dist/mario_*_*.deb dist/mario_*_android.apk dist/SHA256SUMS \
+          # Asset list; the APK joins only when the best-effort apk job
+          # produced one (set -- keeps this shellcheck-clean POSIX sh).
+          set -- dist/mario-* dist/mario_*_*.deb dist/SHA256SUMS
+          ls dist/mario_*_android.apk >/dev/null 2>&1 && set -- "$@" dist/mario_*_android.apk
+          if gh release create "$GITHUB_REF_NAME" "$@" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
             exit 0
@@ -164,8 +173,7 @@ jobs:
           # Rerun of a completed run: the release already exists — refresh
           # its assets instead of dying on "already_exists".
           echo "release exists, uploading assets with --clobber"
-          gh release upload "$GITHUB_REF_NAME" \
-              dist/mario-* dist/mario_*_*.deb dist/mario_*_android.apk dist/SHA256SUMS \
+          gh release upload "$GITHUB_REF_NAME" "$@" \
               --clobber --repo "$GITHUB_REPOSITORY"
 
   # packaging/aur is NOT published anywhere: the PKGBUILD is kept for
