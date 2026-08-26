@@ -695,6 +695,7 @@ const (
 	inkFlag titleInk = iota // MARIO logo red
 	inkWhite
 	inkGold
+	inkDim // build version tag under the subtitle
 )
 
 func (k titleInk) color(p *Palette) Color {
@@ -703,6 +704,8 @@ func (k titleInk) color(p *Palette) Color {
 		return p.FlagRed
 	case inkGold:
 		return p.GoldLight
+	case inkDim:
+		return p.TextDim
 	default:
 		return p.White
 	}
@@ -733,6 +736,13 @@ func titleTextEls(f *Frame) []titleText {
 		add("MARIO", logoY, 2, inkFlag, false)
 		if subY := logoY + 15; subY+5 <= castY { // clear gap below logo + its shadow
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false)
+			if vc := versionCandidates(Version); len(vc) > 0 {
+				if v := pickTextPx(vc, f.W-2); v != "" {
+					if verY := subY + 7; verY+5 <= castY { // build tag under the subtitle
+						add(v, verY, 1, inkDim, false)
+					}
+				}
+			}
 		}
 	}
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), min(castY+castH+1, f.H-5), 1, inkGold, true)

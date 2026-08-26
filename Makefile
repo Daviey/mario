@@ -11,7 +11,7 @@ BINARY    := mario
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DIST      := dist
 WEBDIST   := $(DIST)/web
-LDFLAGS   := -s -w
+LDFLAGS   := -s -w -X mario/render.Version=$(VERSION)
 
 # Every release target: OS, ARCH, binary suffix.
 TARGETS := linux/amd64   \
