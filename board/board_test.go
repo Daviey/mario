@@ -53,7 +53,7 @@ func testClient(t *testing.T, resp func(*http.Request, string) (int, string)) (*
 
 func TestSubmitWire(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
-	e := Entry{Name: "DAVE", Score: 12500, DeviceID: "d"}
+	e := Entry{Name: "DAVE", Score: 12500, Level: 3, DeviceID: "d"}
 	if err := client.Submit(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestSubmitWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"name": "DAVE", "score": float64(12500), "device_id": "d", "pow_nonce": sent["pow_nonce"]}
+	want := map[string]any{"name": "DAVE", "score": float64(12500), "level": float64(3), "device_id": "d", "pow_nonce": sent["pow_nonce"]}
 	if len(sent) != len(want) {
 		t.Errorf("body = %v, want exactly %v", sent, want)
 	}
@@ -97,7 +97,7 @@ func TestSubmitError(t *testing.T) {
 
 func TestTopRPCAndDecode(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) {
-		return 200, `[{"name":"DAVE","score":12500,"mine":true,"created_at":"2026-08-25T12:00:00Z"}]`
+		return 200, `[{"name":"DAVE","score":12500,"level":3,"mine":true,"created_at":"2026-08-25T12:00:00Z"}]`
 	})
 	rows, err := client.Top(context.Background(), 10, "d")
 	if err != nil {
@@ -114,7 +114,7 @@ func TestTopRPCAndDecode(t *testing.T) {
 	if args["p_device_id"] != "d" || args["p_limit"] != float64(10) {
 		t.Errorf("rpc args = %v", args)
 	}
-	if len(rows) != 1 || rows[0].Name != "DAVE" || rows[0].Score != 12500 || !rows[0].Mine {
+	if len(rows) != 1 || rows[0].Name != "DAVE" || rows[0].Score != 12500 || rows[0].Level != 3 || !rows[0].Mine {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
@@ -246,5 +246,35 @@ func TestTopSanitizesNames(t *testing.T) {
 	}
 	if got != "testkey" {
 		t.Fatalf("apikey header = %q", got)
+	}
+}
+
+// Level rides along on the wire and is clamped to the DB CHECK bounds on
+// both paths: zero maps to 1 (legacy rows), overflow to 99.
+func TestLevelClamped(t *testing.T) {
+	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
+	for _, lvl := range []int{0, 1, 99, 500} {
+		if err := client.Submit(context.Background(), Entry{Name: "X", Score: 1, Level: lvl, DeviceID: "d"}); err != nil {
+			t.Fatal(err)
+		}
+		var sent map[string]any
+		if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
+			t.Fatal(err)
+		}
+		want := float64(min(max(lvl, 1), 99))
+		if sent["level"] != want {
+			t.Errorf("level %d sent as %v, want %v", lvl, sent["level"], want)
+		}
+	}
+
+	client, _ = testClient(t, func(*http.Request, string) (int, string) {
+		return 200, `[{"name":"A","score":5,"level":0,"created_at":"2026-08-26T00:00:00Z"},{"name":"B","score":4,"level":1234,"created_at":"2026-08-26T00:00:00Z"}]`
+	})
+	rows, err := client.Top(context.Background(), 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Level != 1 || rows[1].Level != 99 {
+		t.Fatalf("read-back levels = %d, %d; want 1, 99", rows[0].Level, rows[1].Level)
 	}
 }

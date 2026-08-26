@@ -31,6 +31,7 @@ type UI struct {
 	noted   []byte // bytes seen while inactive (title 'l' trigger)
 	name    []byte
 	score   int
+	level   int // 1-based level reached at game over/win
 	player  persist.PlayerConfig
 	status  string
 	rows    []render.ScoreRow
@@ -174,6 +175,7 @@ func boardRowsFor(rows []board.Row) []render.ScoreRow {
 			Rank:  i + 1,
 			Name:  r.Name,
 			Score: r.Score,
+			Level: r.Level,
 			Mine:  r.Mine,
 		})
 	}
@@ -213,6 +215,7 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 		u.asked = true
 		u.player, _ = persist.LoadPlayer()
 		u.score = g.Score
+		u.level = g.LevelIndex() + 1
 		u.mode = render.UIAsk
 	}
 
@@ -286,7 +289,7 @@ func (u *UI) submitLocked() {
 	player := u.player
 	player.Name = name
 	submit, fetch := u.submit, u.fetch
-	score := u.score
+	score, level := u.score, u.level
 	u.mode = render.UIBoard
 	u.done = true
 	u.loading = true
@@ -297,7 +300,7 @@ func (u *UI) submitLocked() {
 	}
 	u.status = "SUBMITTING"
 	go func() {
-		err := submit(board.Entry{Name: name, Score: score, DeviceID: player.DeviceID})
+		err := submit(board.Entry{Name: name, Score: score, Level: level, DeviceID: player.DeviceID})
 		u.mu.Lock()
 		if err != nil {
 			u.status = "SUBMIT FAILED"

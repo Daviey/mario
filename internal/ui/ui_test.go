@@ -97,7 +97,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 	mu.Lock()
 	name, dev := got.Name, got.DeviceID
 	mu.Unlock()
-	if name != "DAVE2" || got.Score != g.Score || dev == "" {
+	if name != "DAVE2" || got.Score != g.Score || got.Level != g.LevelIndex()+1 || dev == "" {
 		t.Fatalf("entry = %+v", got)
 	}
 
@@ -402,5 +402,66 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 	g.State = engine.StateGameOver
 	if s := step(1); s == nil || s.Mode != render.UIAsk {
 		t.Fatalf("next game over should ask again, got %+v", s)
+	}
+}
+
+// A submission must carry the level the run ended on — the board shows it.
+func TestSubmitCarriesLevel(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// Level 1: flat ground, flag at x=6. Level 2: no ground at all —
+	// falling in the pit with one life ends the run there.
+	lvl1, err := engine.ParseLevel("1", []string{"      F     ", "############", "############"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lvl2, err := engine.ParseLevel("2", []string{"      F     ", "            ", "            "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := engine.NewGame([]*engine.Level{lvl1, lvl2}, 12, 3)
+	g.State = engine.StatePlaying
+
+	for i := 0; i < 6000 && g.State != engine.StateLevelClear; i++ {
+		g.Update(engine.Input{Right: true})
+	}
+	if g.State != engine.StateLevelClear {
+		t.Fatalf("never cleared level 1: %v", g.State)
+	}
+	for i := 0; i < engine.ClearTicks+120 && g.State != engine.StatePlaying; i++ {
+		g.Update(engine.Input{})
+	}
+	if g.State != engine.StatePlaying || g.LevelIndex() != 1 {
+		t.Fatalf("want playing on level 2, got %v level %d", g.State, g.LevelIndex())
+	}
+
+	g.Lives = 1
+	for i := 0; i < 1000 && g.State != engine.StateGameOver; i++ {
+		g.Update(engine.Input{})
+	}
+	if g.State != engine.StateGameOver || g.Score == 0 {
+		t.Fatalf("want game over with score, got %v score=%d", g.State, g.Score)
+	}
+
+	var got board.Entry
+	submitted := make(chan struct{})
+	ui := NewUI(func(e board.Entry) error {
+		got = e
+		close(submitted)
+		return nil
+	}, nil)
+	tickUntil(t, ui, g, 2)
+	ui.FeedKeys([]byte("y"))
+	tickUntil(t, ui, g, 1)
+	ui.FeedKeys([]byte("\r"))
+	tickUntil(t, ui, g, 1)
+	select {
+	case <-submitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("submit never called")
+	}
+	if got.Level != 2 {
+		t.Fatalf("submitted level = %d, want 2", got.Level)
 	}
 }

@@ -57,6 +57,7 @@ func FromEnv() (*Client, error) {
 type Entry struct {
 	Name     string `json:"name"`
 	Score    int    `json:"score"`
+	Level    int    `json:"level"` // 1-based level reached (0 reads as 1)
 	DeviceID string `json:"device_id"`
 	PowNonce string `json:"pow_nonce"`
 }
@@ -66,6 +67,7 @@ type Entry struct {
 type Row struct {
 	Name      string    `json:"name"`
 	Score     int       `json:"score"`
+	Level     int       `json:"level"`
 	Mine      bool      `json:"mine"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -74,6 +76,7 @@ type Row struct {
 // first (~0.1s of hashing; invisible next to the network round trip).
 func (c *Client) Submit(ctx context.Context, e Entry) error {
 	e.PowNonce = solvePow(e.DeviceID, e.Score)
+	e.Level = clampLevel(e.Level)
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -104,8 +107,21 @@ func (c *Client) Top(ctx context.Context, n int, deviceID string) ([]Row, error)
 	}
 	for i, r := range rows {
 		rows[i].Name = sanitizeDisplayName(r.Name)
+		rows[i].Level = clampLevel(r.Level)
 	}
 	return rows, nil
+}
+
+// clampLevel bounds a level to the DB CHECK (1..99). Zero maps to 1 —
+// legacy rows and callers that don't track levels read the same way.
+func clampLevel(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > 99 {
+		return 99
+	}
+	return n
 }
 
 // sanitizeDisplayName clamps a peer-supplied name to the documented safe charset

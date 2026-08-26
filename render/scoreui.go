@@ -47,6 +47,7 @@ type ScoreRow struct {
 	Rank  int    `json:"rank"`
 	Name  string `json:"name"`
 	Score int    `json:"score"`
+	Level int    `json:"level"` // 1-based level reached
 	Mine  bool   `json:"mine"`
 }
 
@@ -160,7 +161,7 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 		n := min(len(ui.Rows), boardMaxRows, max(0, lastRow-bodyY+1))
 		for i := range n {
 			r := ui.Rows[i]
-			s.Center(bodyY+i, fmt.Sprintf("%2d  %-8s %6d", r.Rank, r.Name, r.Score),
+			s.Center(bodyY+i, fmt.Sprintf("%2d  %-8s %6d  L%d", r.Rank, r.Name, r.Score, r.Level),
 				rowColor(r.Mine, p), bg, r.Mine)
 		}
 	}

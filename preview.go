@@ -26,9 +26,9 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 	}
 
 	canned := []board.Row{
-		{Name: "BIFF", Score: 32100},
-		{Name: "DAVE", Score: 12500, Mine: true}, // "you"
-		{Name: "KIM", Score: 9900},
+		{Name: "BIFF", Score: 32100, Level: 3},
+		{Name: "DAVE", Score: 12500, Level: 2, Mine: true}, // "you"
+		{Name: "KIM", Score: 9900, Level: 1},
 	}
 	ui := ui.NewUI(nil, func() ([]board.Row, error) { return canned, nil })
 

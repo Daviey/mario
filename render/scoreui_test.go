@@ -32,7 +32,7 @@ func uiGame(t *testing.T) *engine.Game {
 func bigRows(n int) []ScoreRow {
 	rows := make([]ScoreRow, n)
 	for i := range n {
-		rows[i] = ScoreRow{Rank: i + 1, Name: fmt.Sprintf("P%d", i+1), Score: 30000 - i*100, Mine: i == 2}
+		rows[i] = ScoreRow{Rank: i + 1, Name: fmt.Sprintf("P%d", i+1), Score: 30000 - i*100, Level: 3 - min(i, 2), Mine: i == 2}
 	}
 	return rows
 }
@@ -77,7 +77,7 @@ func TestScoreUITextScreens(t *testing.T) {
 	if txt := rowText(s, 1); !strings.Contains(txt, "LEADERBOARD") {
 		t.Errorf("board header = %q", txt)
 	}
-	if txt := rowText(s, 3); !strings.Contains(txt, fmt.Sprintf("%2d  %-8s %6d", 1, "P1", 30000)) {
+	if txt := rowText(s, 3); !strings.Contains(txt, fmt.Sprintf("%2d  %-8s %6d  L%d", 1, "P1", 30000, 3)) {
 		t.Errorf("first board row = %q", txt)
 	}
 	// The top ten, and only ten, render as rows.
