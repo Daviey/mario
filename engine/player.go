@@ -22,22 +22,16 @@ func (g *Game) updatePlayer(in Input) {
 		dir++
 	}
 	switch {
-	case dir > 0:
-		p.Vel.X += accel
-		p.Facing = 1
-	case dir < 0:
-		p.Vel.X -= accel
-		p.Facing = -1
-	default:
-		if p.Grounded {
-			switch {
-			case p.Vel.X > Friction:
-				p.Vel.X -= Friction
-			case p.Vel.X < -Friction:
-				p.Vel.X += Friction
-			default:
-				p.Vel.X = 0
-			}
+	case dir != 0:
+		p.Vel.X += float64(dir) * accel
+		p.Facing = dir
+	case p.Grounded:
+		if p.Vel.X > Friction {
+			p.Vel.X -= Friction
+		} else if p.Vel.X < -Friction {
+			p.Vel.X += Friction
+		} else {
+			p.Vel.X = 0
 		}
 	}
 	// Turning against ground motion reads as a skid to the renderer.
@@ -80,6 +74,7 @@ func (g *Game) updatePlayer(in Input) {
 		p.StretchT = 6
 		g.spawnDustPuff(p.Pos.X+p.W/2-0.15, p.Pos.Y+p.H)
 		g.spawnDustPuff(p.Pos.X+p.W/2+0.15, p.Pos.Y+p.H)
+		g.emit("jump")
 	}
 	if jumpReleased && p.jumping && p.Vel.Y < JumpCut {
 		p.Vel.Y = JumpCut
@@ -110,6 +105,7 @@ func (g *Game) updatePlayer(in Input) {
 	if landed {
 		fall := p.Vel.Y
 		p.Vel.Y = 0
+		p.stompChain = 0 // the stomp combo ends when feet touch ground
 		if fall > 0.12 { // hard landing: squash pose and twin dust puffs
 			p.SquashT = 6
 			g.spawnDustPuff(p.Pos.X+p.W/2-0.2, p.Pos.Y+p.H)
@@ -138,6 +134,7 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 		g.bumps[idx] = 8
 		g.addCoin()
 		g.spawnCoinPop(float64(tx)+0.35, float64(ty))
+		g.emit("bump")
 	case QuestionMush:
 		g.Level.Set(tx, ty, Used)
 		g.bumps[idx] = 8
@@ -146,13 +143,33 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 			Dir:    1,
 			Emerge: MushroomEmergeTicks,
 		})
+		g.emit("bump")
+	case QuestionFire:
+		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = 8
+		// SMB rule: a small player gets a mushroom, a powered one the flower.
+		if p.Power == PowerSmall {
+			g.Mushrooms = append(g.Mushrooms, &Mushroom{
+				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+				Dir:    1,
+				Emerge: MushroomEmergeTicks,
+			})
+		} else {
+			g.FireFlowers = append(g.FireFlowers, &FireFlower{
+				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+				Emerge: FlowerEmergeTicks,
+			})
+		}
+		g.emit("bump")
 	case Brick:
-		if p.Super {
+		if p.Power >= PowerSuper {
 			g.Level.Set(tx, ty, Empty)
 			g.Score += BrickScore
 			g.spawnDebris(tx, ty)
+			g.emit("brick")
 		} else {
 			g.bumps[idx] = 8
+			g.emit("bump")
 		}
 	default:
 		return
@@ -164,17 +181,20 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 		}
 		if math.Abs((e.Pos.Y+e.H)-float64(ty)) < 0.2 && horizontalOverlap(e.Pos.X, e.W, float64(tx)) > 0 {
 			g.flipEnemy(e)
+			g.Score += StompScore
+			g.spawnScorePop(e.Pos.X, e.Pos.Y, StompScore, false)
 		}
 	}
 }
 
-// hurtPlayer applies enemy contact damage: shrink when super, die when small.
+// hurtPlayer applies enemy contact damage: fire and super shrink to small,
+// small dies.
 func (g *Game) hurtPlayer() {
 	p := g.Player
 	if p.Invincible > 0 {
 		return
 	}
-	if p.Super {
+	if p.Power >= PowerSuper {
 		p.shrink()
 		p.Invincible = InvincibleTicks
 	} else {

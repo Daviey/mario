@@ -61,6 +61,12 @@ web:
 	@mkdir -p $(DIST)/web
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm ./cmd/web
 	cp web/index.html $(WEBDIST)/
+	cp web/manifest.webmanifest $(WEBDIST)/
+	# Cache-bust the service worker per release: the deployed sw.js carries
+	# the git version as its CACHE name, so every deploy keys a fresh cache
+	# (activate drops older ones) instead of serving stale bytes forever.
+	sed 's/mario-v0\.2\.0/mario-$(VERSION)/' web/sw.js > $(WEBDIST)/sw.js
+	cp -r web/icons $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \
 		cp "$$wasm_exec" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js

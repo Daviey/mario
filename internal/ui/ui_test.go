@@ -390,7 +390,7 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 		t.Fatal("restart edge missing from polled input")
 	}
 	g.Update(in)
-	if g.State != engine.StatePlaying {
+	if g.State != engine.StateWorldCard {
 		t.Fatalf("restart should reset the game, got %v", g.State)
 	}
 	if io.Poll().Restart {
@@ -423,13 +423,17 @@ func TestSubmitCarriesLevel(t *testing.T) {
 	g := engine.NewGame([]*engine.Level{lvl1, lvl2}, 12, 3)
 	g.State = engine.StatePlaying
 
-	for i := 0; i < 6000 && g.State != engine.StateLevelClear; i++ {
+	// Through the flag sequence: slide, castle walk, score countdown.
+	for i := 0; i < 6000 && g.State == engine.StatePlaying; i++ {
 		g.Update(engine.Input{Right: true})
 	}
-	if g.State != engine.StateLevelClear {
+	for i := 0; i < 1500 && g.State != engine.StateWorldCard; i++ {
+		g.Update(engine.Input{})
+	}
+	if g.State != engine.StateWorldCard {
 		t.Fatalf("never cleared level 1: %v", g.State)
 	}
-	for i := 0; i < engine.ClearTicks+120 && g.State != engine.StatePlaying; i++ {
+	for i := 0; i < engine.WorldCardTicks+10 && g.State != engine.StatePlaying; i++ {
 		g.Update(engine.Input{})
 	}
 	if g.State != engine.StatePlaying || g.LevelIndex() != 1 {

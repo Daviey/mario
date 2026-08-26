@@ -170,7 +170,7 @@ func TestPlayerPixels(t *testing.T) {
 	}
 
 	// Super player spans two tiles (rows 29..41).
-	g.Player.Super = true
+	g.Player.Power = engine.PowerSuper
 	g.Player.W, g.Player.H = engine.SuperW, engine.SuperH
 	g.Player.Pos.Y -= engine.SuperH - engine.SmallH
 	s = Render(g, testPal)

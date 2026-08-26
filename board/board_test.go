@@ -74,7 +74,7 @@ func TestSubmitWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"name": "DAVE", "score": float64(12500), "level": float64(3), "device_id": "d", "pow_nonce": sent["pow_nonce"]}
+	want := map[string]any{"name": "DAVE", "score": float64(12500), "level": float64(3), "device_id": "d", "pow_nonce": sent["pow_nonce"], "mode": "classic"}
 	if len(sent) != len(want) {
 		t.Errorf("body = %v, want exactly %v", sent, want)
 	}

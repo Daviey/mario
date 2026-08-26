@@ -20,20 +20,20 @@ func TestMarioArtPoses(t *testing.T) {
 	if got := marioArt(pl); !sameArt(got, smallStand) {
 		t.Error("idle small player must use the stand frame")
 	}
-	if got := marioArt(&engine.Player{Grounded: true, Super: true}); !sameArt(got, sprMarioSuper) {
+	if got := marioArt(&engine.Player{Grounded: true, Power: engine.PowerSuper}); !sameArt(got, sprMarioSuper) {
 		t.Error("idle super player must use the super stand frame")
 	}
 	if got := marioArt(&engine.Player{}); !sameArt(got, sprMarioSmallJump) {
 		t.Error("airborne small player must use the jump pose")
 	}
-	if got := marioArt(&engine.Player{Super: true}); !sameArt(got, sprMarioSuperJump) {
+	if got := marioArt(&engine.Player{Power: engine.PowerSuper}); !sameArt(got, sprMarioSuperJump) {
 		t.Error("airborne super player must use the jump pose")
 	}
 	skid := &engine.Player{Grounded: true, Skidding: true, Vel: engine.Vec{X: 0.05}}
 	if got := marioArt(skid); !sameArt(got, sprMarioSmallSkid) {
 		t.Error("skidding player must use the skid pose")
 	}
-	if got := marioArt(&engine.Player{Grounded: true, Super: true, Skidding: true,
+	if got := marioArt(&engine.Player{Grounded: true, Power: engine.PowerSuper, Skidding: true,
 		Vel: engine.Vec{X: -0.05}}); !sameArt(got, sprMarioSuperSkid) {
 		t.Error("skidding super player must use the super skid pose")
 	}
@@ -158,14 +158,14 @@ func TestMarioArtStretchSquash(t *testing.T) {
 	if got := marioArt(rising); !sameArt(got, sprMarioSmallStretch) {
 		t.Error("rising small player must use the stretch pose")
 	}
-	if got := marioArt(&engine.Player{Super: true, StretchT: 4}); !sameArt(got, sprMarioSuperStretch) {
+	if got := marioArt(&engine.Player{Power: engine.PowerSuper, StretchT: 4}); !sameArt(got, sprMarioSuperStretch) {
 		t.Error("rising super player must use the super stretch pose")
 	}
 	landed := &engine.Player{Grounded: true, SquashT: 4, Vel: engine.Vec{X: 0.05}, Skidding: true}
 	if got := marioArt(landed); !sameArt(got, sprMarioSmallSquash) {
 		t.Error("landed player must use the squash pose over skid")
 	}
-	if got := marioArt(&engine.Player{Grounded: true, Super: true, SquashT: 4}); !sameArt(got, sprMarioSuperSquash) {
+	if got := marioArt(&engine.Player{Grounded: true, Power: engine.PowerSuper, SquashT: 4}); !sameArt(got, sprMarioSuperSquash) {
 		t.Error("landed super player must use the super squash pose")
 	}
 }

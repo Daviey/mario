@@ -89,6 +89,17 @@ func main() {
 			board.Invoke(string(b))
 		}
 	}
+	// Page-provided hooks (both optional; the page defines them before
+	// the wasm loads): marioSfx(name) plays a sound event, marioTitle(b)
+	// tells the page when the title screen is up (it shows the DAILY
+	// button only there).
+	sfx := js.Global().Get("marioSfx")
+	titleFn := js.Global().Get("marioTitle")
+	lastTitle := true
+	if titleFn.Truthy() {
+		titleFn.Invoke(true)
+	}
+
 	draw := func() { jsFrameSink.deliver(render.RenderPixels(g, pal)) }
 	draw()
 	pushBoard(nil)
@@ -99,6 +110,17 @@ func main() {
 		app.Step()
 		draw()
 		pushBoard(app.UI())
+		if sfx.Truthy() {
+			for _, ev := range g.Events {
+				sfx.Invoke(ev)
+			}
+		}
+		if at := g.State == engine.StateTitle; at != lastTitle {
+			lastTitle = at
+			if titleFn.Truthy() {
+				titleFn.Invoke(at)
+			}
+		}
 		if app.Quit() {
 			break
 		}

@@ -10,6 +10,7 @@ package render
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/Daviey/mario/engine"
@@ -118,6 +119,28 @@ func NewPalette(trueColor bool) *Palette {
 		OverlayFG:    color(0x101010, 0),
 		White:        color(0xFFFFFF, 15),
 	}
+}
+
+// underground re-skins the palette for the underground world: black sky,
+// blue ground and bricks — the classic 1-2 look.
+func underground(p *Palette) *Palette {
+	q := *p
+	q.Sky = color(0x000000, 0)
+	q.GroundLight = color(0x8888D8, 12)
+	q.GroundMid = color(0x3850C8, 4)
+	q.GroundDark = color(0x1A2A70, 4)
+	q.BrickLight = color(0x5878E8, 12)
+	q.BrickDark = color(0x2030A0, 4)
+	q.Cloud = color(0x2A2A4A, 4)
+	return &q
+}
+
+// paletteFor returns the palette for the current level's theme.
+func paletteFor(g *engine.Game, p *Palette) *Palette {
+	if g.Level != nil && g.Level.Theme == engine.ThemeUnderground {
+		return underground(p)
+	}
+	return p
 }
 
 // runeColors maps sprite-art runes to palette swatches.
@@ -349,6 +372,7 @@ func CameraY(g *engine.Game) float64 {
 // worldFrame renders the world (sky, decorations, tiles, HUD
 // overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels.
 func worldFrame(g *engine.Game, p *Palette) *Frame {
+	p = paletteFor(g, p)
 	vh := viewTilesOf(g)
 	f := NewFrame(g.ViewW*Pix, vh*Pix, p.Sky)
 	rc := runeColors(p)
@@ -359,7 +383,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	txOf := func(px int) int { return px - ox }
 	tyOf := func(py int) int { return py - oy }
 
-	if g.State == engine.StateTitle {
+	if g.State == engine.StateTitle && !g.Demo {
 		// Title screen: clean sky, decorations and the ground strip only,
 		// so the logo and cast stay unobstructed.
 		drawDecorations(f, g, p, rc, txOf, tyOf)
@@ -368,12 +392,15 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 		return f
 	}
 	drawDecorations(f, g, p, rc, txOf, tyOf)
+	drawPlants(f, g, p, rc, camX, camY) // under the pipes: the pipe occludes
 	drawCastleAt(f, g, p, txOf, tyOf)
 	drawMushrooms(f, g, p, rc, camX, camY)
+	drawFlowers(f, g, p, rc, camX, camY)
 	drawTilesPx(f, g, p, camX, camY, ox, oy)
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
+	drawFireballs(f, g, p, rc, camX, camY)
 	drawPlayerPx(f, g, p, rc, camX, camY)
 	drawOverlayPx(f, g, p)
 	return f
@@ -423,21 +450,32 @@ func blit(s *Screen, f *Frame) {
 }
 
 func drawHUD(s *Screen, g *engine.Game, p *Palette) {
-	for x := 0; x < s.W; x++ {
+	for x := range s.W {
 		s.SetStyled(x, 0, ' ', p.Text, p.HUDBG, false)
 	}
-	hud := fmt.Sprintf("SCORE %06d  COINS x%02d  WORLD %s  TIME %03d  LIVES x%d",
-		g.Score, g.CoinCount, g.LevelName(), g.Time, g.Lives)
-	s.TextStyled(1, 0, hud, p.Text, p.HUDBG, true)
+	left := fmt.Sprintf("SCORE %06d  COINS x%02d  WORLD %s", g.Score, g.CoinCount, g.LevelName())
+	s.TextStyled(1, 0, left, p.Text, p.HUDBG, true)
+	// TIME gets its own run so it can flash red when time runs low
+	// (steady red once the HURRY! banner has come and gone).
+	tx := 1 + len(left) + 2
+	timeCol := p.Text
+	if g.Hurry && (g.HurryT <= 0 || g.Tick%30 < 18) {
+		timeCol = p.FlagRed
+	}
+	s.TextStyled(tx, 0, fmt.Sprintf("TIME %03d", g.Time), timeCol, p.HUDBG, true)
+	s.TextStyled(tx+10, 0, fmt.Sprintf("LIVES x%d", g.Lives), p.Text, p.HUDBG, true)
 }
 
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	txOf, tyOf func(int) int) {
+	if g.Level.Theme == engine.ThemeUnderground {
+		return // no sky dressing underground
+	}
 	// On the title screen clouds also keep clear of the stacked text —
 	// white cloud art would dissolve the white SUPER CLI subtitle.
 	var bands [][4]int
 	if g.State == engine.StateTitle {
-		bands = titleTextBands(f)
+		bands = titleTextBands(f, g)
 	}
 	for tx := range g.Level.Width {
 		if row, _, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
@@ -458,7 +496,9 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 
 func drawCastleAt(f *Frame, g *engine.Game, p *Palette, txOf, tyOf func(int) int) {
 	c0 := g.Level.FlagX + 3
-	drawCastle(f, p, txOf(c0*Pix), tyOf(9*Pix))
+	x, y := txOf(c0*Pix), tyOf(9*Pix)
+	drawCastle(f, p, x, y)
+	drawCastleFlag(f, p, x, y-2, g.CastleFlag)
 }
 
 // drawGroundOnly paints just the terrain strip (title-screen backdrop).
@@ -515,7 +555,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 			case engine.FlagPole:
 				drawFlagPole(f, p, x, y)
 			case engine.FlagTop:
-				drawFlagTop(f, p, x, y)
+				drawFlagTop(f, p, x, y, g.FlagDrop)
 			}
 		}
 	}
@@ -577,6 +617,12 @@ func drawParticlesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, ox
 			if pt.Life%2 == 0 {
 				f.Set(x+1, y, p.White)
 			}
+		case engine.ParticleScore:
+			txt := strconv.Itoa(pt.Val)
+			if pt.Val == 0 {
+				txt = "1UP"
+			}
+			drawTextPx(f, x-2*len(txt), y, txt, p.White, 1)
 		}
 	}
 }
@@ -615,25 +661,99 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	}
 }
 
+// drawPlants paints the piranha plants (before tiles, so the pipe mouth
+// occludes whatever part of the plant is still inside).
+func drawPlants(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, pl := range g.Plants {
+		if pl.Gone || pl.State == engine.PlantHidden {
+			continue
+		}
+		cx := int(math.Round((pl.Pos.X + engine.PlantW/2 - camX) * Pix))
+		bottom := int(math.Round((pl.Pos.Y + engine.PlantH - camY) * Pix))
+		f.DrawSprite(sprPlant, rc, cx-sprW(sprPlant)/2, bottom-sprH(sprPlant), false, 1)
+	}
+}
+
+// drawFlowers paints fire flowers emerging from (or sitting on) their block.
+func drawFlowers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, fl := range g.FireFlowers {
+		if fl.Gone {
+			continue
+		}
+		cx := int(math.Round((fl.Pos.X + engine.FlowerW/2 - camX) * Pix))
+		bottom := int(math.Round((fl.Pos.Y + engine.FlowerH - camY) * Pix))
+		f.DrawSprite(sprFireFlower, rc, cx-sprW(sprFireFlower)/2, bottom-sprH(sprFireFlower), false, 1)
+	}
+}
+
+// drawFireballs paints live fireballs with a two-frame spin.
+func drawFireballs(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, fb := range g.Fireballs {
+		if fb.Gone {
+			continue
+		}
+		art := sprFireball
+		if (g.Tick/6)%2 == 1 {
+			art = sprFireballSpin
+		}
+		cx := int(math.Round((fb.Pos.X + engine.FireballW/2 - camX) * Pix))
+		cy := int(math.Round((fb.Pos.Y + engine.FireballH/2 - camY) * Pix))
+		f.DrawSprite(art, rc, cx-sprW(art)/2, cy-sprH(art)/2, false, 1)
+	}
+}
+
+// drawWorldCard paints the "WORLD 1-2  x3" interstitial over black.
+func drawWorldCard(f *Frame, g *engine.Game, p *Palette) {
+	f.Fill(0, 0, f.W, f.H, Color{})
+	drawCenterPx(f, f.H/2-6, g.CardName(), p.White, 1)
+	rc := runeColors(p)
+	cx := f.W/2 - 16
+	y := f.H/2 + 2
+	f.DrawSprite(sprMarioSmall, rc, cx, y, false, 1)
+	drawTextPx(f, cx+12, y+1, "X "+strconv.Itoa(g.Lives), p.White, 1)
+}
+
 func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
 	pl := g.Player
+	if g.InCastle {
+		return // through the door
+	}
 	if pl.Invincible > 0 && (g.Tick/3)%2 == 0 {
 		return // damage flicker
 	}
 	art := sprMarioDead
-	if g.State != engine.StateDying {
+	if g.State == engine.StateFlagSlide {
+		// gripping the pole: the jump pose reads best
+		if pl.Power >= engine.PowerSuper {
+			art = sprMarioSuperJump
+		} else {
+			art = sprMarioSmallJump
+		}
+	} else if g.State != engine.StateDying {
 		art = marioArt(pl)
+	}
+	if pl.Power == engine.PowerFire {
+		rc = fireRuneColors(p)
 	}
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
+// fireRuneColors re-skins mario art as fire mario: white cap and shirt,
+// red overalls.
+func fireRuneColors(p *Palette) map[rune]Color {
+	rc := runeColors(p)
+	rc['R'] = p.White
+	rc['B'] = p.FlagRed
+	return rc
+}
+
 // marioArt picks the pose: liftoff stretch or airborne jump, landing squash,
 // skid while turning against motion, otherwise the distance-driven walk
 // cycle (stand frame when idle). The death pose is chosen in drawPlayerPx.
 func marioArt(pl *engine.Player) []string {
-	super := pl.Super
+	super := pl.Power >= engine.PowerSuper
 	switch {
 	case !pl.Grounded && pl.StretchT > 0:
 		if super {
@@ -662,7 +782,7 @@ func marioArt(pl *engine.Player) []string {
 		}
 		return frames[int(pl.WalkDist/engine.WalkFrameLen)%len(frames)]
 	default:
-		if pl.Super {
+		if pl.Power >= engine.PowerSuper {
 			return sprMarioSuper
 		}
 		return sprMarioSmall
@@ -673,11 +793,15 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 	mid := f.H / 2
 	switch {
 	case g.Paused:
-		drawBannerPx(f, mid-2, "PAUSED", p.OverlayFG, p.OverlayBG, p)
-	case g.State == engine.StateTitle:
+		drawBannerPx(f, mid-4, "PAUSED", p.OverlayFG, p.OverlayBG, p)
+		drawCenterPx(f, mid+6, "P RESUME", p.White, 1)
+		drawCenterPx(f, mid+12, "R RESTART  Q QUIT", p.White, 1)
+	case g.HurryT > 0 && g.Tick%20 < 12:
+		drawBannerPx(f, 4, "HURRY!", p.White, p.FlagRed, p)
+	case g.State == engine.StateWorldCard:
+		drawWorldCard(f, g, p)
+	case g.State == engine.StateTitle, g.Demo:
 		drawTitlePx(f, g, p, true)
-	case g.State == engine.StateLevelClear:
-		drawBannerPx(f, mid-2, "LEVEL CLEAR!", p.OverlayFG, p.OverlayBG, p)
 	case g.State == engine.StateGameOver:
 		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
 		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
@@ -698,7 +822,7 @@ func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
 	// overlap or bury anything. Ground occupies the last 2 tile rows.
 	castY := titleCastY(f) // mario sprite top; feet on the last sky row
 	if full {
-		for _, e := range titleTextEls(f) {
+		for _, e := range titleTextEls(f, g) {
 			if e.blink && g.Tick%40 >= 28 {
 				continue
 			}
@@ -760,7 +884,7 @@ type titleText struct {
 // every line with its pixel row, scale and ink. drawTitlePx stamps the
 // elements; titleTextBands turns them into the keep-clear rects for the
 // title cloud filter in drawDecorations.
-func titleTextEls(f *Frame) []titleText {
+func titleTextEls(f *Frame, g *engine.Game) []titleText {
 	castY := titleCastY(f)
 	castH := 2 * sprH(sprMarioSmall)
 	var els []titleText
@@ -784,7 +908,12 @@ func titleTextEls(f *Frame) []titleText {
 	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1, inkGold, true, true)
 	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom
-		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1, inkWhite, false, true)
+		add(pickTextPx([]string{"L BOARD D DAILY", "L/D BOARD DAILY", "L DAILY"}, f.W-2), hintY, 1, inkWhite, false, true)
+		if best := g.Best; best > 0 {
+			if bestY := hintY + 6; bestY+5 <= f.H {
+				add(fmt.Sprintf("BEST %06d", best), bestY, 1, inkGold, false, true)
+			}
+		}
 	}
 	return els
 }
@@ -798,9 +927,9 @@ func titleCastY(f *Frame) int {
 // titleTextBands returns the pixel rects covered by full-mode title text.
 // Blinking lines are always included so the cloud layout stays steady
 // instead of strobing with the blink cycle.
-func titleTextBands(f *Frame) [][4]int {
+func titleTextBands(f *Frame, g *engine.Game) [][4]int {
 	var bands [][4]int
-	for _, e := range titleTextEls(f) {
+	for _, e := range titleTextEls(f, g) {
 		w := textWidthPx(e.s, e.scale)
 		x := (f.W - w) / 2
 		if x < 0 {

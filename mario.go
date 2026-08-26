@@ -43,6 +43,11 @@ type Options struct {
 	// Mapper is the input mapper to wire in; nil creates a fresh one and
 	// applies any previously saved calibration (see SaveCalibration).
 	Mapper *input.Mapper
+
+	// DailyLevel provides the daily challenge level (called when the
+	// player presses 'd' on the title screen). nil defaults to today's
+	// generated level.
+	DailyLevel func() *engine.Level
 }
 
 // App is one wired-up game session: engine, input routing and leaderboard
@@ -54,6 +59,11 @@ type App struct {
 	io     *ui.Router
 	ui     *render.ScoreUI // latest leaderboard snapshot (nil when off)
 	quit   bool
+
+	dailyLevel func() *engine.Level
+	idle       int // ticks idle on the title screen (attract mode)
+	demoT      int // attract-demo script tick
+	bestSaved  int // score already persisted this session
 }
 
 // New builds an App from opts and draws nothing yet.
@@ -92,10 +102,23 @@ func New(opts *Options) *App {
 		persist.LoadCalibration(mapper)
 	}
 
+	daily := opts.DailyLevel
+	if daily == nil {
+		daily = func() *engine.Level {
+			y, m, d := time.Now().UTC().Date()
+			return engine.DailyLevelFor(y, int(m), d)
+		}
+	}
+
+	g := engine.NewGame(levels, viewW, viewH)
+	if pc, err := persist.LoadPlayer(); err == nil {
+		g.Best = pc.Best
+	}
 	return &App{
-		Game:   engine.NewGame(levels, viewW, viewH),
-		mapper: mapper,
-		io:     ui.NewRouter(mapper, ui.NewUI(nil, nil)),
+		Game:       g,
+		mapper:     mapper,
+		io:         ui.NewRouter(mapper, ui.NewUI(nil, nil)),
+		dailyLevel: daily,
 	}
 }
 
@@ -108,10 +131,64 @@ func (a *App) Feed(b []byte) { a.io.Feed(b) }
 // engine and the leaderboard UI. Drive it from your own clock (the
 // terminal runner uses 60 Hz) and read Game/UI afterwards.
 func (a *App) Step() {
+	g := a.Game
+
+	// Title-screen 'd' starts the daily challenge (checked before the
+	// update so the same press cannot also dismiss the title).
+	if a.io.TakeDailyAtTitle(g) {
+		a.StartDaily()
+	}
+
 	in := a.io.Poll()
-	a.Game.Update(in)
-	a.ui = a.io.UITick(a.Game)
+
+	if g.Demo {
+		// Attract mode: any real key bails back to the title; otherwise
+		// the deterministic demo script drives the game.
+		if in != (engine.Input{}) {
+			g.EndDemo()
+			a.idle, a.demoT = 0, 0
+			in = engine.Input{}
+		} else {
+			in = ui.ScriptInput(a.demoT)
+			a.demoT++
+		}
+	}
+
+	g.Update(in)
+	a.ui = a.io.UITick(g)
 	a.quit = in.Quit || a.io.QuitRequested()
+	if a.quit {
+		return
+	}
+
+	if g.Demo {
+		return // no attract bookkeeping below
+	}
+
+	// Attract mode: after ~10s idle on the title (and no UI screen
+	// holding the keyboard), run the demo behind the title art.
+	if g.State == engine.StateTitle && a.ui == nil {
+		a.idle++
+		if a.idle >= 600 {
+			g.BeginDemo()
+			a.demoT = 0
+		}
+	} else {
+		a.idle = 0
+	}
+
+	// Persist the local best once per run end.
+	if (g.State == engine.StateGameOver || g.State == engine.StateWin) &&
+		g.Score > a.bestSaved && g.Score > 0 {
+		a.bestSaved = g.Score
+		go persist.SaveBest(g.Score)
+	}
+}
+
+// StartDaily swaps in the daily challenge level and starts the run.
+func (a *App) StartDaily() {
+	a.Game.Levels = []*engine.Level{a.dailyLevel()}
+	a.Game.BeginDaily()
 }
 
 // UI returns the latest leaderboard render snapshot, or nil when no UI
@@ -126,13 +203,15 @@ func (a *App) Quit() bool { return a.quit }
 // frames to st, until quit. This is the blocking entry the terminal
 // runner uses; browser or embedded consumers should call Step instead.
 func (a *App) Run(st *render.Stream) {
-	st.Draw(a.Game, nil) // first frame: full repaint
-
-	ticker := time.NewTicker(time.Second / engine.TicksPerSecond)
-	defer ticker.Stop()
-	for range ticker.C {
+	tick := time.NewTicker(time.Second / engine.TicksPerSecond)
+	defer tick.Stop()
+	for range tick.C {
 		a.Step()
-		st.Draw(a.Game, a.ui)
+		if a.ui != nil {
+			st.Draw(a.Game, a.ui)
+		} else {
+			st.Draw(a.Game)
+		}
 		if a.quit {
 			return
 		}

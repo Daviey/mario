@@ -58,7 +58,9 @@ func TestHoldDirectionSurvivesJumpTaps(t *testing.T) {
 
 	g := engine.NewGame(engine.DefaultLevels(), 30, 10)
 	m.Feed([]byte{'\r'})
-	g.Update(m.Poll()) // dismiss title
+	g.Update(m.Poll()) // dismiss title -> world card
+	m.Feed([]byte{'\r'})
+	g.Update(m.Poll()) // any key skips the card
 
 	holdDirThenSilence(t, m)
 	for hop := range 3 {

@@ -61,6 +61,9 @@ type ScoreUI struct {
 	Loading  bool       `json:"loading"`
 	Status   string     `json:"status"` // e.g. "SUBMITTED!" or an error line
 	Title    bool       `json:"title"`  // opened from the title screen
+	Best     int        `json:"best"`   // local best score (0 = none yet)
+	Rank     int        `json:"rank"`   // post-submit rank, 0 = not in top n
+	Daily    bool       `json:"daily"`  // daily-challenge leaderboard
 }
 
 // firstUI returns the first optional UI snapshot or nil.
@@ -91,10 +94,14 @@ func drawScoreUIText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 	}
 	switch ui.Mode {
 	case UIAsk:
+		best := ""
+		if ui.Best > 0 {
+			best = fmt.Sprintf("BEST %06d", ui.Best)
+		}
 		drawCenteredBlock(s, p.Dark, tick, []uiLine{
 			{"GAME OVER", p.White, true, false},
 			{fmt.Sprintf("SCORE %06d", ui.Score), p.White, false, false},
-			{"", p.White, false, false},
+			{best, p.TextDim, false, false},
 			{"SUBMIT TO LEADERBOARD?", p.GoldLight, false, true},
 			{"Y YES   N NO", p.White, false, false},
 		})
@@ -146,7 +153,11 @@ func nameField(name string, cursor bool) string {
 // into the HUD or status lines.
 func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 	bg := p.Dark
-	s.Center(1, "LEADERBOARD", p.GoldLight, bg, true)
+	head := "LEADERBOARD"
+	if ui.Daily {
+		head = "DAILY LEADERBOARD"
+	}
+	s.Center(1, head, p.GoldLight, bg, true)
 	footY := s.H - 2
 	bodyY := 3
 	switch {
@@ -164,8 +175,13 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 			s.Center(bodyY+i, fmt.Sprintf("%2d  %-8s %6d  L%d", r.Rank, r.Name, r.Score, r.Level),
 				rowColor(r.Mine, p), bg, r.Mine)
 		}
+		if ui.Rank > 0 {
+			s.Center(bodyY+n, fmt.Sprintf("YOU ARE #%d", ui.Rank), p.GoldLight, bg, false)
+		}
 	}
 	switch {
+	case ui.Rank > 0 && ui.Status == "":
+		s.Center(footY, fmt.Sprintf("YOU ARE #%d", ui.Rank), p.GoldLight, bg, false)
 	case ui.Status != "":
 		s.Center(footY, ui.Status, p.GoldLight, bg, false)
 	case ui.Title:

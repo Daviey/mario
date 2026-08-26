@@ -12,6 +12,7 @@
 //	-width N      viewport width in tiles (0 = terminal width)
 //	-basic        force 16-color ANSI output instead of truecolor
 //	-scores N     print the top N leaderboard scores and exit
+//	-daily        with -scores: the daily board; alone: play today's challenge
 //	-ui-preview M render a leaderboard UI screen headless (ask|entry|board|title-board)
 //
 // Scores can be submitted to a Supabase-backed leaderboard after game over;
@@ -52,6 +53,7 @@ func main() {
 	width := flag.Int("width", 0, "viewport `WIDTH` in tiles (0 = terminal width)")
 	basic := flag.Bool("basic", false, "force 16-color ANSI output instead of truecolor")
 	topN := flag.Int("scores", 0, "print the top `N` leaderboard scores and exit")
+	daily := flag.Bool("daily", false, "play today's daily challenge (or with -scores, print the daily board)")
 	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (`MODE`: ask, entry, board, title-board)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
@@ -66,9 +68,15 @@ func main() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := client.Top(ctx, *topN, "")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
+		var rows []board.Row
+		var terr error
+		if *daily {
+			rows, terr = client.TopMode(ctx, *topN, "", "daily", time.Now().UTC().Format("2006-01-02"))
+		} else {
+			rows, terr = client.Top(ctx, *topN, "")
+		}
+		if terr != nil {
+			fmt.Fprintf(os.Stderr, "mario: %v\n", terr)
 			os.Exit(1)
 		}
 		printScores(os.Stdout, rows)
@@ -94,7 +102,7 @@ func main() {
 		return
 	}
 
-	if _, err := run(levels, *width, trueColor); err != nil {
+	if _, err := run(levels, *width, trueColor, *daily); err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
@@ -177,7 +185,7 @@ func usage(w io.Writer) {
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
+func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -234,6 +242,9 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	viewH := (termHeight() - 2) * 2 / render.Pix
 
 	app := mario.New(&mario.Options{Levels: levels, ViewW: viewW, ViewH: viewH})
+	if daily {
+		app.StartDaily()
+	}
 	saveCalibration = app.SaveCalibration
 
 	// One goroutine owns fd 0 for the life of the process; the app routes
