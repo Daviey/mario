@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // dumpFrame prints a frame as letters (one per palette swatch) for visual

@@ -72,7 +72,7 @@ func TestLoadPlayerCreatesAndPersists(t *testing.T) {
 	}
 
 	// Corrupt config regenerates rather than failing.
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "mario", "player.json")
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "github.com/Daviey/mario", "player.json")
 	os.WriteFile(path, []byte(`{"device_id":`), 0o644)
 	pc4, err := LoadPlayer()
 	if err != nil || pc4.DeviceID == "" {

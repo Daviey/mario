@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mario/board"
+	"github.com/Daviey/mario/board"
 )
 
 func TestLiveSeedOneRow(t *testing.T) {

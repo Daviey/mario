@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"mario/board"
-	"mario/engine"
-	"mario/internal/persist"
-	"mario/render"
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/internal/persist"
+	"github.com/Daviey/mario/render"
 )
 
 // requestTimeout bounds every leaderboard HTTP call.
@@ -119,7 +119,7 @@ func (u *UI) takeRestart() bool {
 	return r
 }
 
-// showBoard switches to the board screen and starts a fetch.
+// ShowBoard switches to the board screen and starts a fetch.
 func (u *UI) ShowBoard() {
 	u.mu.Lock()
 	if u.fetch == nil {

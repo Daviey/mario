@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"mario/engine"
-	"mario/internal/ui"
-	"mario/render"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/internal/ui"
+	"github.com/Daviey/mario/render"
 )
 
 // LoadLevels returns the built-in levels, or a single custom level when

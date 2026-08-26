@@ -25,9 +25,9 @@ import (
 	"encoding/json"
 	"syscall/js"
 
-	"mario"
-	"mario/engine"
-	"mario/render"
+	"github.com/Daviey/mario"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/render"
 )
 
 // jsRGB pushes frame pixels into a page-owned Uint8Array and hands it to

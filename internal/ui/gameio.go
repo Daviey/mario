@@ -1,13 +1,13 @@
 package ui
 
-// gameIO routes raw input bytes: while the leaderboard UI captures input
+// Router routes raw input bytes: while the leaderboard UI captures input
 // (name entry, prompts), bytes never reach the game mapper — so typing
 // letters can never trigger game keys (e.g. 'r' restarting the game).
 
 import (
-	"mario/engine"
-	"mario/input"
-	"mario/render"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/input"
+	"github.com/Daviey/mario/render"
 )
 
 type Router struct {
@@ -44,8 +44,8 @@ func (r *Router) Poll() engine.Input {
 	return in
 }
 
-// uiTick advances the leaderboard UI and returns its render snapshot.
+// UITick advances the leaderboard UI and returns its render snapshot.
 func (r *Router) UITick(g *engine.Game) *render.ScoreUI { return r.ui.Tick(g) }
 
-// quitRequested reports whether the UI asked to leave the game.
+// QuitRequested reports whether the UI asked to leave the game.
 func (r *Router) QuitRequested() bool { return r.ui.quitRequested() }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func mkScreen(w, h int, fill rune) *Screen {

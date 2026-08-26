@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 type key int
@@ -488,7 +488,7 @@ func mappedKey(code int) (keyEvent, bool) {
 		return keyEvent{special: spAny}, true
 	case 'l', 'L':
 		// Leaderboard key: a UI trigger (title screen 'l' opens the
-		// board via scoreUI.note). Deliberately a mapped no-op so its
+		// board via ui.UI.Note). Deliberately a mapped no-op so its
 		// AnyKey edge can never start the game — gameio routes the raw
 		// byte to the UI before the mapper sees it.
 		return keyEvent{}, true

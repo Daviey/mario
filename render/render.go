@@ -12,7 +12,7 @@ import (
 	"math"
 	"strings"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // RGB is a 24-bit color (0xRRGGBB).

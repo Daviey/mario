@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func TestScreenDimensions(t *testing.T) {

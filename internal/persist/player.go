@@ -25,14 +25,14 @@ func PlayerConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, "mario")
+	p := filepath.Join(dir, "github.com/Daviey/mario")
 	if err := os.MkdirAll(p, 0o700); err != nil {
 		return "", err
 	}
 	return filepath.Join(p, "player.json"), nil
 }
 
-// loadPlayer loads the stored player identity, creating a fresh one on first
+// LoadPlayer loads the stored player identity, creating a fresh one on first
 // run.
 func LoadPlayer() (PlayerConfig, error) {
 	path, err := PlayerConfigPath()

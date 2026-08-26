@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"mario/board"
-	"mario/engine"
-	"mario/input"
-	"mario/internal/persist"
-	"mario/render"
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/input"
+	"github.com/Daviey/mario/internal/persist"
+	"github.com/Daviey/mario/render"
 )
 
 // gameOverGame returns a game at the game-over screen with a score.

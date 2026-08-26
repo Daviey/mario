@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-Terminal (CLI) Mario-style platformer in Go — plus a browser WASM build — with an online high-score board on Supabase. Single module `mario`, stdlib-only, no external dependencies. Private repo: `github.com/Daviey/mario`.
+Terminal (CLI) Mario-style platformer in Go — plus a browser WASM build — with an online high-score board on Supabase. Single module `github.com/Daviey/mario`, stdlib-only, no external dependencies. Private repo: `github.com/Daviey/mario`.
 
 ## Project Overview
 

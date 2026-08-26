@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"mario/input"
+	"github.com/Daviey/mario/input"
 )
 
 // keyCalibrationPath returns <UserConfigDir>/mario/keys.json, creating the
@@ -20,7 +20,7 @@ func keyCalibrationPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, "mario")
+	p := filepath.Join(dir, "github.com/Daviey/mario")
 	if err := os.MkdirAll(p, 0o755); err != nil {
 		return "", err
 	}

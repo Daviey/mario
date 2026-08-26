@@ -29,10 +29,10 @@ import (
 	"syscall"
 	"time"
 
-	"mario"
-	"mario/board"
-	"mario/engine"
-	"mario/render"
+	"github.com/Daviey/mario"
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/render"
 )
 
 func main() {
@@ -133,7 +133,7 @@ func run(levels []*engine.Level, width int, trueColor bool) (int, error) {
 	// uncalibrated grace is shorter than the ~500-600ms repeat delay, so
 	// the first hold of a key stutters (moves, dead gap, resumes) and a
 	// player who lets go during the gap never gets smooth holds at all.
-	// The leaderboard UI decodes CSI-u back to plain bytes (gameIO).
+	// The leaderboard UI decodes CSI-u back to plain bytes (the Router).
 	// The leading pop heals any mode left over by a previous run that was
 	// killed without cleanup, before we push our own entry.
 	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")

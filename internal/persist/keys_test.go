@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mario/input"
+	"github.com/Daviey/mario/input"
 )
 
 func TestKeyCalibrationRoundTrip(t *testing.T) {
@@ -16,7 +16,7 @@ func TestKeyCalibrationRoundTrip(t *testing.T) {
 	m.ApplyCalibration(input.Calibration{OSDelay: 22, HeldHabit: []bool{false, true, false, false, false}})
 	SaveCalibration(m)
 
-	if _, err := os.Stat(filepath.Join(dir, "mario", "keys.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "github.com/Daviey/mario", "keys.json")); err != nil {
 		t.Fatalf("calibration file: %v", err)
 	}
 	next := input.NewMapper()
@@ -35,7 +35,7 @@ func TestKeyCalibrationColdStart(t *testing.T) {
 		t.Fatalf("cold start unexpectedly calibrated: %+v", c)
 	}
 	// A corrupt file must also load as cold.
-	path := filepath.Join(t.TempDir(), "mario")
+	path := filepath.Join(t.TempDir(), "github.com/Daviey/mario")
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}

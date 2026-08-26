@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func uiGame(t *testing.T) *engine.Game {

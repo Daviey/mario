@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // Synchronized-output mode: the terminal buffers writes between the two

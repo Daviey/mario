@@ -3,7 +3,7 @@ package input
 import (
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func press(m *Mapper, b ...byte) engine.Input {

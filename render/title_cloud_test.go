@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // sentinelCloudPal clones the test palette with clouds recolored magenta so

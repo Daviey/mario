@@ -11,7 +11,7 @@ BINARY    := mario
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DIST      := dist
 WEBDIST   := $(DIST)/web
-LDFLAGS   := -s -w -X mario/render.Version=$(VERSION)
+LDFLAGS   := -s -w -X github.com/Daviey/mario/render.Version=$(VERSION)
 
 # Every release target: OS, ARCH, binary suffix.
 TARGETS := linux/amd64   \
@@ -49,7 +49,7 @@ release: $(TARGETS)
 # the leaderboard works in the browser, which has no environment.
 SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env web/supabase.env 2>/dev/null | head -n 1))
 SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env web/supabase.env 2>/dev/null | head -n 1))
-WEBLDFLAGS := $(LDFLAGS) -X mario/board.DefaultURL=$(SUPA_URL) -X mario/board.DefaultKey=$(SUPA_KEY)
+WEBLDFLAGS := $(LDFLAGS) -X github.com/Daviey/mario/board.DefaultURL=$(SUPA_URL) -X github.com/Daviey/mario/board.DefaultKey=$(SUPA_KEY)
 
 web:
 	@if [ -z "$(SUPA_URL)" ] || [ -z "$(SUPA_KEY)" ]; then \

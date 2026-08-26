@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"mario/board"
+	"github.com/Daviey/mario/board"
 )
 
 // printScores renders the leaderboard as a text table.

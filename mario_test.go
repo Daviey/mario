@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func TestRunDemo(t *testing.T) {

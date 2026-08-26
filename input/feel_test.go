@@ -3,7 +3,7 @@ package input
 import (
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // Feel tests: the three reported gameplay complaints, replayed through the

@@ -24,11 +24,11 @@ package mario
 import (
 	"time"
 
-	"mario/engine"
-	"mario/input"
-	"mario/internal/persist"
-	"mario/internal/ui"
-	"mario/render"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/input"
+	"github.com/Daviey/mario/internal/persist"
+	"github.com/Daviey/mario/internal/ui"
+	"github.com/Daviey/mario/render"
 )
 
 // Options configures New. The zero value is a playable default game.

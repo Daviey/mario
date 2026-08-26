@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // newSizedGame builds a playing game at an explicit viewport size.

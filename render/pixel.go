@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 // Pixel-band heights for the canvas (browser) renderer. The terminal build

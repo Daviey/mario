@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func sameArt(a, b []string) bool {

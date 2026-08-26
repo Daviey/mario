@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"mario/board"
-	"mario/engine"
-	"mario/render"
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/render"
 )
 
 func TestLiveUISubmit(t *testing.T) {

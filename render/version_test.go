@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"mario/engine"
+	"github.com/Daviey/mario/engine"
 )
 
 func TestSanitizeArcade(t *testing.T) {

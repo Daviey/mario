@@ -10,10 +10,10 @@ import (
 	"io"
 	"time"
 
-	"mario/board"
-	"mario/engine"
-	"mario/internal/ui"
-	"mario/render"
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/internal/ui"
+	"github.com/Daviey/mario/render"
 )
 
 func UIPreview(w io.Writer, mode string, trueColor bool) error {

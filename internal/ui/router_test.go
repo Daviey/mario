@@ -6,8 +6,8 @@ package ui
 import (
 	"testing"
 
-	"mario/input"
-	"mario/render"
+	"github.com/Daviey/mario/input"
+	"github.com/Daviey/mario/render"
 )
 
 func TestRouterKeyboardOwnership(t *testing.T) {
