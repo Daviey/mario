@@ -45,10 +45,36 @@
         };
       });
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          packages = [ pkgs.go ];
-        };
-      });
+      devShells = forAllSystems (pkgs:
+        let
+          # The Android SDK pieces are unfree in nixpkgs (Google's
+          # terms) and pulled in as several oddly-named FODs; allow all
+          # of them in this private nixpkgs instance — used only by the
+          # android shell — so `nix develop .#android` needs no
+          # NIXPKGS_ALLOW_UNFREE / --impure flags anywhere.
+          # android_sdk.accept_license accepts Google's SDK license.
+          androidPkgs = import nixpkgs {
+            system = pkgs.stdenv.hostPlatform.system;
+            config.allowUnfree = true;
+            config.android_sdk.accept_license = true;
+          };
+          # Composed Android SDK for `make apk` (aapt2/d8/zipalign/
+          # apksigner + android.jar). No NDK, no emulator: the APK is a
+          # WebView shell, so the game stays GOOS=js with CGO off.
+          androidSdk = (androidPkgs.androidenv.composeAndroidPackages {
+            buildToolsVersions = [ "35.0.0" ];
+            platformVersions = [ "35" ];
+          }).androidsdk;
+        in
+        {
+          default = pkgs.mkShell {
+            packages = [ pkgs.go ];
+          };
+          # nix develop .#android -c make apk
+          android = pkgs.mkShell {
+            packages = [ androidSdk pkgs.openjdk17_headless ];
+            ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
+          };
+        });
     };
 }

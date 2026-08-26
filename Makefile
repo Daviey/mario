@@ -5,6 +5,7 @@
 #   make check      fmtcheck + vet + test (the CI pre-release gate)
 #   make race       unit tests under the race detector
 #   make cover      coverage summary per package
+#   make apk        Android APK (WebView shell around the web build)
 #   make vet / fmt / fmtcheck / clean / run / demo
 
 BINARY    := mario
@@ -22,7 +23,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb $(TARGETS) deb/amd64 deb/arm64
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk $(TARGETS) deb/amd64 deb/arm64
 
 all: build
 
@@ -92,6 +93,48 @@ web:
 web-serve: web
 	@echo "serving $(WEBDIST) at http://127.0.0.1:8417/"
 	@cd $(WEBDIST) && python3 -m http.server 8417 --bind 127.0.0.1
+
+# Android APK: the WASM web bundle inside a thin WebView shell
+# (packaging/android — manifest + one Activity, no Gradle, no NDK).
+# Needs an Android SDK (build-tools + a platform android.jar) and a JDK;
+# or skip the setup entirely with:  nix develop .#android -c make apk
+ANDROID_HOME ?=
+AAPT2       ?= $(firstword $(sort $(wildcard $(ANDROID_HOME)/build-tools/*/aapt2)))
+D8          ?= $(firstword $(sort $(wildcard $(ANDROID_HOME)/build-tools/*/d8)))
+ZIPALIGN    ?= $(firstword $(sort $(wildcard $(ANDROID_HOME)/build-tools/*/zipalign)))
+APKSIGNER   ?= $(firstword $(sort $(wildcard $(ANDROID_HOME)/build-tools/*/apksigner)))
+ANDROID_JAR ?= $(firstword $(sort $(wildcard $(ANDROID_HOME)/platforms/android-*/android.jar)))
+KEYSTORE    := packaging/android/mario.keystore
+KSFLAGS     := --ks $(KEYSTORE) --ks-key-alias mario --ks-pass pass:mario-apk --key-pass pass:mario-apk
+
+# Monotonic integer versionCode: vX.Y.Z tags map to X*1e8+Y*1e6+Z*1e4;
+# suffixed/dirty working-copy builds fall back to a date code (1yymmdd)
+# that stays under every tagged release with a nonzero minor version.
+VCODE := $(shell echo "$(PKGVERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' && echo "$(PKGVERSION)" | awk -F. '{print $$1*100000000 + $$2*1000000 + $$3*10000}' || echo 1$$(date +%y%m%d))
+
+apk: web
+	@if [ -z "$(AAPT2)" ] || [ -z "$(ANDROID_JAR)" ] || ! command -v javac >/dev/null 2>&1; then \
+		echo "ERROR: Android SDK (ANDROID_HOME) + JDK required — or: nix develop .#android -c make apk" >&2; exit 1; \
+	fi
+	@echo "APK  $(DIST)/$(BINARY)_$(PKGVERSION)_android.apk (versionCode $(VCODE))"
+	@rm -rf $(DIST)/apk && mkdir -p $(DIST)/apk/res/mipmap-xxxhdpi $(DIST)/apk/classes
+	@cp -r packaging/android/res/. $(DIST)/apk/res/
+	@cp web/icons/icon-192.png $(DIST)/apk/res/mipmap-xxxhdpi/ic_launcher.png
+	$(AAPT2) compile --dir $(DIST)/apk/res -o $(DIST)/apk/res.zip
+	$(AAPT2) link -o $(DIST)/apk/base.apk -I $(ANDROID_JAR) \
+		--manifest packaging/android/AndroidManifest.xml \
+		--min-sdk-version 26 --target-sdk-version 35 \
+		--version-code $(VCODE) --version-name $(VERSION) \
+		-A $(WEBDIST) $(DIST)/apk/res.zip
+	javac -source 1.8 -target 1.8 -Xlint:-options -bootclasspath $(ANDROID_JAR) \
+		-d $(DIST)/apk/classes packaging/android/java/com/daviey/mario/MainActivity.java
+	$(D8) --release --lib $(ANDROID_JAR) --output $(DIST)/apk \
+		$(DIST)/apk/classes/com/daviey/mario/*.class
+	cd $(DIST)/apk && zip -qj base.apk classes.dex
+	$(ZIPALIGN) -f 4 $(DIST)/apk/base.apk $(DIST)/apk/aligned.apk
+	$(APKSIGNER) sign $(KSFLAGS) --out $(DIST)/$(BINARY)_$(PKGVERSION)_android.apk \
+		$(DIST)/apk/aligned.apk
+	$(APKSIGNER) verify --print-certs $(DIST)/$(BINARY)_$(PKGVERSION)_android.apk
 
 # CI pre-release gate, in fail-fast order: formatting, vet, then tests.
 check: fmtcheck vet test
