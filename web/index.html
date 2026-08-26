@@ -498,12 +498,12 @@
     document.getElementById('note').innerHTML = 'tap START to play · <a href="#" onclick="location.reload(); return false">restart</a>';
     sizeViewport();
   };
-  // Evidence-gated, not capability-gated: (pointer: coarse) matches
-  // touchscreen computers whose primary pointer is a finger (2-in-1s in
-  // tablet posture), which forced the pad onto desktop browsers. A real
-  // touchstart only fires on actual touch; ?touch is the manual override.
-  window.addEventListener('touchstart', enableTouch, {once: true, passive: true});
-  if (new URLSearchParams(location.search).has('touch')) enableTouch();
+  // Pointer-class gated: the pad appears only on devices with no fine
+  // pointer at all (phones, keyboard-less tablets). Touch events on a
+  // touchscreen computer never enable it — those machines have a
+  // mouse/trackpad and must see the plain keyboard UI. ?touch overrides.
+  if (!matchMedia('(any-pointer: fine)').matches ||
+      new URLSearchParams(location.search).has('touch')) enableTouch();
 
   // Start the game module; main() runs its own 60 Hz loop. mario.wasm is
   // a few MB, so fetch it manually for real byte progress, then
