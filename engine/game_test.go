@@ -2,6 +2,17 @@ package engine
 
 import "testing"
 
+// runClear steps the post-flag sequence (pole slide, castle walk, score
+// countdown) until the next level's world card or the win screen.
+func runClear(g *Game) {
+	for range 1200 {
+		g.Update(Input{})
+		if g.State == StateWorldCard || g.State == StateWin || g.State == StateGameOver {
+			return
+		}
+	}
+}
+
 func TestTitleStartsOnAnyKey(t *testing.T) {
 	g := NewGame([]*Level{buildLevel(t, 60)}, 40, LevelHeight)
 	if g.State != StateTitle {
@@ -12,14 +23,18 @@ func TestTitleStartsOnAnyKey(t *testing.T) {
 		t.Fatal("title dismissed without input")
 	}
 	g.Update(Input{AnyKey: true})
+	if g.State != StateWorldCard {
+		t.Errorf("state = %v, want world card", g.State)
+	}
+	g.Update(Input{AnyKey: true}) // the card is skippable
 	if g.State != StatePlaying {
 		t.Errorf("state = %v, want playing", g.State)
 	}
 	// Movement keys also start the game.
 	g2 := NewGame([]*Level{buildLevel(t, 60)}, 40, LevelHeight)
 	g2.Update(Input{Right: true})
-	if g2.State != StatePlaying {
-		t.Errorf("state = %v after Right", g2.State)
+	if g2.State != StateWorldCard {
+		t.Errorf("state = %v after Right, want world card", g2.State)
 	}
 }
 
@@ -62,16 +77,23 @@ func TestTimerExpiryKills(t *testing.T) {
 	}
 }
 
-func TestFlagClearsLevelWithBonus(t *testing.T) {
+func TestFlagSequencePaysBonusAndAdvances(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
 	g := newGame(t, l)
 	g.Player.Pos = Vec{37, 13 - SmallH}
-	run(g, 60, Input{Right: true})
-	if g.State != StateLevelClear {
-		t.Fatalf("state = %v, want level clear (x=%f)", g.State, g.Player.Pos.X)
+	g.Player.Vel.X = MaxRun // running start: grab inside one time unit
+	g.Time = 100
+	run(g, 24, Input{Right: true, Run: true})
+	if g.State != StateFlagSlide && g.State != StateWalkCastle && g.State != StateScoreTick {
+		t.Fatalf("state = %v, want flag sequence (x=%f)", g.State, g.Player.Pos.X)
 	}
-	if want := g.Time * TimeBonusPerUnit; g.Score != want {
-		t.Errorf("score = %d, want time bonus %d (time=%d)", g.Score, want, g.Time)
+	runClear(g)
+	if g.State != StateWin {
+		t.Fatalf("state = %v after clearing the only level, want win", g.State)
+	}
+	// Ground grab: minimum pole bonus (100) plus the 100-unit time countdown.
+	if want := 100 + 100*TimeBonusPerUnit; g.Score != want {
+		t.Errorf("score = %d, want %d (flag bonus + time countdown)", g.Score, want)
 	}
 }
 
@@ -83,13 +105,15 @@ func TestLevelClearAdvancesToNextLevel(t *testing.T) {
 	g := NewGame(levels, 40, LevelHeight)
 	g.State = StatePlaying
 	g.Player.Pos = Vec{37, 13 - SmallH}
-	run(g, 60, Input{Right: true})
-	if g.State != StateLevelClear {
-		t.Fatalf("state = %v", g.State)
+	g.Player.Vel.X = MaxRun
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
+	if g.State != StateWorldCard || g.LevelIndex() != 1 {
+		t.Fatalf("state=%v level=%d, want level-1 world card", g.State, g.LevelIndex())
 	}
-	run(g, ClearTicks, Input{})
-	if g.State != StatePlaying || g.LevelIndex() != 1 {
-		t.Errorf("state=%v level=%d, want playing level 1", g.State, g.LevelIndex())
+	run(g, WorldCardTicks+2, Input{})
+	if g.State != StatePlaying {
+		t.Errorf("state = %v after card", g.State)
 	}
 }
 
@@ -97,8 +121,8 @@ func TestLastLevelFlagWins(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
 	g := newGame(t, l)
 	g.Player.Pos = Vec{37, 13 - SmallH}
-	run(g, 60, Input{Right: true})
-	run(g, ClearTicks, Input{})
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
 	if g.State != StateWin {
 		t.Errorf("state = %v, want win", g.State)
 	}
@@ -125,9 +149,10 @@ func TestDeathRespawnsLevel(t *testing.T) {
 		t.Fatalf("state = %v", g.State)
 	}
 	run(g, DyingTicks, Input{})
-	if g.State != StatePlaying {
+	if g.State != StateWorldCard {
 		t.Fatalf("state = %v after respawn delay", g.State)
 	}
+	g.Update(Input{AnyKey: true}) // skip the card
 	// Level fully reset: goomba back; score preserved; player small again.
 	if len(g.Enemies) != 1 {
 		t.Errorf("enemies = %d, want respawned goomba", len(g.Enemies))
@@ -135,7 +160,7 @@ func TestDeathRespawnsLevel(t *testing.T) {
 	if g.Score != StompScore || g.CoinCount != 0 {
 		t.Errorf("score reset on death: %d/%d", g.Score, g.CoinCount)
 	}
-	if g.Player.Super {
+	if g.Player.Power >= PowerSuper {
 		t.Error("player should respawn small")
 	}
 }
@@ -156,7 +181,7 @@ func TestGameOverAndRestart(t *testing.T) {
 	}
 	g.Score = 999
 	g.Update(Input{Restart: true})
-	if g.State != StatePlaying || g.LevelIndex() != 0 {
+	if g.State != StateWorldCard || g.LevelIndex() != 0 {
 		t.Fatalf("restart failed: %v/%d", g.State, g.LevelIndex())
 	}
 	if g.Score != 0 || g.Lives != StartLives || g.CoinCount != 0 {
@@ -169,7 +194,7 @@ func TestDyingAnimationFalls(t *testing.T) {
 	g.Time = 1
 	run(g, TicksPerTimeUnit+2, Input{})
 	y0 := g.Player.Pos.Y
-	run(g, DyingTicks, Input{}) // full hop-then-fall arc
+	run(g, DyingTicks-DeathFreezeTicks, Input{}) // freeze-frame, then the arc
 	if g.Player.Pos.Y <= y0 {
 		t.Errorf("dying player did not fall: %f -> %f", y0, g.Player.Pos.Y)
 	}
@@ -203,15 +228,16 @@ func TestScoreAccumulatesAcrossLevels(t *testing.T) {
 	g.State = StatePlaying
 
 	clearOnce := func() {
-		g.Tick = 0 // identical tick phase => identical time drain
-		g.Time = 300
+		g.Update(Input{AnyKey: true}) // leave any world card we are in
+		g.Tick = 0                    // identical tick phase => identical time drain
+		g.Time = 100
 		g.Player.Pos = Vec{X: 37, Y: 13 - g.Player.H}
-		g.Player.Vel = Vec{}
-		run(g, 60, Input{Right: true})
-		if g.State != StateLevelClear {
+		g.Player.Vel = Vec{X: MaxRun}
+		run(g, 24, Input{Right: true, Run: true})
+		runClear(g)
+		if g.State != StateWorldCard && g.State != StateWin {
 			t.Fatalf("did not clear: %v", g.State)
 		}
-		run(g, ClearTicks, Input{})
 	}
 
 	clearOnce()
@@ -229,17 +255,18 @@ func TestSuperCarriesAcrossLevelButNotDeath(t *testing.T) {
 	mk := func() *Level { return buildLevel(t, 60, func(b *Builder) { b.Flag(40) }) }
 	g := NewGame([]*Level{mk(), mk()}, 40, LevelHeight)
 	g.State = StatePlaying
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.Pos = Vec{37, 13 - SuperH}
-	run(g, 90, Input{Right: true})
-	run(g, ClearTicks, Input{})
-	if !g.Player.Super {
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
+	if g.Player.Power < PowerSuper {
 		t.Error("super lost on level transition")
 	}
+	g.Update(Input{AnyKey: true}) // past the card
 	g.Time = 1
 	run(g, TicksPerTimeUnit+2, Input{})
 	run(g, DyingTicks, Input{})
-	if g.Player.Super {
+	if g.Player.Power >= PowerSuper {
 		t.Error("super survived death")
 	}
 }
@@ -248,10 +275,10 @@ func TestDeterminism(t *testing.T) {
 	play := func() string {
 		g := NewGame(DefaultLevels(), 40, LevelHeight)
 		g.State = StatePlaying
-		for t := 0; t < 3000; t++ {
+		for t := range 3000 {
 			in := Input{Right: true, Run: t%3 != 0, Up: t%97 < 22}
 			g.Update(in)
-			if g.State != StatePlaying {
+			if g.State == StateGameOver || g.State == StateWin {
 				break
 			}
 		}
@@ -265,7 +292,7 @@ func TestDeterminism(t *testing.T) {
 
 func TestKillOnlyWhilePlaying(t *testing.T) {
 	g := newGame(t, buildLevel(t, 60))
-	g.State = StateLevelClear
+	g.State = StateScoreTick
 	g.kill()
 	if g.Lives != StartLives {
 		t.Error("kill fired during level clear")

@@ -39,6 +39,10 @@ type UI struct {
 	quit    bool
 	done    bool // submitted or declined: don't re-ask
 	restart bool // board 'r': close the board and play again
+	daily   bool // showing the daily-challenge board
+	dailyGo bool // title 'd': the App should start a daily run
+	day     string
+	rank    int // post-submit rank in the fetched rows, 0 = unknown
 
 	submit func(e board.Entry) error
 	fetch  func() ([]board.Row, error)
@@ -103,6 +107,34 @@ func (u *UI) note(b []byte) {
 	u.noted = append(u.noted, b...)
 }
 
+// dailyMode reports whether the machine currently targets the daily board.
+func (u *UI) dailyMode() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.daily
+}
+
+// today is the UTC challenge day (YYYY-MM-DD). The engine stays
+// wall-clock free; the UI layer owns the calendar.
+func today() string { return time.Now().UTC().Format("2006-01-02") }
+
+// TakeDailyAtTitle reports and clears a title-screen 'd' press (the
+// daily challenge trigger). It must run BEFORE the engine update: the
+// same kitty 'd' press also maps to Right, which would otherwise dismiss
+// the title as a movement key before Tick ever saw the note.
+func (u *UI) TakeDailyAtTitle(g *engine.Game) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.mode != render.UIOff || g.State != engine.StateTitle || len(u.noted) == 0 {
+		return false
+	}
+	if bytesContain(u.noted, 'd') || bytesContain(u.noted, 'D') {
+		u.noted = nil
+		return true
+	}
+	return false
+}
+
 func (u *UI) quitRequested() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -122,6 +154,7 @@ func (u *UI) takeRestart() bool {
 // ShowBoard switches to the board screen and starts a fetch.
 func (u *UI) ShowBoard() {
 	u.mu.Lock()
+	u.daily = false // title board is the classic one
 	if u.fetch == nil {
 		// Offline build (no credentials): still show the screen, with a
 		// status — never an eternal LOADING.
@@ -160,6 +193,13 @@ func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 		return
 	}
 	u.rows = boardRowsFor(rows)
+	u.rank = 0
+	for i, r := range rows {
+		if r.Mine {
+			u.rank = i + 1
+			break
+		}
+	}
 }
 
 // boardRowsFor converts API rows to render rows, marking the player's own
@@ -213,6 +253,9 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 		u.asked = true
 		u.player, _ = persist.LoadPlayer()
 		u.score = g.Score
+		u.daily = g.Daily
+		u.day = today()
+		u.rank = 0
 		u.mode = render.UIAsk
 	}
 
@@ -296,8 +339,12 @@ func (u *UI) submitLocked() {
 		return
 	}
 	u.status = "SUBMITTING"
+	mode, day := "", ""
+	if u.daily {
+		mode, day = "daily", u.day
+	}
 	go func() {
-		err := submit(board.Entry{Name: name, Score: score, DeviceID: player.DeviceID})
+		err := submit(board.Entry{Name: name, Score: score, DeviceID: player.DeviceID, Mode: mode, Day: day})
 		u.mu.Lock()
 		if err != nil {
 			u.status = "SUBMIT FAILED"
@@ -313,6 +360,11 @@ func (u *UI) submitLocked() {
 }
 
 func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {
+	best := g.Best
+	rank := 0
+	if u.mode == render.UIBoard {
+		rank = u.rank
+	}
 	return &render.ScoreUI{
 		Mode:     u.mode,
 		Score:    u.score,
@@ -322,6 +374,9 @@ func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {
 		Loading:  u.loading,
 		Status:   u.status,
 		Title:    g.State == engine.StateTitle,
+		Best:     best,
+		Rank:     rank,
+		Daily:    u.daily,
 	}
 }
 

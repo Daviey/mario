@@ -59,6 +59,8 @@ type Entry struct {
 	Score    int    `json:"score"`
 	DeviceID string `json:"device_id"`
 	PowNonce string `json:"pow_nonce"`
+	Mode     string `json:"mode,omitempty"` // "" / "classic" / "daily"
+	Day      string `json:"day,omitempty"`  // daily rows: YYYY-MM-DD
 }
 
 // Row is a leaderboard entry as served by the board_rows RPC. The raw
@@ -73,6 +75,9 @@ type Row struct {
 // Submit inserts a score row, solving the server's proof-of-work gate
 // first (~0.1s of hashing; invisible next to the network round trip).
 func (c *Client) Submit(ctx context.Context, e Entry) error {
+	if e.Mode == "" {
+		e.Mode = "classic"
+	}
 	e.PowNonce = solvePow(e.DeviceID, e.Score)
 	body, err := json.Marshal(e)
 	if err != nil {
@@ -83,12 +88,25 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 	return err
 }
 
-// Top returns the n best scores, highest first. Rows belonging to
-// deviceID arrive flagged Mine; "" gives the anonymous view.
+// Top returns the n best classic-mode scores, highest first. Rows
+// belonging to deviceID arrive flagged Mine; "" gives the anonymous view.
 func (c *Client) Top(ctx context.Context, n int, deviceID string) ([]Row, error) {
+	return c.TopMode(ctx, n, deviceID, "", "")
+}
+
+// TopMode returns the n best scores for a leaderboard mode. mode "daily"
+// additionally filters to one challenge day (YYYY-MM-DD); the classic
+// board ignores day.
+func (c *Client) TopMode(ctx context.Context, n int, deviceID, mode, day string) ([]Row, error) {
 	args := map[string]any{"p_limit": n}
 	if deviceID != "" {
 		args["p_device_id"] = deviceID
+	}
+	if mode != "" {
+		args["p_mode"] = mode
+	}
+	if mode == "daily" && day != "" {
+		args["p_day"] = day
 	}
 	body, err := json.Marshal(args)
 	if err != nil {

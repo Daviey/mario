@@ -16,6 +16,7 @@ import (
 type PlayerConfig struct {
 	DeviceID string `json:"device_id"`
 	Name     string `json:"name"`
+	Best     int    `json:"best,omitempty"` // best score ever, local only
 }
 
 // PlayerConfigPath returns <UserConfigDir>/mario/player.json, creating the
@@ -51,6 +52,17 @@ func LoadPlayer() (PlayerConfig, error) {
 		os.Chmod(path, 0o600) // Ensure tight permissions if file existed
 	}
 	return pc, nil
+}
+
+// SaveBest records the best score (no-op for scores that do not beat it).
+func SaveBest(score int) {
+	pc, err := LoadPlayer()
+	if err != nil || score <= pc.Best {
+		return
+	}
+	name := pc.Name
+	pc.Best = score
+	pc.SaveName(name)
 }
 
 func (pc *PlayerConfig) SaveName(name string) {

@@ -16,7 +16,7 @@ func TestLiveSeedOneRow(t *testing.T) {
 	if os.Getenv("LIVE") != "1" {
 		t.Skip("set LIVE=1")
 	}
-	board.LoadDotEnv(".env")
+	board.LoadDotEnv("../../.env", "../.env", ".env")
 	c, err := board.FromEnv()
 	if err != nil {
 		t.Fatal(err)

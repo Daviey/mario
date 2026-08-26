@@ -16,7 +16,12 @@ func feelGame(t *testing.T) (*Mapper, *engine.Game, float64) {
 	// the tests exercise StatePlaying rather than the any-key gate that
 	// would otherwise consume the first movement press.
 	m.Feed([]byte{'\r'})
-	g.Update(m.Poll())
+	g.Update(m.Poll()) // title -> world card
+	m.Feed([]byte{'\r'})
+	g.Update(m.Poll()) // any key skips the card -> playing
+	for range 3 {
+		g.Update(m.Poll()) // settle on the ground
+	}
 	return m, g, g.Player.Pos.X
 }
 

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Daviey/mario/engine"
@@ -156,9 +157,9 @@ func TestLeaderHintDrawnOnTitle(t *testing.T) {
 			g := engine.NewGame([]*engine.Level{lv}, 40, viewH) // starts on title
 			f := worldFrame(g, testPal)
 			var hint *titleText
-			for i, e := range titleTextEls(f) {
-				if e.s == "L LEADERBOARD" || e.s == "L BOARD" {
-					hint = &titleTextEls(f)[i]
+			for i, e := range titleTextEls(f, g) {
+				if strings.Contains(e.s, "DAILY") {
+					hint = &titleTextEls(f, g)[i]
 				}
 			}
 			if hint == nil {

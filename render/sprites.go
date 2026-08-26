@@ -1,5 +1,7 @@
 package render
 
+import "math"
+
 // Pixel-grid geometry. Every world tile is Pix×Pix square pixels; a screen
 // cell carries two vertically stacked pixels via the half block '▀'
 // (fg = upper pixel, bg = lower pixel), which is the finest full-color
@@ -394,6 +396,37 @@ var sprHill = []string{ // 12×4
 	"GGGGGGGGGGGG",
 }
 
+var sprFireFlower = []string{ // 5×5 on a 0.9×0.9 hitbox
+	".RRR.",
+	"RYYYR",
+	"RYYYR",
+	".RRR.",
+	".E.E.",
+}
+
+var sprFireball = []string{ // 3×3, spin frame A
+	".R.",
+	"RYR",
+	".R.",
+}
+
+var sprFireballSpin = []string{ // 3×3, spin frame B
+	"R.R",
+	".Y.",
+	"R.R",
+}
+
+var sprPlant = []string{ // 5×8 on a 0.7×1.35 hitbox; stem sinks into the pipe
+	".RRR.",
+	"RWWRW",
+	"RRRRR",
+	"WWWWW",
+	".EGE.",
+	".EGE.",
+	".EGE.",
+	".EGE.",
+}
+
 var sprBush = []string{ // 9×2
 	".EGGGGGE.",
 	"EGGGGGGGG",
@@ -501,18 +534,34 @@ func drawPipeShaft(f *Frame, p *Palette, x, y, h int) {
 }
 
 // drawFlagPole paints one pole tile; drawFlagTop paints the finial and
-// pennant of the goal.
+// pennant of the goal. drop slides the pennant down the pole during the
+// pole slide (0 = top, 1 = base).
 func drawFlagPole(f *Frame, p *Palette, x, y int) {
 	f.Fill(x+2, y, 1, Pix, p.Pole)
 }
 
-func drawFlagTop(f *Frame, p *Palette, x, y int) {
+func drawFlagTop(f *Frame, p *Palette, x, y int, drop float64) {
 	f.Fill(x+2, y, 2, 2, p.GreenLight) // ball
 	f.Fill(x+2, y+2, 1, Pix-2, p.Pole) // pole
-	f.Fill(x+1, y+2, 1, 1, p.FlagRed)  // pennant, pointing down-left
-	f.Fill(x-1, y+3, 3, 1, p.FlagRed)
-	f.Fill(x-2, y+4, 4, 1, p.FlagRed)
-	f.Fill(x-2, y+5, 4, 1, p.FlagRed)
+	// The pennant rides down with the player (7 pole rows to travel).
+	dy := int(drop * float64(7*Pix))
+	f.Fill(x+1, y+2+dy, 1, 1, p.FlagRed) // pennant, pointing down-left
+	f.Fill(x-1, y+3+dy, 3, 1, p.FlagRed)
+	f.Fill(x-2, y+4+dy, 4, 1, p.FlagRed)
+	f.Fill(x-2, y+5+dy, 4, 1, p.FlagRed)
+}
+
+// drawCastleFlag raises the little victory pennant on a mast above the
+// castle door after the player walks in (rise 0..1).
+func drawCastleFlag(f *Frame, p *Palette, x0, y0 int, rise float64) {
+	if rise <= 0 {
+		return
+	}
+	const h = 8
+	mx := x0 + 2*Pix + 2
+	f.Fill(mx, y0-h, 1, h, p.Pole)
+	fy := y0 - 1 - int(math.Round(float64(h-3)*rise))
+	f.Fill(mx+1, fy, 3, 3, p.FlagRed)
 }
 
 // drawCastle paints the goal castle: a 30×24 px keep (5×4 tiles) with

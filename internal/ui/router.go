@@ -44,6 +44,13 @@ func (r *Router) Poll() engine.Input {
 	return in
 }
 
+// TakeDailyAtTitle reports a pending title-screen 'd' (daily challenge)
+// trigger. Runs on the game goroutine before Poll, so the same keypress
+// cannot both start the daily and dismiss the title as a movement key.
+func (r *Router) TakeDailyAtTitle(g *engine.Game) bool {
+	return r.ui.TakeDailyAtTitle(g)
+}
+
 // UITick advances the leaderboard UI and returns its render snapshot.
 func (r *Router) UITick(g *engine.Game) *render.ScoreUI { return r.ui.Tick(g) }
 

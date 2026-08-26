@@ -390,7 +390,7 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 		t.Fatal("restart edge missing from polled input")
 	}
 	g.Update(in)
-	if g.State != engine.StatePlaying {
+	if g.State != engine.StateWorldCard {
 		t.Fatalf("restart should reset the game, got %v", g.State)
 	}
 	if io.Poll().Restart {

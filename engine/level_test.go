@@ -234,15 +234,15 @@ func TestDefaultLevelsValid(t *testing.T) {
 func TestLoadLevelCopiesTiles(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(10, 9, 'B') })
 	g := newGame(t, l)
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.Pos = Vec{9.6, 12.1 - (SuperH - SmallH)}
 	g.Level.Set(10, 9, Empty) // simulate a break
 
-	g.loadLevel(0, false)
+	g.loadLevel(0, PowerSmall)
 	if g.Level.At(10, 9) != Brick {
 		t.Error("reload did not restore the source tiles")
 	}
-	if g.Player.Super {
+	if g.Player.Power >= PowerSuper {
 		t.Error("loadLevel(false) must spawn small")
 	}
 }
@@ -250,12 +250,12 @@ func TestLoadLevelCopiesTiles(t *testing.T) {
 func TestLevelNameAndIndex(t *testing.T) {
 	levels := DefaultLevels()
 	g := NewGame(levels, 40, LevelHeight)
-	for i, want := range []string{"1-1", "1-2", "1-3"} {
+	for i, want := range []string{"1-1", "1-2", "1-3", "2-1"} {
 		if g.LevelIndex() != i || g.LevelName() != want {
 			t.Errorf("level %d: got %d/%s, want %d/%s", i, g.LevelIndex(), g.LevelName(), i, want)
 		}
 		if i+1 < len(levels) {
-			g.loadLevel(i+1, false)
+			g.loadLevel(i+1, PowerSmall)
 		}
 	}
 }
@@ -265,7 +265,7 @@ func snapshot(g *Game) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "s=%d c=%d l=%d t=%d st=%v cam=%.4f p=(%.4f,%.4f,%.4f,%.4f) sup=%v",
 		g.Score, g.CoinCount, g.Lives, g.Time, g.State, g.CameraX,
-		g.Player.Pos.X, g.Player.Pos.Y, g.Player.Vel.X, g.Player.Vel.Y, g.Player.Super)
+		g.Player.Pos.X, g.Player.Pos.Y, g.Player.Vel.X, g.Player.Vel.Y, g.Player.Power)
 	for _, e := range g.Enemies {
 		fmt.Fprintf(&sb, "|e(%.3f,%.3f,%v,%d)", e.Pos.X, e.Pos.Y, e.State, e.Dir)
 	}

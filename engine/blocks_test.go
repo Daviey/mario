@@ -99,7 +99,7 @@ func TestMushroomCollectGrows(t *testing.T) {
 	if !m.Gone {
 		t.Fatal("mushroom not collected")
 	}
-	if !g.Player.Super {
+	if g.Player.Power < PowerSuper {
 		t.Error("player did not grow")
 	}
 	if g.Player.W != SuperW || g.Player.H != SuperH {
@@ -113,13 +113,13 @@ func TestMushroomCollectGrows(t *testing.T) {
 func TestMushroomWhileSuperOnlyScores(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(10, 9, 'U') })
 	g := newGame(t, l)
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.W, g.Player.H = SuperW, SuperH
 	bumpUnder(t, g, 10, 9)
 	m := g.Mushrooms[0]
 	g.Player.Pos = Vec{m.Pos.X, m.Pos.Y - g.Player.H}
 	run(g, 1, Input{})
-	if !m.Gone || !g.Player.Super {
+	if !m.Gone || g.Player.Power < PowerSuper {
 		t.Fatal("mushroom collection failed while super")
 	}
 }
@@ -139,7 +139,7 @@ func TestSmallBumpsBrickWithoutBreaking(t *testing.T) {
 func TestSuperBreaksBrick(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(10, 9, 'B') })
 	g := newGame(t, l)
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.W, g.Player.H = SuperW, SuperH
 	bumpUnder(t, g, 10, 9)
 

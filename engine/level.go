@@ -2,6 +2,14 @@ package engine
 
 import "fmt"
 
+// Theme is a level's visual world: palette and scenery selection.
+type Theme uint8
+
+const (
+	ThemeOverworld Theme = iota
+	ThemeUnderground
+)
+
 // Tile is a single grid cell of a level.
 type Tile uint8
 
@@ -11,6 +19,7 @@ const (
 	Brick
 	Question     // question block containing a coin
 	QuestionMush // question block containing a mushroom
+	QuestionFire // question block containing a fire flower
 	Used         // spent question block
 	Pipe
 	FlagPole
@@ -20,7 +29,7 @@ const (
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, Question, QuestionMush, Used, Pipe:
+	case Ground, Brick, Question, QuestionMush, QuestionFire, Used, Pipe:
 		return true
 	}
 	return false
@@ -34,11 +43,14 @@ type Level struct {
 	Width, Height int
 	Tiles         []Tile
 	FlagX         int
+	Theme         Theme
+	CheckpointX   float64 // mid-level respawn column
 
 	PlayerStart  Vec
 	GoombaSpawns []Vec
 	KoopaSpawns  []Vec
 	CoinSpawns   []Vec
+	PlantSpawns  []Vec // piranha plants; Y is the pipe-mouth row
 }
 
 // At returns the tile at a grid position. Out-of-level sides act as solid
@@ -67,6 +79,7 @@ var tileChars = map[byte]Tile{
 	'B': Brick,
 	'?': Question,
 	'U': QuestionMush,
+	'f': QuestionFire,
 	'P': Pipe,
 	'F': FlagPole,
 	'T': FlagTop,
@@ -75,8 +88,10 @@ var tileChars = map[byte]Tile{
 // ParseLevel builds a level from ASCII rows. Tile characters:
 //
 //	' ' empty    '#' ground   'B' brick   '?' question (coin)
-//	'U' question (mushroom)   'P' pipe    'F' flag pole   'T' flag top
-//	'G' goomba   'K' koopa    'c' coin    'M' player start
+//	'U' question (mushroom)   'f' question (fire flower)
+//	'P' pipe     'F' flag pole   'T' flag top
+//	'G' goomba   'K' koopa   'c' coin   'M' player start
+//	'V' piranha plant (on the pipe below its cell)
 //
 // Rows are padded with spaces to the width of the longest row. Entity
 // characters are removed from the tile grid and turned into spawn points.
@@ -119,6 +134,8 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 				l.KoopaSpawns = append(l.KoopaSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
 			case 'c':
 				l.CoinSpawns = append(l.CoinSpawns, Vec{float64(x) + 0.2, float64(y) + 0.2})
+			case 'V': // air cell above a pipe's left column
+				l.PlantSpawns = append(l.PlantSpawns, Vec{float64(x) + 0.65, float64(y) + 1})
 			case 'F', 'T':
 				l.Tiles[y*w+x] = tileChars[ch]
 				if l.FlagX < 0 || x < l.FlagX {
@@ -140,5 +157,24 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 	if !playerSet {
 		l.PlayerStart = Vec{1, float64(l.Height-3) + 1 - SmallH}
 	}
+	l.computeCheckpoint()
 	return l, nil
+}
+
+// computeCheckpoint picks the mid-level respawn column: the first column
+// at or past the middle with two rows of ground under it and standing room
+// above. Falls back to the player start.
+func (l *Level) computeCheckpoint() {
+	ground := l.Height - 2
+	for x := l.Width / 2; x < l.Width-8; x++ {
+		if !l.At(x, ground).Solid() || !l.At(x, ground+1).Solid() {
+			continue
+		}
+		if l.At(x, ground-1).Solid() || l.At(x, ground-2).Solid() {
+			continue // no standing room (pipe, blocks, stairs)
+		}
+		l.CheckpointX = float64(x)
+		return
+	}
+	l.CheckpointX = l.PlayerStart.X
 }

@@ -50,7 +50,8 @@ func (g *Game) updateEnemies() {
 		}
 	}
 
-	// Moving shells mow down every other enemy they touch.
+	// Moving shells mow down every other enemy they touch, climbing the
+	// combo ladder with each consecutive kill.
 	for i := 0; i < len(g.Enemies); i++ {
 		a := g.Enemies[i]
 		if a.Gone || a.State != EnemyShellMoving {
@@ -65,20 +66,22 @@ func (g *Game) updateEnemies() {
 				continue
 			}
 			if overlap(a.Pos.X, a.Pos.Y, a.W, a.H, b.Pos.X, b.Pos.Y, b.W, b.H) {
+				g.awardShell(b, a.Chain)
+				a.Chain++
 				g.flipEnemy(b)
 			}
 		}
 	}
 }
 
-// flipEnemy knocks an enemy onto its back (killed by a block bump or shell).
+// flipEnemy knocks an enemy onto its back (killed by a block bump, shell
+// or fireball). Scoring belongs to the caller.
 func (g *Game) flipEnemy(e *Enemy) {
 	if e.State == EnemySquashed || e.State == EnemyFlipped {
 		return
 	}
 	e.State = EnemyFlipped
 	e.Vel = Vec{0, -0.28}
-	g.Score += StompScore
 }
 
 // playerEnemyInteractions resolves stomps, kicks and damage.
@@ -103,14 +106,16 @@ func (g *Game) playerEnemyInteractions() {
 				e.H = GoombaH
 				e.Vel.X = 0
 			}
-			g.Score += StompScore
+			g.awardStomp(e.Pos.X, e.Pos.Y)
 			g.bouncePlayer()
+			g.emit("stomp")
 		case stomping && e.State == EnemyShell:
 			g.kickShell(e)
 			g.bouncePlayer()
 		case stomping && e.State == EnemyShellMoving:
 			e.State = EnemyShell
 			e.Vel.X = 0
+			e.Chain = 0
 			g.bouncePlayer()
 		case e.State == EnemyShell:
 			g.kickShell(e)
@@ -132,13 +137,13 @@ func (g *Game) bouncePlayer() {
 // kickShell sends an idle shell sliding away from the player.
 func (g *Game) kickShell(e *Enemy) {
 	e.State = EnemyShellMoving
+	e.Chain = 0
 	d := (e.Pos.X + e.W/2) - (g.Player.Pos.X + g.Player.W/2)
 	switch {
-	case d > 0.01:
+	case d > 0.1:
 		e.Dir = 1
-	case d < -0.01:
+	case d < -0.1:
 		e.Dir = -1
-	default:
-		e.Dir = g.Player.Facing
 	}
+	g.emit("kick")
 }

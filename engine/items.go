@@ -1,5 +1,7 @@
 package engine
 
+import "math"
+
 // updateMushrooms advances power-up mushrooms (emerge, walk, collect).
 func (g *Game) updateMushrooms() {
 	p := g.Player
@@ -32,6 +34,162 @@ func (g *Game) updateMushrooms() {
 			g.Score += MushroomScore
 			p.grow()
 			g.spawnSparkle(m.Pos.X+0.2, m.Pos.Y)
+			g.emit("powerup")
+		}
+	}
+}
+
+// updateFlowers advances fire flowers: emerge, then wait to be collected.
+func (g *Game) updateFlowers() {
+	p := g.Player
+	for _, f := range g.FireFlowers {
+		if f.Gone {
+			continue
+		}
+		if f.Emerge > 0 {
+			f.Emerge--
+			f.Pos.Y -= FlowerEmergeStep
+		}
+		if overlap(p.Pos.X, p.Pos.Y, p.W, p.H, f.Pos.X, f.Pos.Y, FlowerW, FlowerH) {
+			f.Gone = true
+			g.Score += FlowerScore
+			if p.Power == PowerSmall {
+				p.grow() // small players just become super, like SMB
+			} else {
+				p.fireUp()
+			}
+			g.spawnSparkle(f.Pos.X+0.2, f.Pos.Y)
+			g.emit("powerup")
+		}
+	}
+}
+
+// aliveFireballs counts live fireballs.
+func (g *Game) aliveFireballs() int {
+	n := 0
+	for _, fb := range g.Fireballs {
+		if !fb.Gone {
+			n++
+		}
+	}
+	return n
+}
+
+// throwFireball launches a fireball in the player's facing direction.
+func (g *Game) throwFireball() {
+	p := g.Player
+	g.Fireballs = append(g.Fireballs, &Fireball{
+		Pos:  Vec{p.Pos.X + p.W/2 + float64(p.Facing)*0.4, p.Pos.Y + p.H*0.3},
+		Vel:  Vec{float64(p.Facing) * FireballSpeed, -0.05},
+		Life: FireballLife,
+	})
+	g.emit("fire")
+}
+
+// updateFireballs advances fireballs: gravity, ground bounces, wall and
+// enemy hits.
+func (g *Game) updateFireballs() {
+	for _, fb := range g.Fireballs {
+		if fb.Gone {
+			continue
+		}
+		fb.Life--
+		if fb.Life <= 0 {
+			fb.Gone = true
+			continue
+		}
+		fb.Vel.Y += FireballGravity
+		if fb.Vel.Y > MaxFall {
+			fb.Vel.Y = MaxFall
+		}
+		if g.moveX(&fb.Pos, FireballW, FireballH, fb.Vel.X) {
+			fb.Gone = true
+			g.spawnSparkle(fb.Pos.X, fb.Pos.Y)
+			continue
+		}
+		landed, _, _ := g.moveY(&fb.Pos, FireballW, FireballH, fb.Vel.Y)
+		if landed {
+			fb.Vel.Y = FireballBounce
+		}
+		if fb.Pos.Y > float64(g.Level.Height)+2 {
+			fb.Gone = true
+			continue
+		}
+		for _, e := range g.Enemies {
+			if e.Gone || e.State == EnemySquashed || e.State == EnemyFlipped {
+				continue
+			}
+			if overlap(fb.Pos.X, fb.Pos.Y, FireballW, FireballH, e.Pos.X, e.Pos.Y, e.W, e.H) {
+				g.flipEnemy(e)
+				g.Score += StompScore
+				g.spawnScorePop(e.Pos.X, e.Pos.Y, StompScore, false)
+				fb.Gone = true
+				g.emit("stomp")
+				break
+			}
+		}
+		if fb.Gone {
+			continue
+		}
+		for _, pl := range g.Plants {
+			if pl.Gone {
+				continue
+			}
+			if overlap(fb.Pos.X, fb.Pos.Y, FireballW, FireballH, pl.Pos.X, pl.Pos.Y, PlantW, PlantH) {
+				pl.Gone = true
+				g.Score += StompScore
+				g.spawnScorePop(pl.Pos.X, pl.Pos.Y, StompScore, false)
+				g.spawnSparkle(pl.Pos.X, pl.Pos.Y)
+				fb.Gone = true
+				break
+			}
+		}
+	}
+}
+
+// updatePlants advances the piranha plants: rise, wait, sink, hide — with
+// the mercy rule that a plant never rises while the player stands near.
+func (g *Game) updatePlants() {
+	p := g.Player
+	pcx := p.Pos.X + p.W/2
+	for _, pl := range g.Plants {
+		if pl.Gone {
+			continue
+		}
+		switch pl.State {
+		case PlantHidden:
+			if math.Abs(pcx-(pl.Pos.X+PlantW/2)) < PlantMercyDist {
+				pl.Timer = PlantHiddenTicks // mercy: hold while stood near
+				continue
+			}
+			pl.Timer--
+			if pl.Timer <= 0 {
+				pl.State = PlantRising
+			}
+			continue
+		case PlantRising:
+			pl.Pos.Y -= PlantH / PlantRiseTicks
+			if pl.Pos.Y <= pl.BaseY-PlantH {
+				pl.Pos.Y = pl.BaseY - PlantH
+				pl.State = PlantUp
+				pl.Timer = PlantUpTicks
+			}
+		case PlantUp:
+			pl.Timer--
+			if pl.Timer <= 0 {
+				pl.State = PlantSinking
+			}
+		case PlantSinking:
+			pl.Pos.Y += PlantH / PlantRiseTicks
+			if pl.Pos.Y >= pl.BaseY {
+				pl.Pos.Y = pl.BaseY
+				pl.State = PlantHidden
+				pl.Timer = PlantHiddenTicks
+			}
+		}
+		if pl.State != PlantHidden &&
+			overlap(p.Pos.X, p.Pos.Y, p.W, p.H, pl.Pos.X, pl.Pos.Y, PlantW, PlantH) {
+			g.hurtPlayer()
 		}
 	}
 }
@@ -89,4 +247,15 @@ func (g *Game) spawnSparkle(x, y float64) {
 
 func (g *Game) spawnDustPuff(x, y float64) {
 	g.Particles = append(g.Particles, &Particle{Pos: Vec{x, y}, Vel: Vec{0, -0.02}, Life: 12, Kind: ParticleDust})
+}
+
+// spawnScorePop floats a score value (0 = "1UP") up from a world point.
+func (g *Game) spawnScorePop(x, y float64, val int, oneUp bool) {
+	v := val
+	if oneUp {
+		v = 0
+	}
+	g.Particles = append(g.Particles, &Particle{
+		Pos: Vec{x, y}, Vel: Vec{0, -0.018}, Life: 45, Kind: ParticleScore, Val: v,
+	})
 }

@@ -112,11 +112,11 @@ func TestSideHitSmallPlayerDies(t *testing.T) {
 func TestSideHitSuperPlayerShrinks(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') })
 	g := newGame(t, l)
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.W, g.Player.H = SuperW, SuperH
 	g.Player.Pos = Vec{18.5, 13 - SuperH}
 	run(g, 120, Input{Right: true})
-	if !g.Player.Super && g.State == StatePlaying {
+	if g.Player.Power < PowerSuper && g.State == StatePlaying {
 		// Shrunk and survived.
 		if g.Player.H != SmallH {
 			t.Errorf("height = %f, want small", g.Player.H)
@@ -126,19 +126,19 @@ func TestSideHitSuperPlayerShrinks(t *testing.T) {
 		}
 		return
 	}
-	t.Fatalf("super player died or stayed super: state=%v super=%v", g.State, g.Player.Super)
+	t.Fatalf("super player died or stayed super: state=%v power=%v", g.State, g.Player.Power)
 }
 
 func TestInvinciblePreventsDamage(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') })
 	g := newGame(t, l)
-	g.Player.Super = true
+	g.Player.grow()
 	g.Player.W, g.Player.H = SuperW, SuperH
 	g.Player.Pos = Vec{18.5, 13 - SuperH}
 	// Damage once, then stay overlapped while invincible.
 	run(g, 60, Input{Right: true})
-	if g.Player.Super || g.State != StatePlaying {
-		t.Fatalf("setup failed: super=%v state=%v", g.Player.Super, g.State)
+	if g.Player.Power >= PowerSuper || g.State != StatePlaying {
+		t.Fatalf("setup failed: power=%v state=%v", g.Player.Power, g.State)
 	}
 	// Second contact while invincible must not kill.
 	run(g, 60, Input{Right: true})
@@ -285,8 +285,11 @@ func TestFlipEnemyIsIdempotent(t *testing.T) {
 	g.Enemies = append(g.Enemies, e)
 	g.flipEnemy(e)
 	g.flipEnemy(e)
-	if g.Score != StompScore {
-		t.Errorf("double flip scored twice: %d", g.Score)
+	if e.State != EnemyFlipped {
+		t.Fatalf("state = %v, want flipped", e.State)
+	}
+	if g.Score != 0 {
+		t.Errorf("flip scored without a caller awarding it: %d", g.Score)
 	}
 }
 

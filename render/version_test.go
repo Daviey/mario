@@ -66,13 +66,13 @@ func TestVersionDrawnOnTitle(t *testing.T) {
 
 	Version = ""
 	f0 := worldFrame(g, testPal)
-	nBands0 := len(titleTextBands(f0))
+	nBands0 := len(titleTextBands(f0, g))
 
 	Version = "V9.9.9-TEST"
 	f1 := worldFrame(g, testPal)
 
 	found := false
-	for _, e := range titleTextEls(f1) {
+	for _, e := range titleTextEls(f1, g) {
 		if e.s == "V9.9.9-TEST" {
 			found = true
 		}
@@ -93,7 +93,7 @@ func TestVersionDrawnOnTitle(t *testing.T) {
 		t.Fatal("set Version drew no pixels on the title frame")
 	}
 
-	if nBands := len(titleTextBands(f1)); nBands != nBands0+1 {
+	if nBands := len(titleTextBands(f1, g)); nBands != nBands0+1 {
 		t.Fatalf("title bands with version = %d, want %d (+1 keep-clear rect)", nBands, nBands0+1)
 	}
 
@@ -101,7 +101,7 @@ func TestVersionDrawnOnTitle(t *testing.T) {
 	// laddered to a shorter candidate rather than overflowing.
 	g.ViewW = 12 // 72px wide frame
 	f2 := worldFrame(g, testPal)
-	for _, e := range titleTextEls(f2) {
+	for _, e := range titleTextEls(f2, g) {
 		if w := textWidthPx(e.s, e.scale); e.s != "MARIO" && w > f2.W {
 			t.Fatalf("element %q overflows %dpx frame (%dpx)", e.s, f2.W, w)
 		}

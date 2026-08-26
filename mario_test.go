@@ -36,8 +36,8 @@ func TestLoadLevelsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevels: %v", err)
 	}
-	if len(levels) != 3 {
-		t.Errorf("levels = %d, want 3", len(levels))
+	if len(levels) != 4 {
+		t.Errorf("levels = %d, want 4", len(levels))
 	}
 }
 

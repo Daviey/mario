@@ -48,7 +48,7 @@ func TestVisualDump(t *testing.T) {
 
 	// Sky dressing.
 	f.DrawSprite(sprCloud, rc, 8, 2, false, 1)
-	drawFlagTop(f, testPal, 26, 4)
+	drawFlagTop(f, testPal, 26, 4, 0)
 	for ty := 5; ty <= 6; ty++ {
 		drawFlagPole(f, testPal, 26, ty*Pix)
 	}

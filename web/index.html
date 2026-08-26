@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co; img-src 'self' data:">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a1c6e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="./manifest.webmanifest">
 <title>SUPER CLI MARIO</title>
 <style>
   :root { color-scheme: dark; }
@@ -107,6 +111,13 @@
   #pad .act-btn { width: 64px; height: 64px; font-size: 20px; border-radius: 50%; }
   #pad .act-grp { gap: 12px; }
   #pad .mid-btn { width: auto; min-width: 54px; height: 38px; font-size: 13px; border-radius: 8px; padding: 0 10px; }
+  /* Portrait phones are narrow: let the pad groups wrap (A/B drop to a
+     second row) and compact the mid buttons so everything stays tappable
+     until the player heeds the rotate hint. Landscape is untouched. */
+  @media (orientation: portrait) {
+    #pad { flex-wrap: wrap; justify-content: space-around; row-gap: 8px; }
+    #pad .mid-btn { min-width: 44px; padding: 0 6px; font-size: 12px; }
+  }
 
   #pad.ask, #pad.entry, #pad.board { justify-content: center; flex-wrap: wrap; }
   #pad .btn-yes, #pad .btn-no { width: 140px; height: 64px; font-size: 20px; }
@@ -114,13 +125,38 @@
   #pad.keypad .pbtn { width: 100%; height: 44px; border-radius: 8px; font-size: 15px; }
   #pad.keypad .ok { grid-column: span 2; background: #E4221B; border-color: #f75550; }
   #pad.keypad .ok.held, #pad.keypad .ok:active { background: #b21813; }
+  /* ---- top-bar controls + rotate hint ---- */
+  #bar .bar-r { display: flex; align-items: center; gap: 10px; }
+  #bar .cbtn {
+    appearance: none; border: 1px solid #2a4a9e; background: #0a1c6e; color: #fff;
+    border-radius: 6px; font-size: 13px; line-height: 1;
+    width: 30px; height: 26px; padding: 0; cursor: pointer;
+  }
+  .pbtn[hidden] { display: none; } /* [hidden] loses to .pbtn's flex otherwise */
+  #rotate {
+    display: none; flex: 0 0 auto;
+    justify-content: center; align-items: center; gap: 10px;
+    background: #E4221B; color: #fff;
+    font-size: 12px; font-weight: 700; letter-spacing: 1px;
+    padding: 4px 12px;
+  }
+  #rotate button {
+    appearance: none; border: 0; background: none; color: #fff;
+    font-size: 14px; font-weight: 700; padding: 0 4px; cursor: pointer;
+  }
+  @media (orientation: portrait) { body.touch #rotate:not(.off) { display: flex; } }
 </style>
 </head>
 <body>
 <div id="bar">
   <span>SUPER CLI MARIO</span>
-  <span class="dim">a/d move · w/space jump · x run · p pause · q quit</span>
+  <span class="bar-r">
+    <span class="dim">a/d move · w jump · x run/fire · p pause</span>
+    <button id="fs-btn" class="cbtn" tabindex="-1" aria-label="fullscreen">⛶</button>
+    <button id="mute-btn" class="cbtn" tabindex="-1" aria-label="toggle sound">🔊</button>
+  </span>
 </div>
+<div id="rotate"><span>↻ ROTATE FOR THE FULL VIEW</span><button id="rotate-x" tabindex="-1" aria-label="dismiss rotate hint">✕</button></div>
 <div id="stage">
   <canvas id="game"></canvas>
   <div id="loader" role="status">
@@ -410,6 +446,7 @@
     if (st.mode === 'ask') {
       html = '<h3>GAME OVER</h3>'
         + '<p class="score">SCORE ' + escHtml(pad(st.score, 6)) + '</p>'
+        + (st.best > 0 ? '<p class="hint">BEST ' + escHtml(pad(st.best, 6)) + '</p>' : '')
         + '<p class="gold blink">SUBMIT TO LEADERBOARD?</p>'
         + (IS_TOUCH() ? '' : '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>');
     } else if (st.mode === 'entry') {
@@ -417,6 +454,7 @@
       const padN = '&nbsp;'.repeat(Math.max(0, 9 - name.length));
       html = '<h3>GAME OVER</h3>'
         + '<p class="score">SCORE ' + escHtml(pad(st.score, 6)) + '</p>'
+        + (st.best > 0 ? '<p class="hint">BEST ' + escHtml(pad(st.best, 6)) + '</p>' : '')
         + '<p class="gold">ENTER NAME</p>'
         + '<p class="field">[' + name + '<span class="blink">_</span>' + padN + ']</p>'
         + (IS_TOUCH() ? '<p class="hint">TAP LETTERS BELOW</p>' : '<p class="hint">ENTER OK&nbsp;&nbsp;&nbsp;BS DEL&nbsp;&nbsp;&nbsp;ESC BACK</p>');
@@ -431,10 +469,154 @@
         ? '<p class="gold">' + escHtml(st.status) + '</p>'
         : (st.title ? (IS_TOUCH() ? '' : '<p class="hint blink">L CLOSE</p>')
                     : (IS_TOUCH() ? '' : '<p class="hint blink">R RESTART&nbsp;&nbsp;&nbsp;Q QUIT</p>'));
-      html = '<h3>LEADERBOARD</h3>' + body + foot;
+      html = '<h3>' + (st.daily ? 'DAILY LEADERBOARD' : 'LEADERBOARD') + '</h3>' + body
+        + (st.rank > 0 ? '<p class="gold">YOU ARE #' + escHtml(st.rank) + '</p>' : '')
+        + foot;
     }
     boardEl.innerHTML = html;
   };
+
+  // ---- Sound: window.marioSfx is the game's whole audio layer — a tiny
+  // WebAudio chiptune synth (square/triangle oscillators + one noise
+  // buffer; no assets, no deps). The AudioContext is created lazily and
+  // resumed on the first user gesture (autoplay policy). ----
+  let ac = null, master = null, noiseBuf = null;
+  let muted = false;
+  try { muted = localStorage.getItem('mario-muted') === '1'; } catch {}
+  const ensureAudio = () => {
+    if (ac) { if (ac.state === 'suspended') ac.resume().catch(() => {}); return; }
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    try {
+      ac = new Ctor();
+      master = ac.createGain();
+      master.gain.value = 0.25;
+      noiseBuf = ac.createBuffer(1, (ac.sampleRate * 0.5) | 0, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch { ac = null; }
+  };
+  const unlock = () => ensureAudio();
+  window.addEventListener('pointerdown', unlock, { once: true, passive: true });
+  window.addEventListener('keydown', unlock, { once: true });
+  // One oscillator voice: type + optional pitch glide + decay envelope.
+  const note = (type, f0, f1, dur, t, vol) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(master);
+    o.start(t); o.stop(t + dur + 0.02);
+  };
+  const burst = (dur, t, freq, vol) => { // filtered noise hit
+    const s = ac.createBufferSource(); s.buffer = noiseBuf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.value = freq; f.Q.value = 0.8;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f).connect(g).connect(master);
+    s.start(t); s.stop(t + dur + 0.02);
+  };
+  const arp = (freqs, step, vol) => {
+    const t = ac.currentTime;
+    for (let i = 0; i < freqs.length; i++)
+      note('square', freqs[i], freqs[i], step * 0.95, t + i * step, vol);
+  };
+  const SFX = {
+    jump: () => note('square', 150, 750, 0.15, ac.currentTime, 0.5),
+    coin: () => { const t = ac.currentTime;
+      note('square', 988, 988, 0.08, t, 0.5); note('square', 1319, 1319, 0.35, t + 0.08, 0.45); },
+    stomp: () => { const t = ac.currentTime;
+      note('square', 250, 80, 0.12, t, 0.5); burst(0.1, t, 400, 0.35); },
+    kick: () => note('square', 400, 150, 0.1, ac.currentTime, 0.5),
+    brick: () => burst(0.18, ac.currentTime, 800, 0.5),
+    bump: () => note('triangle', 90, 90, 0.09, ac.currentTime, 0.7),
+    powerup: () => arp([523, 659, 784, 1046, 1318, 1568], 0.055, 0.4),
+    oneup: () => arp([659, 784, 659, 523, 587, 784], 0.09, 0.4),
+    die: () => note('square', 600, 100, 0.6, ac.currentTime, 0.5),
+    flag: () => note('square', 1000, 200, 0.5, ac.currentTime, 0.45),
+    clear: () => arp([523, 523, 523, 659, 784, 1046], 0.09, 0.45),
+    tick: () => note('square', 1319, 1319, 0.03, ac.currentTime, 0.15),
+    hurry: () => { const t = ac.currentTime; // 880/660 alternating ×3
+      for (let i = 0; i < 3; i++) {
+        note('square', 880, 880, 0.05, t + i * 0.12, 0.4);
+        note('square', 660, 660, 0.05, t + i * 0.12 + 0.06, 0.4);
+      } },
+    fire: () => note('square', 900, 300, 0.09, ac.currentTime, 0.35),
+    pause: () => { const t = ac.currentTime;
+      note('square', 660, 660, 0.05, t, 0.4); note('square', 880, 880, 0.05, t + 0.06, 0.4); },
+    gameover: () => arp([523, 392, 330, 262], 0.2, 0.45),
+    win: () => arp([523, 659, 784, 1046, 784, 1046], 0.12, 0.45),
+  };
+  const VIBE = { stomp: 20, coin: 10, powerup: 40, oneup: [30, 40, 30], die: 80 };
+  const lastSfx = {};
+  window.marioSfx = (name) => {
+    const play = SFX[name];
+    if (!play || muted) return;
+    const now = performance.now(); // rate-limit repeats (tick can spam)
+    if (now - (lastSfx[name] || 0) < 40) return;
+    lastSfx[name] = now;
+    const v = VIBE[name];
+    if (v !== undefined && document.body.classList.contains('touch') && navigator.vibrate)
+      navigator.vibrate(v);
+    ensureAudio();
+    if (ac) { try { play(); } catch {} }
+  };
+
+  // Top-bar controls: mute (persisted) and fullscreen + landscape lock.
+  // tabindex=-1 + blur() keeps game keys off the buttons.
+  const muteBtn = document.getElementById('mute-btn');
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+  muteBtn.addEventListener('click', () => {
+    muted = !muted;
+    try { localStorage.setItem('mario-muted', muted ? '1' : '0'); } catch {}
+    muteBtn.textContent = muted ? '🔇' : '🔊';
+    muteBtn.blur();
+  });
+  const lockLandscape = () => {
+    try {
+      if (screen.orientation && screen.orientation.lock)
+        screen.orientation.lock('landscape').catch(() => {});
+    } catch {}
+  };
+  const fsBtn = document.getElementById('fs-btn');
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    } else if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().then(lockLandscape).catch(() => {});
+    }
+    fsBtn.blur();
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) lockLandscape();
+  });
+
+  // Title-screen hook: the DAILY pad button only exists at the title.
+  window.marioTitle = (at) => {
+    const b = document.getElementById('daily-btn');
+    if (b) b.hidden = !at;
+  };
+
+  // Rotate hint: portrait touch only, dismissible for the session.
+  const rotateEl = document.getElementById('rotate');
+  try { if (sessionStorage.getItem('mario-rotated') === '1') rotateEl.classList.add('off'); } catch {}
+  const rotBtn = document.getElementById('rotate-x');
+  rotBtn.addEventListener('click', () => {
+    rotateEl.classList.add('off');
+    try { sessionStorage.setItem('mario-rotated', '1'); } catch {}
+    rotBtn.blur();
+  });
+
+  // PWA: register the service worker once the page is fully loaded —
+  // http(s) only; file:// has neither service workers nor the fetch.
+  window.addEventListener('load', () => {
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
 
   // Integer uniform scaling, like every polished pixel game: pick the
   // largest integer k where the game's max height fits, then size the
@@ -492,7 +674,7 @@
   const padEl = document.getElementById('pad');
   padEl.innerHTML = `<div id="pad-game" style="display:contents">
     <div class="grp"><button class="pbtn" data-key="a">◀</button><button class="pbtn" data-key="s">▼</button><button class="pbtn" data-key="d">▶</button></div>
-    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button></div>
+    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
     <div class="grp act-grp"><button class="pbtn act-btn" data-key="x">B</button><button class="pbtn act-btn" data-key="w">A</button></div>
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
