@@ -130,14 +130,24 @@ type member struct {
 	data []byte
 }
 
-// sanitizeVersion strips a leading "v" (git describe style) and enforces
-// the Debian version charset: must start with a digit.
-var verRe = regexp.MustCompile(`^[0-9][0-9A-Za-z.+~_-]*$`)
+// sanitizeVersion maps a git-describe version onto a valid Debian native
+// version: strips the leading "v", rewrites the off-tag suffix
+// ("-14-g1a2b3c" → "+14.g1a2b3c", "-dirty" → "+dirty" — a native
+// version must not contain '-', which dpkg would read as an
+// upstream/revision split), then rejects anything still outside the
+// Debian charset (must start with a digit; no ':' epoch, no spaces, no
+// leftover hyphens).
+var (
+	verRe  = regexp.MustCompile(`^[0-9][0-9A-Za-z.+~_]*$`)
+	offTag = regexp.MustCompile(`-(\d+)-g([0-9A-Fa-f]+)`)
+)
 
 func sanitizeVersion(v string) (string, error) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	v = offTag.ReplaceAllString(v, "+$1.g$2")
+	v = strings.ReplaceAll(v, "-dirty", "+dirty")
 	if !verRe.MatchString(v) {
-		return "", fmt.Errorf("invalid Debian version %q (must start with a digit)", v)
+		return "", fmt.Errorf("invalid Debian version %q (must start with a digit; no '-' after describe mapping)", v)
 	}
 	return v, nil
 }
