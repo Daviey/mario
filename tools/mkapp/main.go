@@ -227,13 +227,21 @@ func assemble(appDir string, fat []byte, version string) error {
 		if err := os.WriteFile(f.path, f.data, f.mode); err != nil {
 			return err
 		}
+		// Chmod explicitly: WriteFile's mode argument is masked by
+		// the process umask (077 on the CI runner), which would strip
+		// the exec bit from Contents/MacOS/mario and leak 0600 files
+		// into the archive.
+		if err := os.Chmod(f.path, f.mode); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // zipDir walks dir deterministically (sorted, filepath separators → /)
-// and writes every regular file with the fixed epoch timestamp,
-// preserving the mode bits.
+// and writes every regular file with the fixed epoch timestamp and a
+// normalized mode — 0755 for executables, 0644 for everything else —
+// so the archive never mirrors the build host's umask.
 func zipDir(dir string, zw *zip.Writer) error {
 	var files []struct {
 		path string
@@ -263,7 +271,11 @@ func zipDir(dir string, zw *zip.Writer) error {
 			return err
 		}
 		hdr := &zip.FileHeader{Name: filepath.ToSlash(rel), Modified: zipEpoch}
-		hdr.SetMode(f.mode)
+		mode := fs.FileMode(0o644)
+		if f.mode&0o111 != 0 {
+			mode = 0o755
+		}
+		hdr.SetMode(mode)
 		w, err := zw.CreateHeader(hdr)
 		if err != nil {
 			return err

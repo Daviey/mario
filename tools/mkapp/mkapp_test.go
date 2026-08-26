@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"image/png"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -293,5 +295,45 @@ func TestAppZipDeterministic(t *testing.T) {
 	}
 	for name := range want {
 		t.Errorf("missing zip entry %q", name)
+	}
+}
+
+// TestZipDirNormalizesModes pins the archive's umask-independence: the
+// runner builds with umask 077, and mirroring staged perms leaked 0600
+// plists and 0700 binaries into the zip. Whatever the tree on disk
+// carries, entries are 0644 — 0755 for executables.
+func TestZipDirNormalizesModes(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, mode os.FileMode) {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o666); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("plain", 0o600)
+	write("exec", 0o700)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if err := zipDir(dir, zw); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range zr.File {
+		want := fs.FileMode(0o644)
+		if f.Name == "exec" {
+			want = 0o755
+		}
+		if got := f.Mode().Perm(); got != want {
+			t.Errorf("entry %q mode = %#o, want %#o", f.Name, got, want)
+		}
 	}
 }
