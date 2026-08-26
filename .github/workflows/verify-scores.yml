@@ -1,0 +1,27 @@
+name: verify-scores
+
+# Replay-verifies pending leaderboard submissions: every score carries the
+# run's input log; the deterministic engine must reproduce the exact score.
+# Keeps survivors, deletes the rest. The service key lives in the
+# SUPABASE_SERVICE_KEY secret (never in binaries or the client).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: [self-hosted, mario]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Verify pending scores
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: CGO_ENABLED=0 go run ./cmd/mario -verify-pending

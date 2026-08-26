@@ -16,7 +16,9 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-// gameOverGame returns a game at the game-over screen with a score.
+// testReplaySource stands in for the App's recorder in submit-flow tests.
+func testReplaySource() (string, bool) { return `{"v":1,"ticks":2,"runs":[[0,2]]}`, true }
+
 func gameOverGame(t *testing.T) *engine.Game {
 	t.Helper()
 	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
@@ -71,6 +73,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 			{Name: got.Name, Score: 999, Mine: true},
 		}, nil
 	})
+	ui.SetReplaySource(testReplaySource)
 
 	g := gameOverGame(t)
 	snap := tickUntil(t, ui, g, 2)
@@ -210,6 +213,7 @@ func TestEmptyNameUsesStoredDefault(t *testing.T) {
 		close(done)
 		return nil
 	}, nil)
+	ui.SetReplaySource(testReplaySource)
 	g := gameOverGame(t)
 	tickUntil(t, ui, g, 1)
 	ui.FeedKeys([]byte("y\r")) // accept prompt, enter with empty name
@@ -455,6 +459,7 @@ func TestSubmitCarriesLevel(t *testing.T) {
 		close(submitted)
 		return nil
 	}, nil)
+	ui.SetReplaySource(testReplaySource)
 	tickUntil(t, ui, g, 2)
 	ui.FeedKeys([]byte("y"))
 	tickUntil(t, ui, g, 1)

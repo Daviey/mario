@@ -44,11 +44,12 @@ func (m UIMode) MarshalJSON() ([]byte, error) {
 
 // ScoreRow is one leaderboard entry.
 type ScoreRow struct {
-	Rank  int    `json:"rank"`
-	Name  string `json:"name"`
-	Score int    `json:"score"`
-	Level int    `json:"level"` // 1-based level reached
-	Mine  bool   `json:"mine"`
+	Rank     int    `json:"rank"`
+	Name     string `json:"name"`
+	Score    int    `json:"score"`
+	Level    int    `json:"level"` // 1-based level reached
+	Mine     bool   `json:"mine"`
+	Verified bool   `json:"verified"` // replay-confirmed by the verifier
 }
 
 // ScoreUI is an immutable snapshot of the leaderboard UI state.
@@ -172,7 +173,11 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 		n := min(len(ui.Rows), boardMaxRows, max(0, lastRow-bodyY+1))
 		for i := range n {
 			r := ui.Rows[i]
-			s.Center(bodyY+i, fmt.Sprintf("%2d  %-8s %6d  L%d", r.Rank, r.Name, r.Score, r.Level),
+			mark := " "
+			if r.Verified {
+				mark = "✓"
+			}
+			s.Center(bodyY+i, fmt.Sprintf("%2d %s %-8s %6d  L%d", r.Rank, mark, r.Name, r.Score, r.Level),
 				rowColor(r.Mine, p), bg, r.Mine)
 		}
 		if ui.Rank > 0 {

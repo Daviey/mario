@@ -45,8 +45,9 @@ type UI struct {
 	day     string
 	rank    int // post-submit rank in the fetched rows, 0 = unknown
 
-	submit func(e board.Entry) error
-	fetch  func() ([]board.Row, error)
+	replaySrc func() (string, bool) // the App's recording, for verification
+	submit    func(e board.Entry) error
+	fetch     func() ([]board.Row, error)
 }
 
 // NewUI wires the machine. Nil submit/fetch default to the real
@@ -75,6 +76,15 @@ func NewUI(submit func(board.Entry) error, fetch func() ([]board.Row, error)) *U
 		}
 	}
 	return u
+}
+
+// SetReplaySource wires in the App's input recorder; submissions carry the
+// recording so the server can verify the run. Without a shippable
+// recording the submit is refused client-side.
+func (u *UI) SetReplaySource(src func() (string, bool)) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.replaySrc = src
 }
 
 // capturing reports whether a UI screen currently owns the keyboard.
@@ -225,11 +235,12 @@ func boardRowsFor(rows []board.Row) []render.ScoreRow {
 	out := make([]render.ScoreRow, 0, len(rows))
 	for i, r := range rows {
 		out = append(out, render.ScoreRow{
-			Rank:  i + 1,
-			Name:  r.Name,
-			Score: r.Score,
-			Level: r.Level,
-			Mine:  r.Mine,
+			Rank:     i + 1,
+			Name:     r.Name,
+			Score:    r.Score,
+			Level:    r.Level,
+			Mine:     r.Mine,
+			Verified: r.Verified,
 		})
 	}
 	return out
@@ -354,13 +365,26 @@ func (u *UI) submitLocked() {
 		u.loading = false
 		return
 	}
+	var replayData string
+	if u.replaySrc != nil {
+		if d, ok := u.replaySrc(); ok && d != "" {
+			replayData = d
+		}
+	}
+	if replayData == "" {
+		// The server rejects replay-less rows; don't bother it.
+		u.status = "UNRECORDED"
+		u.loading = false
+		return
+	}
 	u.status = "SUBMITTING"
 	mode, day := "", ""
 	if u.daily {
 		mode, day = "daily", u.day
 	}
+	entry := board.Entry{Name: name, Score: score, Level: level, DeviceID: player.DeviceID, Mode: mode, Day: day, Replay: replayData}
 	go func() {
-		err := submit(board.Entry{Name: name, Score: score, Level: level, DeviceID: player.DeviceID, Mode: mode, Day: day})
+		err := submit(entry)
 		u.mu.Lock()
 		if err != nil {
 			u.status = "SUBMIT FAILED"

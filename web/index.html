@@ -90,6 +90,7 @@
   #board td.sc { text-align: right; }
   #board td.lv { text-align: right; color: #9fb6d9; }
   #board tr.mine td { color: #FFF3B0; font-weight: 700; }
+  #board .vfy { color: #80D010; font-weight: 700; }
   @keyframes ui-blink { 50% { opacity: 0; } }
   #board .blink { animation: ui-blink 1.2s steps(1) infinite; }
 
@@ -465,7 +466,8 @@
       else if (!st.rows || !st.rows.length) body = '<p>NO SCORES YET</p>';
       else body = '<table>' + st.rows.map((r) =>
         '<tr' + (r.mine ? ' class="mine"' : '') + '><td class="rk">' + escHtml(r.rank)
-        + '</td><td class="nm">' + escHtml(r.name) + '</td><td class="sc">' + escHtml(r.score)
+        + '</td><td class="nm">' + escHtml(r.name) + (r.verified ? ' <span class="vfy">✓</span>' : '')
+        + '</td><td class="sc">' + escHtml(r.score)
         + '</td><td class="lv">L' + escHtml(r.level || 1) + '</td></tr>').join('') + '</table>';
       const foot = st.status
         ? '<p class="gold">' + escHtml(st.status) + '</p>'
