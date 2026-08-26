@@ -458,8 +458,11 @@
   };
 
   // Keyboard -> terminal-style sequences the game's input mapper already
-  // parses. Press on keydown, kitty-style release on keyup: instant key
-  // release, crisp controls.
+  // parses. Every key — arrows AND letters — goes out as an explicit
+  // kitty-protocol press/release pair. A press is held until its release
+  // arrives; a bare letter byte would decay after the mapper's ~0.2s
+  // legacy silence window, so holding a key (or a pad button) has to be
+  // an explicit held press, not a text byte.
   const PRESS = {
     ArrowLeft: '\x1b[1;1:1D', ArrowRight: '\x1b[1;1:1C',
     ArrowUp: '\x1b[1;1:1A', ArrowDown: '\x1b[1;1:1B',
@@ -468,13 +471,14 @@
     ArrowLeft: '\x1b[1;1:3D', ArrowRight: '\x1b[1;1:3C',
     ArrowUp: '\x1b[1;1:3A', ArrowDown: '\x1b[1;1:3B',
   };
+  const kittyPress = (key) => '\x1b[' + key.charCodeAt(0) + ';1:1u';
   const release = (code, key) =>
     RELEASE[code] || '\x1b[' + key.charCodeAt(0) + ';1:3u';
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key === 'c') { window.marioFeed('\x03'); e.preventDefault(); return; }
-    if (e.repeat) return; // the mapper decays held keys; repeats unneeded
+    if (e.repeat) return; // a press stays held until its release; repeats unneeded
     const seq = PRESS[e.code]
-      || (e.key.length === 1 ? e.key : null)
+      || (e.key.length === 1 ? kittyPress(e.key) : null)
       || (e.key === 'Enter' ? '\r' : null)
       || (e.key === 'Escape' ? '\x1b' : null);
     if (seq) { window.marioFeed(seq); e.preventDefault(); }
@@ -488,7 +492,7 @@
   const padEl = document.getElementById('pad');
   padEl.innerHTML = `<div id="pad-game" style="display:contents">
     <div class="grp"><button class="pbtn" data-key="a">◀</button><button class="pbtn" data-key="s">▼</button><button class="pbtn" data-key="d">▶</button></div>
-    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="\\r">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button></div>
+    <div class="grp"><button class="pbtn mid-btn" data-tap="p">⏸</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">TOP</button></div>
     <div class="grp act-grp"><button class="pbtn act-btn" data-key="x">B</button><button class="pbtn act-btn" data-key="w">A</button></div>
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
@@ -511,7 +515,7 @@
     const k = b.dataset.key;
     if (k) {
       const up = () => { if (!b.classList.contains('held')) return; b.classList.remove('held'); if (window.marioFeed) window.marioFeed(release(k, k)); };
-      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (window.marioFeed) window.marioFeed(PRESS[k] || k); });
+      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (window.marioFeed) window.marioFeed(PRESS[k] || kittyPress(k)); });
       b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     }
     const t = b.dataset.tap;
