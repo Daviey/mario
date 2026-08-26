@@ -1,9 +1,10 @@
 // Command mkcpio packs the EFI boot's initramfs: a "newc" cpio archive
-// holding exactly one entry — the game's static init binary as /init.
+// with the game's static init binary as /init plus the two device nodes
+// PID 1 needs for stdio (/dev/console, /dev/null) — without them the
+// kernel gives init closed fds and early userspace panics die invisibly.
 // The kernel's EFI stub (embedded initramfs via CONFIG_INITRAMFS_SOURCE)
 // and the QEMU dev loop (-initrd) both consume this format. Pure stdlib,
-// like tools/mkdeb — no cpio(1) needed on the build host (the CI runner
-// has none).
+// like tools/mkdeb — no cpio(1) on the build host (the CI runner has none).
 //
 // Usage: mkcpio OUT.cpio INITBIN
 package main
@@ -32,8 +33,11 @@ func main() {
 // archive builds the complete initramfs for one init binary.
 func archive(init []byte) []byte {
 	var buf bytes.Buffer
-	writeEntry(&buf, "init", 0o100755, init)
-	writeEntry(&buf, "TRAILER!!!", 0, nil)
+	writeDir(&buf, "dev")
+	writeCharDev(&buf, "dev/console", 0o0600, 5, 1)
+	writeCharDev(&buf, "dev/null", 0o0666, 1, 3)
+	writeFile(&buf, "init", 0o755, init)
+	writeEntry(&buf, "TRAILER!!!", 0, 0, nil, 0, 0)
 	// Pad the archive to a 512-byte boundary (cpio(5) convention; the
 	// kernel tolerates any tail, external initrd consumers expect this).
 	if r := buf.Len() % 512; r != 0 {
@@ -42,10 +46,22 @@ func archive(init []byte) []byte {
 	return buf.Bytes()
 }
 
+func writeDir(buf *bytes.Buffer, name string) {
+	writeEntry(buf, name, 0o040755, 0, nil, 0, 0)
+}
+
+func writeCharDev(buf *bytes.Buffer, name string, perm uint64, major, minor uint64) {
+	writeEntry(buf, name, 0o020000|perm, 0, nil, major, minor)
+}
+
+func writeFile(buf *bytes.Buffer, name string, perm uint64, data []byte) {
+	writeEntry(buf, name, 0o100000|perm, uint64(len(data)), data, 0, 0)
+}
+
 // writeEntry appends one newc-format entry. Header: "070701" + 13
 // little-endian hex fields, then NUL-terminated name and file data, each
 // padded to a 4-byte boundary.
-func writeEntry(buf *bytes.Buffer, name string, mode uint64, data []byte) {
+func writeEntry(buf *bytes.Buffer, name string, mode, filesize uint64, data []byte, devMajor, devMinor uint64) {
 	fields := []uint64{
 		nextInode(), // c_ino
 		mode,        // c_mode (S_IFREG | perms)
@@ -53,11 +69,11 @@ func writeEntry(buf *bytes.Buffer, name string, mode uint64, data []byte) {
 		0,           // c_gid
 		1,           // c_nlink
 		0,           // c_mtime
-		uint64(len(data)),
+		filesize,
 		0,                     // c_devmajor
 		0,                     // c_devminor
-		0,                     // c_rdevmajor
-		0,                     // c_rdevminor
+		devMajor,              // c_rdevmajor (device nodes)
+		devMinor,              // c_rdevminor
 		uint64(len(name) + 1), // c_namesize (NUL included)
 		0,                     // c_check (always 0 for newc)
 	}
