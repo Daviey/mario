@@ -188,7 +188,7 @@
     G:['###','#..','#.#','#.#','###'], H:['#.#','#.#','###','#.#','#.#'],
     I:['###','.#.','.#.','.#.','###'], J:['..#','..#','..#','#.#','###'],
     K:['#.#','#.#','##.','#.#','#.#'], L:['#..','#..','#..','#..','###'],
-    M:['###','###','#.#','#.#','#.#'], N:['##.','#.#','#.#','#.#','#.#'],
+    M:['#.#','###','.#.','#.#','#.#'], N:['##.','#.#','#.#','#.#','#.#'],
     O:['###','#.#','#.#','#.#','###'], P:['###','#.#','###','#..','#..'],
     Q:['###','#.#','###','..#','..#'], R:['###','#.#','##.','#.#','#.#'],
     S:['###','#..','###','..#','###'], T:['###','.#.','.#.','.#.','.#.'],
@@ -222,6 +222,9 @@
     drawText(s, x + sc, y + sc, PC.dark, sc);
     drawText(s, x, y, c, sc);
   };
+  // Sky-level title lines draw without a shadow: it fills the letters'
+  // counters and wrecks legibility (see render drawTitlePx).
+  const centerText = (s, y, c, sc) => drawText(s, (160 - textW(s, sc)) / 2, y, c, sc);
 
   // Tiles — render/sprites.go draw*, 4px each, verbatim ports.
   const tileGround = (x, y, tx, ty, open) => {
@@ -308,8 +311,8 @@
     const bob = running && !RM && ((frame >> 3) & 1) ? 1 : 0;
     drawArt(sprMario, MARIO_X, 38 - bob, 2);
     // Title cascade, exactly like the in-game title screen.
-    centerShadow('MARIO', 2, PC.flag, 2);
-    centerShadow('SUPER CLI EDITION', 17, PC.white, 1);
+    centerText('MARIO', 2, PC.flag, 2);
+    centerText('SUPER CLI EDITION', 17, PC.white, 1);
   };
   const tick = () => {
     frame++;
