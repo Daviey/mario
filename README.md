@@ -69,6 +69,8 @@ skip the bundle and run the binary from Terminal: `Mario.app/Contents/MacOS/mari
 
 **Bare metal:** `make efi` produces a single-file UEFI executable that boots straight into the game — no OS required.
 
+**Legacy BIOS / USB:** `make iso` wraps the same payload in a BIOS-bootable hybrid ISO — `make iso-qemu` smoke-boots it headless.
+
 ### Controls
 
 | Key | Action |
@@ -121,8 +123,8 @@ leaderboard.
 * **One codebase, many targets.** `make release` cross-compiles 17 OS/arch
   pairs; `make web` produces the static PWA; `make apk` wraps it for Android;
   `make deb` / `make rpm` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
-  builds the bootable image. The Windows exe icon is rendered from the game's
-  own sprite data.
+  builds the bootable image, `make iso` its BIOS-bootable hybrid ISO. The
+  Windows exe icon is rendered from the game's own sprite data.
 * **Importable as a library.** The root package is a facade — `mario.New`,
   `Feed`, `Step`, `Run` — so you can embed the game as an easter egg in your
   own Go program.

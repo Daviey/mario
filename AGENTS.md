@@ -65,6 +65,7 @@ make run          # build + run
 make demo         # ./mario -demo (headless scripted run)
 make release      # cross-compile 17 OS/arch pairs (linux/darwin/freebsd/openbsd/netbsd/solaris/windows) → dist/
 make efi          # single-file UEFI bootable linux/amd64 image (mario.efi) via nix
+make iso          # BIOS-bootable hybrid ISO (mario.iso) of the same payload via nix (xorriso+ISOLINUX); make iso-qemu smoke-boots it
 make deb          # .deb packages for all five linux arches into dist/ via tools/mkdeb (no dpkg needed)
 make rpm          # .rpm packages (all five linux arches) into dist/ via tools/mkrpm (no rpm toolchain needed)
 make web          # GOOS=js GOARCH=wasm → dist/web/ (embeds Supabase URL/publishable key from env or .env)

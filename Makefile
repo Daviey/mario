@@ -41,7 +41,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf iso iso-qemu
 
 all: build
 
@@ -222,6 +222,52 @@ efi-qemu-ovmf: efi
 	   -drive if=pflash,format=raw,readonly=on,file=$$code \
 	   -drive if=pflash,format=raw,file=$(DIST)/OVMF_VARS.fd \
 	   -drive file=fat:rw:$(DIST)/esp,format=raw,if=ide,index=0,media=disk
+
+# BIOS-bootable ISO of the same payload: the nix-built EFI-stub bzImage +
+# the efi-initrd initramfs wrapped in ISOLINUX (El Torito) with an
+# isohybrid MBR, so legacy-BIOS machines and USB sticks boot it too —
+# make efi covers UEFI, this covers everything else. Toolchain via
+# ad-hoc nix (xorriso + syslinux), no flake change. SOURCE_DATE_EPOCH=0
+# plus epoch-0 mtimes keep the ISO byte-reproducible for identical
+# inputs (same rule as mkdeb/mkcpio).
+iso: efi-initrd
+	@command -v nix >/dev/null 2>&1 || { echo "make iso: nix is required (builds the kernel and the ISO toolchain)"; exit 1; }
+	nix build "$(EFI_FLAKE)#mario-efi" -o $(DIST)/mario-efi-kernel
+	@set -e; \
+	 syslinux=$$(nix build --no-link --print-out-paths 'nixpkgs#syslinux^out'); \
+	 xorriso=$$(nix build --no-link --print-out-paths 'nixpkgs#xorriso^out'); \
+	 rm -rf $(DIST)/iso && mkdir -p $(DIST)/iso/isolinux; \
+	 cp $(DIST)/mario-efi-kernel/bzImage $(EFI_INITRD) $(DIST)/iso/isolinux/; \
+	 cp $$syslinux/share/syslinux/isolinux.bin \
+	    $$syslinux/share/syslinux/ldlinux.c32 $(DIST)/iso/isolinux/; \
+	 printf '%s\n' 'DEFAULT linux' 'PROMPT 0' 'TIMEOUT 1' 'SERIAL 0 115200' \
+	   'LABEL linux' '  KERNEL bzImage' \
+	   '  APPEND initrd=init.cpio console=tty0 console=ttyS0 vga=791' \
+	   > $(DIST)/iso/isolinux/isolinux.cfg; \
+	 find $(DIST)/iso -exec touch -h -d @0 {} +; \
+	 SOURCE_DATE_EPOCH=0 $$xorriso/bin/xorriso -as mkisofs -quiet \
+	   -o $(DIST)/mario.iso -V MARIO -publisher mario -preparer mario \
+	   -c isolinux/boot.cat -b isolinux/isolinux.bin \
+	   -no-emul-boot -boot-load-size 4 -boot-info-table \
+	   -isohybrid-mbr $$syslinux/share/syslinux/isohdpfx.bin \
+	   $(DIST)/iso; \
+	 rm -rf $(DIST)/iso; \
+	 echo "wrote $(DIST)/mario.iso — BIOS/USB bootable, or: make iso-qemu"
+
+# Smoke-boot dist/mario.iso headless through BIOS (SeaBIOS → ISOLINUX →
+# kernel), the ISO counterpart of make efi-qemu — same expected serial
+# evidence: kernel boot lines ending in "Run /init as init process",
+# then the game's init reaching userspace: "mario-efi: init starting
+# (pid 1)", "mario-efi: framebuffer 1024x768x16 ..." (vesafb via
+# vga=791 here, vs efifb on the OVMF path), and a "mario-efi: tick N
+# rendered" line per second. Nothing ever powers the VM off headless
+# (no keyboard input reaches the guest), so timeout(1) reaps it after
+# 60 s and 124 (killed) counts as success; quit early with Ctrl-A x.
+iso-qemu: iso
+	@command -v qemu-system-x86_64 >/dev/null 2>&1 || { echo "make iso-qemu: qemu-system-x86_64 not found"; exit 1; }
+	@rc=0; timeout 60 qemu-system-x86_64 -enable-kvm -m 512 -display none -vga std \
+	  -cdrom $(DIST)/mario.iso -serial stdio || rc=$$?; \
+	[ $$rc -eq 0 ] || [ $$rc -eq 124 ] || exit $$rc
 
 # Static browser build (GitHub Pages ready): the game itself compiled to
 # WASM, rendered client-side. All asset paths relative. The Supabase URL
