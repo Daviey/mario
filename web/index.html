@@ -171,6 +171,30 @@
   const sprBush  = ['.EGGE.','GGGGGG'];
   const artMap = { R:PC.mario, S:PC.skin, D:PC.dark, B:PC.overall,
                    W:PC.white, E:PC.pipeL, G:PC.pipeM };
+  // Favicon + iOS home-screen icon, drawn from this same art at boot —
+  // no binary asset to keep in sync, CSP-safe (img-src data:). 32 px
+  // halves cleanly onto 16 px tabs.
+  const setIcon = (rel, size) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ig = c.getContext('2d');
+    ig.fillStyle = PC.sky;
+    ig.fillRect(0, 0, size, size);
+    const s = Math.floor(size / 6); // sprite is 5 px wide → ~83% coverage
+    const ox = (size - 5*s) >> 1, oy = (size - 5*s) >> 1;
+    for (let r = 0; r < sprMario.length; r++)
+      for (let col = 0; col < sprMario[r].length; col++) {
+        const paint = artMap[sprMario[r][col]];
+        if (!paint) continue;
+        ig.fillStyle = paint;
+        ig.fillRect(ox + col*s, oy + r*s, s, s);
+      }
+    let l = document.querySelector('link[rel="' + rel + '"]');
+    if (!l) { l = document.createElement('link'); l.rel = rel; document.head.appendChild(l); }
+    l.href = c.toDataURL('image/png');
+  };
+  setIcon('icon', 32);
+  setIcon('apple-touch-icon', 180);
   const px = (x, y, w, h, c) => { bc.fillStyle = c; bc.fillRect(x|0, y|0, w, h); };
   const drawArt = (art, x, y, sc) => {
     for (let r = 0; r < art.length; r++)
