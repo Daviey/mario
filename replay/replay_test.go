@@ -194,10 +194,46 @@ func TestDecodeRejects(t *testing.T) {
 		`{"v":1,"ticks":1,"runs":[[999999,1]]}`, // mask out of range
 		`{"v":1,"ticks":1,"runs":[[0,0]]}`,      // zero-length run
 		`{"v":1,"ticks":1,"runs":[[0,-3]]}`,     // negative run
+		// Bounds must be enforced BEFORE any allocation (audit fix: a
+		// hostile header once drove make()/expansion to OOM on the
+		// verifier). These cases must error cheaply.
+		`{"v":1,"ticks":4000000000,"runs":[[0,1]]}`,                                          // header ticks over cap
+		`{"v":1,"ticks":-1,"runs":[]}`,                                                       // negative ticks
+		`{"v":1,"ticks":1,"runs":[[0,4000000000]]}`,                                          // single run over cap
+		`{"v":1,"ticks":` + itoa(MaxTicks-1) + `,"runs":[[0,1],[0,` + itoa(MaxTicks) + `]]}`, // runs overflow cap mid-stream
+		// run count over cap (each run covers >=1 tick)
+		`{"v":1,"ticks":1,"runs":` + runsOverCap() + `}`,
 	}
 	for _, s := range bad {
 		if _, err := decode(s); err == nil {
 			t.Errorf("decode(%q) accepted a bad stream", s)
 		}
 	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}
+
+// runsOverCap builds a runs array with MaxTicks+1 entries (each [0,1]),
+// which must be rejected by the run-count bound before any expansion.
+func runsOverCap() string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := 0; i <= MaxTicks; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString("[0,1]")
+	}
+	b.WriteByte(']')
+	return b.String()
 }
