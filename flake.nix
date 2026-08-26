@@ -148,6 +148,16 @@
             packages = [ androidSdk pkgs.openjdk17_headless ];
             ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
           };
+
+          # nix develop .#ios -c make ipa
+          # clang MUST be the unwrapped multi-target one: the nixpkgs
+          # cc-wrapper rewrites header search for its linux libc and
+          # breaks -isysroot framework lookup for apple triples (the
+          # wrapped build cannot even find Foundation/Foundation.h).
+          # lld provides ld64.lld (Mach-O), ldid the ad-hoc signature.
+          ios = pkgs.mkShell {
+            packages = [ pkgs.llvmPackages.clang-unwrapped pkgs.llvmPackages.lld pkgs.ldid ];
+          };
         });
     };
 }

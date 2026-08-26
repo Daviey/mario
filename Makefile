@@ -6,6 +6,7 @@
 #   make race       unit tests under the race detector
 #   make cover      coverage summary per package
 #   make apk        Android APK (WebView shell around the web build)
+#   make ipa        unsigned iOS .ipa (WKWebView shell; Linux clang+lld build)
 #   make vet / fmt / fmtcheck / clean / run / demo
 
 BINARY    := mario
@@ -26,7 +27,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb apk ipa $(TARGETS) deb/amd64 deb/arm64 efi efi-initrd efi-qemu efi-qemu-ovmf
 
 all: build
 
@@ -201,6 +202,19 @@ apk: web
 
 # CI pre-release gate, in fail-fast order: formatting, vet, then tests.
 check: fmtcheck vet test
+
+# Unsigned iOS .ipa — the WKWebView shell in packaging/ios compiled on
+# plain Linux: clang -target arm64-apple-ios + lld against an iPhoneOS
+# SDK (.tbd link stubs, no Apple binaries needed), ad-hoc signed with
+# ldid, bundled around the web build by tools/mkipa. The SDK is not in
+# the repo (Apple licenses it for Apple hardware); point IOS_SDK at an
+# extracted one — see packaging/ios/README.md. Sideload the result via
+# Sideloadly/AltStore, which re-sign with your own Apple ID.
+IOS_SDK ?= $(HOME)/dev/ios-sdks/sdks/iPhoneOS16.5.sdk
+ipa: web
+	@mkdir -p $(DIST)
+	$(GOFLAGS) go run ./tools/mkipa -version $(VERSION) -web $(WEBDIST) -sdk $(IOS_SDK) \
+		-out $(DIST)/$(BINARY)_$(PKGVERSION)_ios_unsigned.ipa
 
 test:
 	$(GOFLAGS) go test ./...

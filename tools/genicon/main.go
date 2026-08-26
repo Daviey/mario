@@ -65,6 +65,7 @@ func main() {
 		{"icon-192.png", 192, 32},          // 160 px art, ~83%
 		{"icon-512.png", 512, 85},          // 425 px art, ~83%
 		{"icon-maskable-512.png", 512, 61}, // 305 px art, ~60% safe zone
+		{"apple-touch-icon.png", 180, 30},  // 150 px art, ~83%; iOS home screen
 	} {
 		p := filepath.Join(dir, ic.name)
 		if err := write(p, art.Icon(ic.size, ic.cell)); err != nil {
