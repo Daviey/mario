@@ -54,6 +54,7 @@ const (
 	fbiogetVScreeninfo = 0x4600
 	fbiogetFScreeninfo = 0x4602
 )
+
 // framebuffer is one open, mapped fbdev device plus the computed blit
 // geometry (integer scale, letterbox origin).
 type framebuffer struct {
