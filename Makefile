@@ -90,8 +90,10 @@ vet:
 fmt:
 	gofmt -w .
 
+# Tracked files only — mirrors what CI checks out, and stops the gate
+# breaking when a nested .worktrees/ checkout holds WIP sources.
 fmtcheck:
-	@out=$$(gofmt -l .); [ -z "$$out" ] || (echo "gofmt needed:"; echo "$$out"; exit 1)
+	@out=$$(git ls-files -- '*.go' | xargs gofmt -l); [ -z "$$out" ] || (echo "gofmt needed:"; echo "$$out"; exit 1)
 
 run: build
 	./$(BINARY)
