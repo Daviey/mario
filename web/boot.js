@@ -696,9 +696,12 @@
     const p = padPref();
     if (p === 'on') enableTouch();
     else if (p === 'off') disableTouch();
-    // auto: pointer-class gated — the pad appears only on devices with
-    // no fine pointer at all (phones, keyboard-less tablets).
-    else if (!matchMedia('(any-pointer: fine)').matches) enableTouch();
+    // auto: pointer-class gated. Some devices misjudge (Android WebView
+    // and several Samsung phones report a fine pointer alongside their
+    // touchscreen) — a coarse pointer with real touch points is a phone,
+    // so let that combination win over the fine-pointer veto.
+    else if (!matchMedia('(any-pointer: fine)').matches
+        || (matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints > 0)) enableTouch();
     else disableTouch();
   };
   applyPad();
