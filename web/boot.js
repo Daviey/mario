@@ -506,8 +506,8 @@
   // Touch controls
   const padEl = document.getElementById('pad');
   padEl.innerHTML = `<div id="pad-game" style="display:contents">
-    <div class="grp dpad"><button class="pbtn b-left" data-key="a" aria-label="left">◀</button><button class="pbtn b-down" data-key="s" aria-label="duck">▼</button><button class="pbtn b-right" data-key="d" aria-label="right">▶</button></div>
-    <div class="grp mid-grp"><button class="pbtn mid-btn" data-tap="p" aria-label="pause">⏸</button><button class="pbtn mid-btn" data-tap="k" aria-label="give up (die)">☠</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">SCORES</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
+    <div class="grp stick-grp"><div id="stick" class="stick" aria-label="move: tilt to run, pull down to duck"><div class="stick-knob"></div></div></div>
+    <div class="grp mid-grp"><button class="pbtn mid-btn" data-tap="p" aria-label="pause" style="letter-spacing:.2em">II</button><button class="pbtn mid-btn" data-tap="k" aria-label="give up (die)">☠</button><button class="pbtn mid-btn" data-tap="&#13;">START</button><button class="pbtn mid-btn" data-tap="l">SCORES</button><button class="pbtn mid-btn" id="arrange-btn" aria-label="move controls: drag them, then tap again to lock">&#10022;</button><button class="pbtn mid-btn" id="daily-btn" data-tap="d" hidden>DAILY</button></div>
     <div class="grp act-grp"><button class="pbtn act-btn b-btn" data-key="x" aria-label="run and fire">B</button><button class="pbtn act-btn a-btn" data-key="w" aria-label="jump">A</button></div>
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
@@ -516,7 +516,7 @@
   const padViews = { game: document.getElementById('pad-game'), ask: document.getElementById('pad-ask'), board: document.getElementById('pad-board'), entry: document.getElementById('pad-entry') };
   window.setPadMode = (m) => {
     padEl.className = m === 'entry' ? 'keypad' : m;
-    for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' || m === 'entry' ? 'contents' : 'flex') : 'none';
+    for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' ? 'contents' : m === 'entry' ? '' : 'flex') : 'none';
   };
   
   const kbd = 'QWERTYUIOPASDFGHJKLZXCVBNM1234567890.-'.split('');
@@ -525,18 +525,152 @@
   const ok = document.createElement('button'); ok.className = 'pbtn ok'; ok.textContent = 'OK'; ok.dataset.tap = '\r'; padViews.entry.appendChild(ok);
   const esc = document.createElement('button'); esc.className = 'pbtn'; esc.textContent = 'ESC'; esc.dataset.tap = '\x1b'; padViews.entry.appendChild(esc);
 
+  const arranging = () => padEl.classList.contains('arrange');
+
   const bindPad = (b) => {
     b.addEventListener('contextmenu', e => e.preventDefault());
     const k = b.dataset.key;
     if (k) {
       const up = () => { if (!b.classList.contains('held')) return; b.classList.remove('held'); if (window.marioFeed) window.marioFeed(release(k, k)); };
-      b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(PRESS[k] || kittyPress(k)); });
+      b.addEventListener('pointerdown', e => { e.preventDefault(); if (arranging()) return; b.setPointerCapture?.(e.pointerId); b.classList.add('held'); if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(PRESS[k] || kittyPress(k)); });
       b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
     }
     const t = b.dataset.tap;
-    if (t) b.addEventListener('pointerdown', e => { e.preventDefault(); if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(t); b.classList.add('held'); setTimeout(()=>b.classList.remove('held'), 80); });
+    if (t) b.addEventListener('pointerdown', e => { e.preventDefault(); if (arranging()) return; if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(t); b.classList.add('held'); setTimeout(()=>b.classList.remove('held'), 80); });
   };
   padEl.querySelectorAll('.pbtn').forEach(bindPad);
+
+  // Virtual joystick: tilt left/right to run, pull down to duck.
+  // Directions latch as held kitty presses with edge transitions only —
+  // exactly the press/release semantics the d-pad buttons had.
+  const stick = document.getElementById('stick');
+  const knob = stick.querySelector('.stick-knob');
+  const DIRKEY = { left: 'a', right: 'd', down: 's' };
+  let heldDirs = new Set();
+  const setDirs = (next) => {
+    for (const d of heldDirs) if (!next.has(d) && window.marioFeed) window.marioFeed(release(DIRKEY[d], DIRKEY[d]));
+    for (const d of next) if (!heldDirs.has(d)) { if (navigator.vibrate) navigator.vibrate(4); if (window.marioFeed) window.marioFeed(kittyPress(DIRKEY[d])); }
+    heldDirs = next;
+  };
+  const dirsFor = (dx, dy) => {
+    const s = new Set();
+    if (dx < -0.30) s.add('left'); else if (dx > 0.30) s.add('right');
+    if (dy > 0.45) s.add('down');
+    return s;
+  };
+  stick.addEventListener('contextmenu', e => e.preventDefault());
+  stick.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (arranging()) return;
+    stick.setPointerCapture?.(e.pointerId);
+    stick.classList.add('active');
+    const rect = stick.getBoundingClientRect();
+    const r = stick.clientWidth / 2 - 10;
+    const move = (ev) => {
+      let dx = (ev.clientX - (rect.left + rect.width / 2)) / r;
+      let dy = (ev.clientY - (rect.top + rect.height / 2)) / r;
+      const m = Math.hypot(dx, dy);
+      if (m > 1) { dx /= m; dy /= m; }
+      knob.style.transform = 'translate(' + (dx * r) + 'px,' + (dy * r) + 'px)';
+      setDirs(dirsFor(dx, dy));
+    };
+    move(e);
+    const up = () => {
+      stick.removeEventListener('pointermove', move);
+      setDirs(new Set());
+      knob.style.transform = '';
+      stick.classList.remove('active');
+    };
+    stick.addEventListener('pointermove', move);
+    stick.addEventListener('pointerup', up, { once: true });
+    stick.addEventListener('pointercancel', up, { once: true });
+    stick.addEventListener('lostpointercapture', up, { once: true });
+  });
+
+  // ---- control layout: drag controls in arrange mode (the &#10022; pill);
+  // positions persist as viewport fractions so rotation and device
+  // changes keep them under the same thumbs. ----
+  const draggables = [
+    ['stick', document.getElementById('stick')],
+    ['act', document.querySelector('#pad .act-grp')],
+    ['mid', document.querySelector('#pad .mid-grp')],
+  ];
+  const layoutKey = 'mario.pad.layout';
+  const loadLayout = () => { try { return JSON.parse(localStorage.getItem(layoutKey)) || {}; } catch { return {}; } };
+  const applyLayout = () => {
+    const saved = loadLayout();
+    for (const [name, el] of draggables) {
+      const pos = saved[name];
+      if (!pos) continue;
+      const r = el.getBoundingClientRect();
+      const x = Math.max(0, Math.min(pos[0] * (innerWidth - r.width), innerWidth - r.width));
+      const y = Math.max(0, Math.min(pos[1] * (innerHeight - r.height), innerHeight - r.height));
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+      el.style.transform = 'none';
+      el.style.marginTop = '0';
+    }
+  };
+  const saveLayout = () => {
+    const saved = loadLayout();
+    for (const [name, el] of draggables) {
+      const r = el.getBoundingClientRect();
+      // offsetLeft/Top are transform-free; a default-positioned mid row
+      // still carries translateX(-50%), so derive from the rect and undo
+      // the known translate instead of reading offsetLeft mid-transform.
+      const tx = el.style.transform === '' || el.style.transform === 'none' ? 0 : r.width / 2;
+      const x = r.x + tx, y = r.y;
+      saved[name] = [
+        r.width < innerWidth ? x / (innerWidth - r.width) : 0,
+        r.height < innerHeight ? y / (innerHeight - r.height) : 0,
+      ];
+    }
+    try { localStorage.setItem(layoutKey, JSON.stringify(saved)); } catch {}
+  };
+  const arrangeBtn = document.getElementById('arrange-btn');
+  const bindArrangeDrag = (el) => {
+    el.addEventListener('pointerdown', (e) => {
+      if (!arranging()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.setPointerCapture?.(e.pointerId);
+      el.classList.add('held');
+      const start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop };
+      const move = (ev) => {
+        const w = el.offsetWidth, h = el.offsetHeight;
+        el.style.left = Math.max(0, Math.min(start.l + ev.clientX - start.x, innerWidth - w)) + 'px';
+        el.style.top = Math.max(0, Math.min(start.t + ev.clientY - start.y, innerHeight - h)) + 'px';
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+        el.style.transform = 'none';
+        el.style.marginTop = '0';
+      };
+      const up = () => {
+        el.removeEventListener('pointermove', move);
+        el.classList.remove('held');
+        if (navigator.vibrate) navigator.vibrate(10);
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up, { once: true });
+      el.addEventListener('pointercancel', up, { once: true });
+    });
+  };
+  for (const [, el] of draggables) bindArrangeDrag(el);
+  arrangeBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const on = !padEl.classList.contains('arrange');
+    padEl.classList.toggle('arrange', on);
+    arrangeBtn.classList.toggle('arranging', on);
+    arrangeBtn.classList.add('held');
+    setTimeout(() => arrangeBtn.classList.remove('held'), 120);
+    if (!on) saveLayout();
+    if (navigator.vibrate) navigator.vibrate(on ? 12 : 20);
+  });
+  applyLayout();
+  addEventListener('resize', applyLayout);
 
   // Pad visibility: auto by default (pointer media queries), or the
   // user's explicit persisted choice — the queries alone misjudge some

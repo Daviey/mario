@@ -205,7 +205,7 @@ apk: web
 	$(AAPT2) compile --dir $(DIST)/apk/res -o $(DIST)/apk/res.zip
 	$(AAPT2) link -o $(DIST)/apk/base.apk -I $(ANDROID_JAR) \
 		--manifest packaging/android/AndroidManifest.xml \
-		--min-sdk-version 26 --target-sdk-version 35 \
+		--min-sdk-version 26 --target-sdk-version 35 $(if $(APK_DEBUG),--debug-mode,) \
 		--version-code $(VCODE) --version-name $(VERSION) \
 		-A $(WEBDIST) $(DIST)/apk/res.zip
 	javac -source 1.8 -target 1.8 -Xlint:-options -bootclasspath $(ANDROID_JAR) \
