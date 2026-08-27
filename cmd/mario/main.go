@@ -14,7 +14,8 @@
 //	-scores N     print the top N leaderboard scores and exit
 //	-daily        with -scores: the daily board; alone: play today's challenge
 //	-ui-preview M render a leaderboard UI screen headless (ask|entry|board|title-board)
-//	-verify-pending service tool: replay-verify pending scores (needs the service key)
+//	-serve ADDR    run an unauthenticated SSH game server on ADDR (e.g. :2222)
+//	-hostkey PATH  with -serve: persist the host key at PATH (created if missing)
 //
 // Scores can be submitted to a Supabase-backed leaderboard after game over;
 // every submission carries the run's input recording — a GitHub Action
@@ -60,6 +61,8 @@ func main() {
 	daily := flag.Bool("daily", false, "play today's daily challenge (or with -scores, print the daily board)")
 	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (`MODE`: ask, entry, board, title-board)")
 	verifyPending := flag.Bool("verify-pending", false, "verify pending replay-backed scores (service key) and exit")
+	serveAddr := flag.String("serve", "", "run an unauthenticated SSH game server on `ADDR` (e.g. :2222) instead of playing")
+	hostKeyPath := flag.String("hostkey", "", "with -serve: persist the SSH host key at `PATH` (created if missing)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -110,6 +113,16 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
+	}
+
+	if *serveAddr != "" {
+		// Truecolor is the default over SSH — the operator cannot know
+		// every client's terminal; -basic forces the 16-color palette.
+		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic); err != nil {
+			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if *demo {

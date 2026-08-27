@@ -49,6 +49,11 @@ type Options struct {
 	// player presses 'd' on the title screen). nil defaults to today's
 	// generated level.
 	DailyLevel func() *engine.Level
+
+	// Session is an independent player identity for hosts that run many
+	// Apps in one process (the SSH server gives each connection one).
+	// nil keeps the process-wide identity (the native terminal path).
+	Session *persist.Session
 }
 
 // App is one wired-up game session: engine, input routing and leaderboard
@@ -61,15 +66,15 @@ type App struct {
 	ui     *render.ScoreUI // latest leaderboard snapshot (nil when off)
 	quit   bool
 
-	dailyLevel func() *engine.Level
-	idle       int // ticks idle on the title screen (attract mode)
-	demoT      int // attract-demo script tick
-	bestSaved  int // score already persisted this session
-
+	dailyLevel   func() *engine.Level
+	idle         int             // ticks idle on the title screen (attract mode)
+	demoT        int             // attract-demo script tick
+	bestSaved    int             // score already persisted this session
 	rec          replay.Recorder // this run's input log (leaderboard proof)
 	prevState    engine.State    // state before the last Update
 	levelsTrust  bool            // built-in level set: runs are verifiable
 	dailyTrusted bool            // default daily generator: daily runs verifiable
+	saveBest     func(score int) // records the session best (persist or per-connection)
 }
 
 // New builds an App from opts and draws nothing yet.
@@ -116,7 +121,9 @@ func New(opts *Options) *App {
 	}
 
 	g := engine.NewGame(levels, viewW, viewH)
-	if pc, err := persist.LoadPlayer(); err == nil {
+	if opts.Session != nil {
+		g.Best = opts.Session.Player().Best
+	} else if pc, err := persist.LoadPlayer(); err == nil {
 		g.Best = pc.Best
 	}
 	app := &App{
@@ -126,8 +133,16 @@ func New(opts *Options) *App {
 		dailyLevel:   daily,
 		levelsTrust:  len(opts.Levels) == 0,
 		dailyTrusted: opts.DailyLevel == nil,
+		saveBest:     persist.SaveBest,
 	}
 	mach := ui.NewUI(nil, nil)
+	if opts.Session != nil {
+		// One player identity per connection: submissions, name entry and
+		// best-score bookkeeping all read the session, never the process
+		// cache (which is neither per-player nor goroutine-safe).
+		mach.SetIdentity(opts.Session.Player, opts.Session.SaveName)
+		app.saveBest = opts.Session.SaveBest
+	}
 	mach.SetReplaySource(func() (string, bool) {
 		if !app.rec.Shippable() {
 			return "", false
@@ -219,7 +234,7 @@ func (a *App) Step() {
 	if (g.State == engine.StateGameOver || g.State == engine.StateWin) &&
 		g.Score > a.bestSaved && g.Score > 0 {
 		a.bestSaved = g.Score
-		go persist.SaveBest(g.Score)
+		go a.saveBest(g.Score)
 	}
 }
 
