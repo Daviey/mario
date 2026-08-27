@@ -92,6 +92,10 @@ jobs:
             dist/*.deb
             dist/mario_*_*.rpm
           if-no-files-found: error
+          # 1-day retention: the release job consumes these within
+          # minutes of upload; the 90-day default exhausted the
+          # private-repo artifact storage quota (2026-08-27, v0.4.0).
+          retention-days: 1
 
   web:
     needs: test
@@ -111,6 +115,7 @@ jobs:
         with:
           name: web-dist
           path: dist/web
+          retention-days: 1
 
   # Android APK: the WASM build wrapped in a thin WebView shell
   # (packaging/android). The Android SDK + JDK come from the repo flake
@@ -142,6 +147,7 @@ jobs:
           name: mario-android
           path: dist/mario_*_android.apk
           if-no-files-found: error
+          retention-days: 1
 
   # iOS IPA: the same WASM build wrapped in a WKWebView shell, built
   # entirely on this Linux runner — clang (arm64-apple-ios) + lld +
@@ -170,6 +176,7 @@ jobs:
           name: mario-ios
           path: dist/mario_*_ios_unsigned.ipa
           if-no-files-found: error
+          retention-days: 1
 
   # macOS .app: tools/mkapp glues the two darwin cross-builds into one
   # universal (fat) Mach-O, renders the icns icon set and packs
@@ -194,12 +201,14 @@ jobs:
           name: mario-darwin-universal
           path: dist/mario-darwin-universal
           if-no-files-found: error
+          retention-days: 1
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7
         with:
           name: mario-macos-app
           path: dist/mario_*_macos.app.zip
           if-no-files-found: error
+          retention-days: 1
 
   # Linux AppImage (amd64): the static binary + desktop entry + icon in
   # an AppImageKit-wrapped squashfs. appimagetool is gone from nixpkgs,
@@ -233,6 +242,7 @@ jobs:
           name: mario-appimage
           path: dist/mario_*_amd64.AppImage
           if-no-files-found: error
+          retention-days: 1
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
