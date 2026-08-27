@@ -4,6 +4,7 @@ mario \- terminal Mario-style platformer with an online leaderboard
 .SH SYNOPSIS
 .B mario
 .RI [ options ]
+
 .SH DESCRIPTION
 .B mario
 is a Super Mario Bros.-style platformer that renders as square half-block
@@ -51,13 +52,14 @@ Render a leaderboard UI screen headless and exit
 Run an unauthenticated SSH game server on
 .I ADDR
 (e.g.
-.BR :2222 )
+.BR :1985 )
 instead of playing locally: anyone can connect with
-.B "ssh \-t anyuser@host \-p 2222"
-and play. The server implements the SSH transport, curve25519 key
-exchange and session channels itself (stdlib only); there is no shell,
-exec or forwarding \[em] the game is the only service. Each connection
-gets its own player identity for the leaderboard.
+.B "ssh \-t anyuser@host \-p 1985"
+and play. 1985 is the year Super Mario Bros. shipped. The server implements
+the SSH transport, curve25519 key exchange and session channels itself
+(stdlib only); there is no shell, exec or forwarding \[em] the game is the
+only service. Each connection gets its own player identity for the
+leaderboard.
 .TP
 .BI \-hostkey\ PATH
 With

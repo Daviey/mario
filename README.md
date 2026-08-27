@@ -81,11 +81,13 @@ or just play the web build, which is the same game.
 
 **Legacy BIOS / USB:** `make iso` wraps the same payload in a BIOS-bootable hybrid ISO — `make iso-qemu` smoke-boots it headless.
 
-**Over SSH:** `mario -serve :2222` turns any machine into an arcade — players connect with `ssh -t anyuser@yourhost -p 2222`, no
-account, no client install. The server speaks the whole SSH protocol from the standard library (curve25519 key exchange,
-ed25519 host key, AES-CTR + HMAC) and offers exactly one service: the game. No shell, no exec, no forwarding — every
-connection gets its own game, leaderboard identity and replay-verified scores. `-hostkey /path` pins the host key across
-restarts; `-basic` falls back to 16-color output.
+**Over SSH:** `mario -serve :1985` turns any machine into an arcade — players connect with `ssh -t anyuser@yourhost -p 1985`, no
+account, no client install. 1985 — the year Super Mario Bros. shipped. The server speaks the whole SSH protocol from the
+standard library (curve25519 key exchange, ed25519 host key, AES-CTR + HMAC) and offers exactly one service: the game. No
+shell, no exec, no forwarding — every connection gets its own game, leaderboard identity and replay-verified scores.
+`-hostkey /path` pins the host key across restarts; `-basic` falls back to 16-color output.
+
+Play it right now: `ssh -t mario@mario.daviey.com` (port 22) or `ssh -t mario@mario.daviey.com -p 1985` — IPv6.
 
 ### Controls
 
