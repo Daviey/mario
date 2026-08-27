@@ -1,0 +1,30 @@
+name: debug-appimage
+on: workflow_dispatch
+jobs:
+  debug:
+    runs-on: [self-hosted, mario]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+      - name: Reproduce bwrap failure under strace
+        run: |
+          set +e
+          nix shell nixpkgs#strace -c \
+            strace -f -o /tmp/trace.log -e trace=clone,clone3,unshare,setns,mount,umount2,personality,prctl \
+            make appimage VERSION=debug
+          echo "make exit=$?"
+          echo '=== EPERM lines ==='
+          grep -n EPERM /tmp/trace.log | head -30 || echo none
+          echo '=== last bwrap-related lines ==='
+          grep -n -E 'bwrap' /tmp/trace.log | tail -5 || true
+          echo '=== tail 60 ==='
+          tail -60 /tmp/trace.log
+      - name: systemd-run probe inside job context
+        run: |
+          set +e
+          bw=$(find /nix/store -maxdepth 3 -path '*bubblewrap*/bin/bwrap' -type f | head -1)
+          echo "bwrap=$bw"
+          echo "unshare test:"; unshare -Ur /run/current-system/sw/bin/true; echo "  exit=$?"
+          echo "bwrap basic:"; $bw --ro-bind / / /run/current-system/sw/bin/true; echo "  exit=$?"
+          echo "bwrap appimage-shape:"; $bw --dev-bind /dev /dev --proc /proc --chdir / --die-with-parent --bind /nix /nix --tmpfs /etc --ro-bind /etc/hosts /etc/hosts /run/current-system/sw/bin/true; echo "  exit=$?"
+          echo "id: $(id)"
+          echo "parent tree:"; cat /proc/self/cgroup; tr '\0' ' ' < /proc/1/cmdline; echo
