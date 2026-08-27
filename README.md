@@ -52,14 +52,14 @@ The same code compiles to a browser build (Go → WebAssembly, installable PWA w
 **Terminal** (Linux, macOS, Windows, the BSDs, Solaris/illumos; x86-64, arm64, riscv64, 32-bit arm/x86):
 
 ```sh
-git clone https://github.com/Daviey/mario && cd mario
-make run          # or: make build && ./mario
+go install github.com/Daviey/mario/cmd/mario@latest
 ```
 
-Or skip the clone and install the binary directly:
+Or build from source (needs Go 1.22+; no toolchain? Grab a prebuilt binary below):
 
 ```sh
-go install github.com/Daviey/mario/cmd/mario@latest
+git clone https://github.com/Daviey/mario && cd mario
+make run          # or: make build && ./mario
 ```
 
 Or grab a static binary, a `.deb`/`.rpm`, an AppImage, the Android APK, the macOS app or the web bundle from the
