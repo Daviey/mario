@@ -411,7 +411,7 @@ jobs:
             if [ -n "$PREV" ]; then
               echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$PREV...$TAG"
             fi
-            echo "Full notes: [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md)."
+            echo "Full notes: [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md)."
           } >> release-body.md
           gh release edit "$TAG" --notes-file release-body.md \
               --repo "$GITHUB_REPOSITORY"
