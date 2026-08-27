@@ -43,3 +43,12 @@ jobs:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
         run: make web
+
+      # Regression guard for the flakiest build surface: the appimage job
+      # needs CAP_SYS_ADMIN on the runner unit (see AGENTS.md) and `file`
+      # inside the appimage-run FHS env. Catches both classes on main/PRs
+      # instead of at tag time.
+      - name: AppImage build + smoke
+        run: |
+          make appimage VERSION=ci
+          nix shell nixpkgs#appimage-run -c appimage-run dist/mario_ci_amd64.AppImage -ui-preview board | grep -q LEADERBOARD

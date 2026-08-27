@@ -173,7 +173,7 @@ appimage: linux/amd64
 	ln -sf $(BINARY).png $(DIST)/appdir/.DirIcon
 	find $(DIST)/appdir -exec touch -h -d @0 {} +
 	@tool=$$(nix build --no-link --print-out-paths --expr 'builtins.fetchurl { url = "$(APPIMAGETOOL_URL)"; sha256 = "$(APPIMAGETOOL_SHA)"; }'); \
-		nix shell nixpkgs#appimage-run -c appimage-run "$$tool" $(DIST)/appdir $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.AppImage
+		nix shell nixpkgs#appimage-run nixpkgs#file -c appimage-run "$$tool" $(DIST)/appdir $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.AppImage
 	@echo "wrote $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.AppImage"
 
 # Single-file UEFI bootable: the static init binary (cmd/efi) packed as an
