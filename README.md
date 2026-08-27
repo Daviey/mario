@@ -81,6 +81,12 @@ or just play the web build, which is the same game.
 
 **Legacy BIOS / USB:** `make iso` wraps the same payload in a BIOS-bootable hybrid ISO — `make iso-qemu` smoke-boots it headless.
 
+**Over SSH:** `mario -serve :2222` turns any machine into an arcade — players connect with `ssh -t anyuser@yourhost -p 2222`, no
+account, no client install. The server speaks the whole SSH protocol from the standard library (curve25519 key exchange,
+ed25519 host key, AES-CTR + HMAC) and offers exactly one service: the game. No shell, no exec, no forwarding — every
+connection gets its own game, leaderboard identity and replay-verified scores. `-hostkey /path` pins the host key across
+restarts; `-basic` falls back to 16-color output.
+
 ### Controls
 
 | Key | Action |
@@ -135,6 +141,9 @@ leaderboard.
   `make deb` / `make rpm` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
   builds the bootable image, `make iso` its BIOS-bootable hybrid ISO. The
   Windows exe icon is rendered from the game's own sprite data.
+* **Its own SSH server.** `mario -serve` implements the transport, key
+  exchange, `none` auth and session channels from scratch — stdlib only —
+  so `ssh -t host` is a first-class way to play.
 * **Importable as a library.** The root package is a facade — `mario.New`,
   `Feed`, `Step`, `Run` — so you can embed the game as an easter egg in your
   own Go program.

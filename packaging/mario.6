@@ -47,6 +47,26 @@ print the daily board).
 Render a leaderboard UI screen headless and exit
 .RB ( ask ", " entry ", " board ", " title-board ).
 .TP
+.BI \-serve\ ADDR
+Run an unauthenticated SSH game server on
+.I ADDR
+(e.g.
+.BR :2222 )
+instead of playing locally: anyone can connect with
+.B "ssh \-t anyuser@host \-p 2222"
+and play. The server implements the SSH transport, curve25519 key
+exchange and session channels itself (stdlib only); there is no shell,
+exec or forwarding \[em] the game is the only service. Each connection
+gets its own player identity for the leaderboard.
+.TP
+.BI \-hostkey\ PATH
+With
+.BR \-serve :
+persist the host key at
+.I PATH
+(created on first use). Without it every launch generates a fresh key,
+so clients see a new host fingerprint each time.
+.TP
 .BR \-verify\-pending
 Service tool: replay-verify pending scores (requires the service key).
 .SH CONTROLS
@@ -68,6 +88,17 @@ After game over the game offers to submit your score to a Supabase-backed
 online board. Rows are replay-verified: an automated verifier re-executes
 each submission's recorded inputs and deletes rows that do not reproduce
 their claimed score. Verified rows show a check mark.
+.SH SSH SERVER
+.B "mario \-serve"
+accepts any username with the
+.B none
+authentication method and serves one game session per connection over a
+pty. Output is truecolor by default
+.RB ( \-basic
+for 16 colors); the viewport is sized from the client's pty. Keystrokes
+arrive as raw terminal bytes, so the kitty keyboard protocol and legacy
+key-repeat inference both work over SSH. Concurrent sessions are capped
+(default 16).
 .SH ENVIRONMENT
 .TP
 .B SUPABASE_URL ", " SUPABASE_KEY

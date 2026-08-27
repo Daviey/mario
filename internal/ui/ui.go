@@ -48,6 +48,12 @@ type UI struct {
 	replaySrc func() (string, bool) // the App's recording, for verification
 	submit    func(e board.Entry) error
 	fetch     func() ([]board.Row, error)
+
+	// loadIdentity/saveName override the process-wide player identity for
+	// multi-session hosts (the SSH server): one player identity per
+	// connection instead of one per process. Nil keeps the native path.
+	loadIdentity func() persist.PlayerConfig
+	saveName     func(string)
 }
 
 // NewUI wires the machine. Nil submit/fetch default to the real
@@ -62,10 +68,7 @@ func NewUI(submit func(board.Entry) error, fetch func() ([]board.Row, error)) *U
 				return client.Submit(ctx, e)
 			}
 			u.fetch = func() ([]board.Row, error) {
-				dev := ""
-				if pc, err := persist.LoadPlayer(); err == nil {
-					dev = pc.DeviceID
-				}
+				dev := u.identityLocked().DeviceID
 				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 				defer cancel()
 				if u.dailyMode() {
@@ -76,6 +79,15 @@ func NewUI(submit func(board.Entry) error, fetch func() ([]board.Row, error)) *U
 		}
 	}
 	return u
+}
+
+// SetIdentity routes the machine's player identity (and name persistence)
+// through the given functions. Multi-session hosts call it before the
+// first Tick; the native single-session path never does.
+func (u *UI) SetIdentity(load func() persist.PlayerConfig, saveName func(string)) {
+	u.mu.Lock()
+	u.loadIdentity, u.saveName = load, saveName
+	u.mu.Unlock()
 }
 
 // SetReplaySource wires in the App's input recorder; submissions carry the
@@ -258,7 +270,7 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
 			u.noted = nil
 			u.mode = render.UIBoard
-			u.player, _ = persist.LoadPlayer()
+			u.player = u.identityLocked()
 			if u.fetch == nil {
 				u.loading = false
 				u.status = "OFFLINE"
@@ -277,7 +289,7 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	if u.mode == render.UIOff && !u.asked &&
 		(g.State == engine.StateGameOver || g.State == engine.StateWin) && g.Score > 0 {
 		u.asked = true
-		u.player, _ = persist.LoadPlayer()
+		u.player = u.identityLocked()
 		u.score = g.Score
 		u.level = g.LevelIndex() + 1
 		u.daily = g.Daily
@@ -390,7 +402,11 @@ func (u *UI) submitLocked() {
 			u.status = "SUBMIT FAILED"
 		} else {
 			u.status = "SUBMITTED!"
-			player.SaveName(name)
+			if u.saveName != nil {
+				u.saveName(name)
+			} else {
+				player.SaveName(name)
+			}
 		}
 		u.mu.Unlock()
 		if fetch != nil {
@@ -443,4 +459,14 @@ func bytesContain(b []byte, c byte) bool {
 		}
 	}
 	return false
+}
+
+// identityLocked refreshes the cached player snapshot. Session hosts read
+// their per-connection identity; the native path reads the process cache.
+func (u *UI) identityLocked() persist.PlayerConfig {
+	if u.loadIdentity != nil {
+		return u.loadIdentity()
+	}
+	pc, _ := persist.LoadPlayer()
+	return pc
 }
