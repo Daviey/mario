@@ -41,7 +41,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf iso iso-qemu
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/arm deb/386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf iso iso-qemu
 
 all: build
 
@@ -85,17 +85,20 @@ deb/riscv64: linux/riscv64
 	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch riscv64 \
 		-bin $(DIST)/$(BINARY)-linux-riscv64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_riscv64.deb
 
-deb/armhf: linux/arm
+# Targets take the GOARCH name (matching the release.yml matrix's
+# `make deb/${{ matrix.goarch }}`); the Debian arch mapping (arm→armhf,
+# 386→i386) lives inside the recipe.
+deb/arm: linux/arm
 	@mkdir -p $(DIST)
 	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch armhf \
 		-bin $(DIST)/$(BINARY)-linux-arm -out $(DIST)/$(BINARY)_$(PKGVERSION)_armhf.deb
 
-deb/i386: linux/386
+deb/386: linux/386
 	@mkdir -p $(DIST)
 	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch i386 \
 		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.deb
 
-deb: deb/amd64 deb/arm64 deb/riscv64 deb/armhf deb/i386
+deb: deb/amd64 deb/arm64 deb/riscv64 deb/arm deb/386
 
 # RPM packages via the pure-Go packager (tools/mkrpm) — same contract as
 # mkdeb, no rpm toolchain on the build host. Installs /usr/bin/mario
@@ -347,7 +350,9 @@ KSFLAGS     := --ks $(KEYSTORE) --ks-key-alias mario --ks-pass pass:mario-apk --
 # Monotonic integer versionCode: vX.Y.Z tags map to X*1e8+Y*1e6+Z*1e4;
 # suffixed/dirty working-copy builds fall back to a date code (1yymmdd)
 # that stays under every tagged release with a nonzero minor version.
-VCODE := $(shell echo "$(PKGVERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' && echo "$(PKGVERSION)" | awk -F. '{print $$1*100000000 + $$2*1000000 + $$3*10000}' || echo 1$$(date +%y%m%d))
+# POSIX shell arithmetic only — no awk: this $(shell) evaluates on every
+# make parse, and the CI runner's bare PATH has no awk (nix shells do).
+VCODE := $(shell v="$(PKGVERSION)"; if echo "$$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then a=$${v%%.*}; r=$${v#*.}; b=$${r%%.*}; c=$${r#*.}; echo $$(( a*100000000 + b*1000000 + c*10000 )); else echo 1$$(date +%y%m%d); fi)
 
 apk: web
 	@if [ -z "$(AAPT2)" ] || [ -z "$(ANDROID_JAR)" ] || ! command -v javac >/dev/null 2>&1; then \
