@@ -331,7 +331,7 @@ jobs:
     continue-on-error: true
     steps:
       # Full history + tags: the notes span previous tag .. this tag.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677268 # v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
         with:
           fetch-depth: 0
 
