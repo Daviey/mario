@@ -6,7 +6,7 @@
 
 <p align="center">
   A complete Super Mario Bros–style platformer that runs <b>in your terminal</b> —<br />
-  and in the browser, on your phone, as a <code>.deb</code>/AUR/Nix package or AppImage, and bootable on bare metal via UEFI.
+  and in the browser, on your phone, as a <code>.deb</code>/<code>.rpm</code>/AUR/Nix package, AppImage or Android APK, and bootable on bare metal via UEFI.
 </p>
 
 <p align="center">
@@ -56,6 +56,12 @@ git clone https://github.com/Daviey/mario && cd mario
 make run          # or: make build && ./mario
 ```
 
+Or skip the clone and install the binary directly:
+
+```sh
+go install github.com/Daviey/mario/cmd/mario@latest
+```
+
 Or grab a static binary, a `.deb`/`.rpm`, an AppImage, the Android APK, the macOS app or the web bundle from the
 [latest release](https://github.com/Daviey/mario/releases/latest). AppImage: `chmod +x mario_*_amd64.AppImage && ./mario_*_amd64.AppImage`
 (on NixOS: `nix shell nixpkgs#appimage-run -c appimage-run mario_*_amd64.AppImage`).
@@ -64,6 +70,10 @@ Nix users: `nix build` from the flake in this repo; Arch users: `makepkg -p pack
 **macOS app:** grab `mario_<version>_macos.app.zip` from the release, unzip it, then
 right-click → **Open** the first time (Gatekeeper has to bless the unsigned binary) — or
 skip the bundle and run the binary from Terminal: `Mario.app/Contents/MacOS/mario`.
+
+**iOS:** grab `mario_<version>_ios_unsigned.ipa` from the release and sideload it with
+Sideloadly/AltStore (it re-signs with your Apple ID; free accounts expire every 7 days) —
+or just play the web build, which is the same game.
 
 **Browser:** play it at **[daviey.github.io/mario](https://daviey.github.io/mario/)** — no install, works offline once loaded, touch controls on phones.
 
