@@ -15,6 +15,12 @@
 # Manual dispatch = test/build/web/apk/ipa/appimage only; the release job is
 # tag-gated, so dispatches never publish anything.
 
+
+# The name is load-bearing: pages.yml triggers on
+# workflow_run: workflows: ['release'] — a nameless workflow reports its
+# path ("release.yml") to that filter and Pages never fires (regression
+# found 2026-08-27 when every v0.4.0 run silently skipped the deploy).
+name: release
 on:
   push:
     tags: ['v*']
