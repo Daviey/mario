@@ -184,14 +184,19 @@
     box-shadow: 0 0 0 #4d0805, inset 0 3px 10px rgba(0,0,0,.3);
   }
   .pbtn.b-btn.held, .pbtn.b-btn:active { box-shadow: 0 0 0 #060d2a; }
-  /* mid row: START / SCORES / pause — small pills, bottom-centre */
+  /* mid row: pause / die / restart / START / SCORES — small pills, bottom-centre.
+     Stretched anchor (not left:50%+translate) so flex-wrap can pack a second
+     line on narrow phones instead of shrink-to-fitting to half the viewport.
+     Arrange-mode layouts override left/right/transform explicitly, so saved
+     positions are unaffected. */
   #pad .mid-grp {
-    left: 50%; transform: translateX(-50%);
+    left: 12px; right: 12px;
     bottom: max(12px, env(safe-area-inset-bottom));
-    gap: 8px;
+    gap: 8px; row-gap: 6px;
+    flex-wrap: wrap; justify-content: center;
   }
   .pbtn.mid-btn {
-    width: auto; min-width: 56px; height: 40px; padding: 0 12px;
+    width: auto; min-width: 44px; height: 40px; padding: 0 10px;
     border-radius: 20px; font-size: 12px;
   }
   /* ask / board / entry: modal overlays over the frozen game */
