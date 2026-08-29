@@ -270,48 +270,103 @@ func (s *Screen) RowString(y int) string {
 }
 
 // String serializes the screen as one ANSI frame: cursor home, every cell
-// with style transitions, reset at the end.
+// with only the SGR parameters that changed since the previous cell, reset
+// at the end. Style state deliberately persists across row breaks — the
+// terminal keeps SGR across line feeds, so starting a row in the style the
+// previous row ended in costs nothing.
 func (s *Screen) String() string {
 	var b strings.Builder
 	b.WriteString("\x1b[H")
-	have := false
-	var pFg, pBg Color
-	pBold := false
-	for y := 0; y < s.H; y++ {
-		for x := 0; x < s.W; x++ {
+	st := sgrState{tc: s.TrueColor}
+	for y := range s.H {
+		for x := range s.W {
 			c := s.cells[y*s.W+x]
-			if !have || c.Fg != pFg || c.Bg != pBg || c.Bold != pBold {
-				b.WriteString(s.styleSeq(c))
-				pFg, pBg, pBold, have = c.Fg, c.Bg, c.Bold, true
-			}
+			st.transition(&b, c)
 			b.WriteRune(c.Ch)
 		}
 		if y < s.H-1 {
-			b.WriteString("\x1b[0m\r\n")
-			have = false
+			b.WriteString("\r\n")
 		}
 	}
 	b.WriteString("\x1b[0m")
 	return b.String()
 }
 
-func (s *Screen) styleSeq(c Cell) string {
-	parts := []string{"0"}
-	if c.Bold {
-		parts = append(parts, "1")
+// sgrState mirrors the terminal's current SGR state so successive cells,
+// runs and rows emit only the SGR parameters that actually changed — style
+// sequences dominate a frame's byte cost, so this is where the SSH
+// bandwidth goes. A space paints nothing but its background, so its
+// foreground is a don't-care and never costs bytes.
+type sgrState struct {
+	tc   bool
+	have bool // any style emitted yet (terminal starts at default)
+	fg   Color
+	bg   Color
+	bold bool
+}
+
+func isDefaultColor(c Color) bool { return c.RGB == 0 && c.ANSI == 0 }
+
+// colorParams returns the SGR parameters that set c as foreground
+// (bg=false) or background in the given color mode.
+func colorParams(tc bool, c Color, bg bool) string {
+	if tc {
+		base := 38
+		if bg {
+			base = 48
+		}
+		return fmt.Sprintf("%d;2;%d;%d;%d", base, c.RGB>>16, (c.RGB>>8)&0xFF, c.RGB&0xFF)
 	}
-	if s.TrueColor {
-		parts = append(parts, fmt.Sprintf("38;2;%d;%d;%d", c.Fg.RGB>>16, (c.Fg.RGB>>8)&0xFF, c.Fg.RGB&0xFF))
-		if c.Bg.RGB != 0 || c.Bg.ANSI != 0 {
-			parts = append(parts, fmt.Sprintf("48;2;%d;%d;%d", c.Bg.RGB>>16, (c.Bg.RGB>>8)&0xFF, c.Bg.RGB&0xFF))
+	return ansiCode(c.ANSI, bg)
+}
+
+// transition appends the minimal SGR sequence that renders cell c and
+// updates the tracked state.
+func (st *sgrState) transition(b *strings.Builder, c Cell) {
+	dBg, dBold := c.Bg, c.Bold
+	dFg := c.Fg
+	if c.Ch == ' ' {
+		dFg = st.fg // invisible on a space: keep whatever is already set
+	}
+	if st.have && dFg == st.fg && dBg == st.bg && dBold == st.bold {
+		return
+	}
+	// Attributes that must be cleared (bold off, a color returning to the
+	// terminal default) have no cheap additive form: fall back to a full
+	// "0;..." reset+set.
+	needClear := st.have &&
+		((!dBold && st.bold) ||
+			(isDefaultColor(dFg) && !isDefaultColor(st.fg)) ||
+			(isDefaultColor(dBg) && !isDefaultColor(st.bg)))
+	if !st.have || needClear {
+		parts := []string{"0"}
+		if dBold {
+			parts = append(parts, "1")
+		}
+		if c.Ch != ' ' && !isDefaultColor(c.Fg) {
+			parts = append(parts, colorParams(st.tc, c.Fg, false))
+		}
+		if !isDefaultColor(dBg) {
+			parts = append(parts, colorParams(st.tc, dBg, true))
+		}
+		b.WriteString("\x1b[" + strings.Join(parts, ";") + "m")
+		if c.Ch == ' ' {
+			dFg = Color{} // the full form omits fg: terminal is at default
 		}
 	} else {
-		parts = append(parts, ansiCode(c.Fg.ANSI, false))
-		if c.Bg.ANSI != 0 {
-			parts = append(parts, ansiCode(c.Bg.ANSI, true))
+		var parts []string
+		if dFg != st.fg {
+			parts = append(parts, colorParams(st.tc, dFg, false))
 		}
+		if dBg != st.bg {
+			parts = append(parts, colorParams(st.tc, dBg, true))
+		}
+		if dBold && !st.bold {
+			parts = append(parts, "1")
+		}
+		b.WriteString("\x1b[" + strings.Join(parts, ";") + "m")
 	}
-	return "\x1b[" + strings.Join(parts, ";") + "m"
+	st.fg, st.bg, st.bold, st.have = dFg, dBg, dBold, true
 }
 
 func ansiCode(idx int, bg bool) string {
@@ -473,12 +528,21 @@ func drawStatus(s *Screen, p *Palette) {
 	}
 	s.Center(y, "a/d move · w/space jump · x run · p pause · q quit", p.TextDim, p.StatusBG, false)
 }
+
+// blit packs two pixel rows per screen cell: differing halves ride the
+// half block (fg = upper, bg = lower); a solid pair is a plain space over
+// the colour — one byte on the wire instead of the block's three, and sky
+// and other large fills are almost entirely solid pairs.
 func blit(s *Screen, f *Frame) {
 	worldRows := f.H / 2
-	for cy := 0; cy < worldRows; cy++ {
-		for x := 0; x < f.W && x < s.W; x++ {
+	for cy := range worldRows {
+		for x := range min(f.W, s.W) {
 			upper := f.At(x, cy*2)
 			lower := f.At(x, cy*2+1)
+			if upper == lower {
+				s.SetStyled(x, 1+cy, ' ', upper, upper, false)
+				continue
+			}
 			s.SetStyled(x, 1+cy, '▀', upper, lower, false)
 		}
 	}
