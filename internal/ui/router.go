@@ -11,9 +11,10 @@ import (
 )
 
 type Router struct {
-	mapper *input.Mapper
-	ui     *UI
-	plain  *input.PlainDecoder
+	mapper    *input.Mapper
+	ui        *UI
+	plain     *input.PlainDecoder
+	capturing bool // last-seen capture state, to catch the transition
 }
 
 func NewRouter(mapper *input.Mapper, ui *UI) *Router {
@@ -25,7 +26,18 @@ func (r *Router) Feed(b []byte) {
 	if len(b) == 0 {
 		return
 	}
-	if r.ui.capturing() {
+	// Entering capture (game-over ask, name entry, board): from here
+	// bytes flow to the UI alone, so the mapper never sees the releases
+	// for keys still held at that moment. Drop them now — a leaked hold
+	// survives into the next run (a sticky kitty hold forever, a legacy
+	// one for its grace window) and the restarted game runs on untouched.
+	if cap := r.ui.capturing(); cap != r.capturing {
+		r.capturing = cap
+		if cap {
+			r.mapper.ReleaseAll()
+		}
+	}
+	if r.capturing {
 		r.ui.FeedKeys(r.plain.Feed(b))
 		return
 	}
@@ -40,6 +52,9 @@ func (r *Router) Poll() engine.Input {
 	in := r.mapper.Poll()
 	if r.ui.takeRestart() {
 		in.Restart = true
+		// The board held the keyboard since capture began: anything
+		// the mapper still holds from before is a phantom by now.
+		r.mapper.ReleaseAll()
 	}
 	return in
 }

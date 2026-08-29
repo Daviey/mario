@@ -115,6 +115,19 @@ func (w sessWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// bellChanWriter turns the bell ringer's synchronous Write into a
+// non-blocking handoff to the session's writer goroutine, so a BEL can
+// never stall the tick loop on SSH flow control.
+type bellChanWriter struct{ c chan []byte }
+
+func (w bellChanWriter) Write(p []byte) (int, error) {
+	select {
+	case w.c <- p:
+	default: // writer busy: drop the bell, never block a tick
+	}
+	return len(p), nil
+}
+
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
@@ -147,12 +160,14 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		Term:      s.Term(),
 		ColorTerm: s.Env("COLORTERM"),
 	}
+	// BEL bytes must never be written from the tick goroutine: the
+	// channel write below can stall on SSH flow control, and a stalled
+	// tick loop drops ticks — mushy controls and late key releases.
+	// Bells ride the writer goroutine with the frames instead; when
+	// that goroutine is busy, the bell is dropped (best-effort sound).
+	bells := make(chan []byte, 8)
 	if bellOn {
-		// Sound feedback as BEL bytes on the session channel. Written
-		// from the tick goroutine while frames flush on the writer
-		// goroutine — channel.write is mutex-guarded, and BEL is a C0
-		// control every terminal parser executes even mid-sequence.
-		opts.Sound = newBell(out).ring
+		opts.Sound = newBell(bellChanWriter{c: bells}).ring
 	}
 	app := mario.New(opts)
 	s.OnFeed(app.Feed) // also flushes keystrokes the color probe buffered
@@ -164,13 +179,27 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 
 	// Terminal setup/teardown mirrors run()'s (kitty keyboard protocol,
 	// alt screen, hidden cursor, window title). Unsupported terminals
-	// ignore these. The epilogue waits for the writer below so it lands
-	// after any in-flight frame diff — a trailing partial frame after the
+	// ignore these. ORDER IS LOAD-BEARING: the kitty push comes AFTER
+	// the alt-screen enter and the pop AFTER the alt-screen exit — a
+	// terminal that snapshots keyboard state with the screen (1049's
+	// save/restore) would otherwise re-install our pushed level on
+	// exit and leave the player's shell emitting CSI-u garbage. The
+	// epilogue waits for the writer below so it lands after any
+	// in-flight frame diff — a trailing partial frame after the
 	// alt-screen exit would print garbage on the player's shell.
-	s.Write([]byte("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
+	s.Write([]byte("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
 
 	st := render.NewStream(out, render.NewPalette(trueColor))
-
+	drainBells := func() {
+		for {
+			select {
+			case b := <-bells:
+				out.Write(b) // on the writer goroutine: may block safely
+			default:
+				return
+			}
+		}
+	}
 	// Rendering and writing are decoupled. The tick goroutine snapshots
 	// each frame (Snapshot reads engine state, which is only quiescent
 	// between Steps); a writer goroutine diffs and sends. When the
@@ -186,6 +215,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		defer close(drained)
 		for cur := range frames {
 			st.Flush(cur)
+			drainBells()
 		}
 	}()
 	defer func() {
@@ -194,7 +224,8 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		case <-drained:
 		case <-time.After(500 * time.Millisecond): // wedged writer: leave anyway
 		}
-		s.Write([]byte("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l\x1b[0m\r\n"))
+		// Alt-screen exit first, kitty pop after: see the prologue note.
+		s.Write([]byte("\x1b[?2026l\x1b[?1049l\x1b[<u\x1b[?25h\x1b[?23t\x1b[0m\r\n"))
 	}()
 
 	tick := time.NewTicker(time.Second / engine.TicksPerSecond)

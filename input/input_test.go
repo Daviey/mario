@@ -599,3 +599,94 @@ func TestSawKittyRegime(t *testing.T) {
 		t.Fatal("explicit kitty event must report kitty")
 	}
 }
+
+func TestTypelessKittyPressHoldsUntilRelease(t *testing.T) {
+	// Ghostty (and kitty itself) omit ":1" on press events —
+	// CSI 100;129u is a 'd' press with num_lock held. It must behave as
+	// the press it is: held until the explicit release, never subject
+	// to the OS-repeat inference (whose grace both stutters first holds
+	// and overruns taps — the "lag and run-on" feel over SSH).
+	m := NewMapper()
+	m.Feed([]byte("\x1b[100;129u"))
+	if in := m.Poll(); !in.Right {
+		t.Fatal("typeless kitty press must hold immediately")
+	}
+	if !m.SawKitty() {
+		t.Fatal("a CSI-u final marks the kitty regime, press or not")
+	}
+	for range 80 { // ~1.3s of silence: past every grace window
+		if in := m.Poll(); !in.Right {
+			t.Fatal("kitty press must not expire on silence; its release is explicit")
+		}
+	}
+	m.Feed([]byte("\x1b[100;129:3u"))
+	if in := m.Poll(); in.Right {
+		t.Fatal("release must clear the key at once")
+	}
+}
+
+func TestTypelessKittyArrowPressSticky(t *testing.T) {
+	// Arrow CSI is protocol-ambiguous (legacy terminals send CSI arrows
+	// with modifiers too), so a typeless one only counts as kitty once
+	// the regime is established by any CSI-u event.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[100u")) // kitty 'd' press: regime established
+	m.Poll()
+	m.Feed([]byte("\x1b[1;129D")) // left arrow press, num_lock modifier
+	if in := m.Poll(); !in.Left {
+		t.Fatal("typeless kitty arrow press must hold")
+	}
+	for range 80 {
+		if in := m.Poll(); !in.Left {
+			t.Fatal("kitty arrow press must survive silence")
+		}
+	}
+	m.Feed([]byte("\x1b[1;129:3D"))
+	if in := m.Poll(); in.Left {
+		t.Fatal("arrow release must clear at once")
+	}
+}
+
+func TestLegacyArrowsStayLegacy(t *testing.T) {
+	// Without kitty evidence the silence-expiry model must be intact:
+	// a legacy arrow press dies after the grace window, and the regime
+	// flag stays off (play-context diagnostics).
+	m := NewMapper()
+	m.Feed([]byte("\x1b[D"))
+	if in := m.Poll(); !in.Left {
+		t.Fatal("legacy press must hold")
+	}
+	for range 13 { // holdWindow is 12 on a cold mapper
+		m.Poll()
+	}
+	if in := m.Poll(); in.Left {
+		t.Fatal("legacy press must expire after the grace window")
+	}
+	if m.SawKitty() {
+		t.Fatal("legacy arrows alone must not mark the kitty regime")
+	}
+}
+
+func TestReleaseAllDropsHoldsAndEdges(t *testing.T) {
+	// The leaderboard UI capture path: while it holds the keyboard the
+	// mapper sees no bytes, so ReleaseAll is what keeps a hold from the
+	// dying run out of the restarted one.
+	m := NewMapper()
+	m.Feed([]byte("\x1b[100u")) // kitty Right, sticky
+	m.Poll()
+	m.Feed([]byte("w")) // legacy Up byte (Left would trip the newest-press tiebreak)
+	if in := m.Poll(); !in.Right || !in.Up {
+		t.Fatal("both keys should be held first")
+	}
+	m.ReleaseAll()
+	for range 3 {
+		if in := m.Poll(); in.Left || in.Right || in.Up || in.Down || in.Run {
+			t.Fatal("ReleaseAll must drop every hold and pending edge")
+		}
+	}
+	// Calibration survives: the mapper stays usable for the next run.
+	m.Feed([]byte("\x1b[100;1:1u"))
+	if in := m.Poll(); !in.Right {
+		t.Fatal("mapper must accept new presses after ReleaseAll")
+	}
+}

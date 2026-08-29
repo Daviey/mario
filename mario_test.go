@@ -124,8 +124,34 @@ func TestLoadLevelsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLevels: %v", err)
 	}
-	if len(levels) != 7 {
-		t.Errorf("levels = %d, want 7", len(levels))
+	if levels != nil {
+		t.Errorf("levels = %v, want nil (nil lets New use the built-ins)", levels)
+	}
+	// Regression: an explicitly-passed level set — even one equal to the
+	// built-ins — is untrusted, and untrusted runs show UNRECORDED and
+	// can never submit. LoadLevels("") returning the built-ins made the
+	// native and ssh paths pass them explicitly, silently untrusting
+	// every run.
+	a := New(&Options{Levels: levels})
+	if !a.levelsTrust {
+		t.Fatal("default (nil) levels must keep runs replay-trusted")
+	}
+	if len(a.Game.Levels) != 7 {
+		t.Errorf("New defaulted to %d levels, want 7", len(a.Game.Levels))
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.txt")
+	rows := strings.Repeat(strings.Repeat(" ", 14)+"\n", 12) +
+		"  M  G     F  \n##############\n##############"
+	if err := os.WriteFile(path, []byte(rows), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	custom, err := LoadLevels(path)
+	if err != nil {
+		t.Fatalf("custom level: %v", err)
+	}
+	if New(&Options{Levels: custom}).levelsTrust {
+		t.Fatal("custom levels must not be replay-trusted")
 	}
 }
 
