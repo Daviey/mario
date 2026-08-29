@@ -119,6 +119,14 @@ func (w sessWriter) Write(p []byte) (int, error) {
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
 func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache) {
+	// Per-session color depth, not the server process's own terminal:
+	// a forwarded COLORTERM env request, the client's TERM family, or
+	// the DA2/DA3 terminal probe decides (Session.TrueColor). The
+	// server-wide false (-basic) stays a hard override.
+	if trueColor {
+		trueColor = s.TrueColor()
+	}
+
 	// Fill the terminal like the native runner does: width in tiles,
 	// height minus HUD/status rows, Pix/2 terminal rows per tile.
 	cols, rows := s.Size()
@@ -138,7 +146,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		Term:      s.Term(),
 		ColorTerm: s.Env("COLORTERM"),
 	})
-	s.OnFeed(app.Feed)
+	s.OnFeed(app.Feed) // also flushes keystrokes the color probe buffered
 	// Client-side resizes follow like the native runner's SIGWINCH: new
 	// viewport on the next tick, full repaint at the new size.
 	s.OnResize(func(cols, rows int) {
