@@ -1,0 +1,74 @@
+# Auto-deploy the WASM web build to https://mario.baby (the mario-vps
+# NixOS box, reached over the private network by the self-hosted runner).
+# All connection specifics live in repo secrets:
+#   MARIO_WEB_DEPLOY_KEY       ed25519 private key (mario-deploy user)
+#   MARIO_DEPLOY_HOST          private network address of the VPS
+#   MARIO_DEPLOY_USER          deploy username
+#   MARIO_DEPLOY_KNOWN_HOSTS   pinned hostkey line(s)
+# The runner container has no rsync — tar over ssh with a directory swap
+# (web.next → web) keeps the cutover atomic-ish without it.
+name: web-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, mario]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v5
+
+      # Vars missing → make web embeds empty board credentials and the
+      # deployed site would silently lose its leaderboard. Fail loudly.
+      - name: Require board credentials
+        if: ${{ vars.SUPABASE_URL == '' || vars.SUPABASE_KEY == '' }}
+        run: |
+          echo "repo vars SUPABASE_URL / SUPABASE_KEY are not set" >&2
+          exit 1
+
+      - name: Build web bundle
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.SUPABASE_KEY }}
+        run: make web
+
+      - name: Deploy
+        env:
+          KEY: ${{ secrets.MARIO_WEB_DEPLOY_KEY }}
+          HOST: ${{ secrets.MARIO_DEPLOY_HOST }}
+          USER: ${{ secrets.MARIO_DEPLOY_USER }}
+          KNOWN_HOSTS: ${{ secrets.MARIO_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          if [ -z "$KEY" ] || [ -z "$HOST" ] || [ -z "$USER" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "deploy secrets missing (KEY/HOST/USER/KNOWN_HOSTS)" >&2
+            exit 1
+          fi
+          key="$RUNNER_TEMP/mario_web_deploy"
+          known="$RUNNER_TEMP/mario_known_hosts"
+          printf '%s\n' "$KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$known"
+          chmod 600 "$key" "$known"
+          mssh() {
+            ssh -i "$key" -o UserKnownHostsFile="$known" -o StrictHostKeyChecking=yes \
+              -o IdentitiesOnly=yes -o ConnectTimeout=15 "$USER@$HOST" "$@"
+          }
+
+          # Visible freshness marker on the live site.
+          echo "$GITHUB_SHA $(date -u +%FT%TZ)" > dist/web/deploy.txt
+          tar -C dist/web -cf - . | mssh 'mkdir -p /var/lib/mario-web/.next && tar -C /var/lib/mario-web/.next -xf -'
+          # The runner builds under umask 077 — normalize modes here or
+          # nginx gets 0600 files and the site 403s (AGENTS.md trap).
+          mssh 'find /var/lib/mario-web/.next -type d -exec chmod 755 {} + && find /var/lib/mario-web/.next -type f -exec chmod 644 {} +'
+          mssh 'cd /var/lib/mario-web && rm -rf .prev && if [ -d content ]; then mv content .prev; fi && mv .next content && rm -rf .prev && echo SWAPPED'
+          mssh 'test -s /var/lib/mario-web/content/mario.wasm && test -s /var/lib/mario-web/content/index.html && echo CONTENT-OK'
