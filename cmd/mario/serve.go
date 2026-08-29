@@ -15,11 +15,14 @@ import (
 )
 
 // runServe serves the game over SSH until the listener fails.
-func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool) error {
+func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, maxSessions int) error {
 	srv := &sshd.Server{
 		Addr:        addr,
 		HostKeyFile: hostKeyFile,
 		Handler:     func(s *sshd.Session) { playSession(levels, s, trueColor) },
+	}
+	if maxSessions > 0 {
+		srv.MaxSessions = maxSessions
 	}
 	return srv.ListenAndServe()
 }

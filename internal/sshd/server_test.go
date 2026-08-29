@@ -557,10 +557,17 @@ func TestRekeyMidSession(t *testing.T) {
 }
 
 func TestSessionCapRefusesExcess(t *testing.T) {
-	srv := startServer(t, echoHandler, func(s *Server) { s.MaxSessions = 1 })
+	// Queue disabled: the old pre-handshake refusal (with the queue on,
+	// excess sessions wait in line instead — see admission_test.go).
+	srv := startServer(t, echoHandler, func(s *Server) {
+		s.MaxSessions = 1
+		s.MaxQueue = -1
+	})
 
 	tc := dial(t, srv.Addr)
-	tc.authNone() // occupies the single slot
+	tc.authNone()
+	tc.openSession(1<<20, 32768)
+	tc.shell() // holds the slot (admission is per-shell, not per-conn)
 
 	nc2, err := net.Dial("tcp", srv.Addr)
 	if err != nil {

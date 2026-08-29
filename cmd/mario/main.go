@@ -63,6 +63,7 @@ func main() {
 	verifyPending := flag.Bool("verify-pending", false, "verify pending replay-backed scores (service key) and exit")
 	serveAddr := flag.String("serve", "", "run an unauthenticated SSH game server on `ADDR` (e.g. :2222) instead of playing")
 	hostKeyPath := flag.String("hostkey", "", "with -serve: persist the SSH host key at `PATH` (created if missing)")
+	maxSessions := flag.Int("maxsessions", 0, "with -serve: concurrent session cap (0 = 16); excess connections are refused pre-handshake")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -118,7 +119,7 @@ func main() {
 	if *serveAddr != "" {
 		// Truecolor is the default over SSH — the operator cannot know
 		// every client's terminal; -basic forces the 16-color palette.
-		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic); err != nil {
+		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, *maxSessions); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
