@@ -96,6 +96,43 @@ func TestSubmitError(t *testing.T) {
 	}
 }
 
+func TestSubmitPlayContext(t *testing.T) {
+	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
+	e := Entry{Name: "DAVE", Score: 10, DeviceID: "d", Replay: `{"v":1}`,
+		Surface: "ssh", UserAgent: "Mozilla/5.0 (test) " + strings.Repeat("x", 300),
+		Term: "xterm-256color", ColorTerm: "truecolor", InputRegime: "kitty", Viewport: "40x15"}
+	if err := client.Submit(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(f.bodies[len(f.bodies)-1]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{
+		"surface": "ssh",
+		"term":    "xterm-256color", "colorterm": "truecolor",
+		"input_regime": "kitty", "viewport": "40x15",
+	} {
+		if sent[k] != want {
+			t.Errorf("body[%s] = %v, want %v", k, sent[k], want)
+		}
+	}
+	if ua, ok := sent["user_agent"].(string); !ok || len(ua) != 256 || !strings.HasPrefix(ua, "Mozilla/5.0 (test) ") {
+		t.Errorf("user_agent not capped/passed: %v", sent["user_agent"])
+	}
+	if got := f.last(t).Header.Get("User-Agent"); got != "mario/"+EngineVersion {
+		t.Errorf("User-Agent header = %q", got)
+	}
+}
+
+func TestClampPlayContextRejectsJunk(t *testing.T) {
+	e := &Entry{Surface: "browser", InputRegime: "touch", Viewport: "40x15; drop table"}
+	ClampPlayContext(e)
+	if e.Surface != "" || e.InputRegime != "" || e.Viewport != "" {
+		t.Errorf("junk context survived: %+v", e)
+	}
+}
+
 func TestTopRPCAndDecode(t *testing.T) {
 	client, f := testClient(t, func(*http.Request, string) (int, string) {
 		return 200, `[{"name":"DAVE","score":12500,"level":3,"mine":true,"created_at":"2026-08-25T12:00:00Z"}]`

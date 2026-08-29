@@ -54,9 +54,14 @@ func (j *jsRGB) deliver(f *render.Frame) {
 func main() {
 	// ?cheats opts into cheat mode: unlimited fireballs, run unrecorded
 	// and therefore unsubmitable (see mario.Options.Cheats).
-	opts := &mario.Options{Cheats: strings.Contains(
-		js.Global().Get("location").Get("search").String(), "cheats")}
-	app := mario.New(opts)
+	// Play-context diagnostics: the browser's user agent rides along on
+	// every submission (surface "web"); UA header + column on the DB side.
+	cheats := strings.Contains(js.Global().Get("location").Get("search").String(), "cheats")
+	ua := ""
+	if n := js.Global().Get("navigator"); n.Truthy() {
+		ua = n.Get("userAgent").String()
+	}
+	app := mario.New(&mario.Options{Cheats: cheats, Surface: "web", UserAgent: ua})
 
 	js.Global().Set("marioFeed", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		app.Feed([]byte(args[0].String()))

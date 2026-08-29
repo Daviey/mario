@@ -48,6 +48,7 @@ type UI struct {
 	replaySrc func() (string, bool) // the App's recording, for verification
 	submit    func(e board.Entry) error
 	fetch     func() ([]board.Row, error)
+	playCtx   func() board.Entry // App-supplied play context (surface/term/UA/…)
 
 	// loadIdentity/saveName override the process-wide player identity for
 	// multi-session hosts (the SSH server): one player identity per
@@ -97,6 +98,16 @@ func (u *UI) SetReplaySource(src func() (string, bool)) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.replaySrc = src
+}
+
+// SetPlayContext wires the App-supplied play context (surface, TERM,
+// user agent, input regime, viewport): evaluated at submit time so the
+// values describe the run as it ended. Entries start from it; Submit
+// clamps whatever lands here.
+func (u *UI) SetPlayContext(ctx func() board.Entry) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.playCtx = ctx
 }
 
 // capturing reports whether a UI screen currently owns the keyboard.
@@ -220,6 +231,13 @@ func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 		}
 	}()
 	rows, err := fetch()
+	if err != nil {
+		// Transient edge slowness must not read as OFFLINE: once in a
+		// blue moon a fetch hangs to the 15s timeout against the
+		// Supabase/Cloudflare edge (observed live on the SSH host);
+		// one immediate retry absorbs it.
+		rows, err = fetch()
+	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.loading = false
@@ -395,6 +413,12 @@ func (u *UI) submitLocked() {
 		mode, day = "daily", u.day
 	}
 	entry := board.Entry{Name: name, Score: score, Level: level, DeviceID: player.DeviceID, Mode: mode, Day: day, Replay: replayData}
+	if u.playCtx != nil {
+		if ctx := u.playCtx(); ctx.DeviceID == "" {
+			entry.Surface, entry.UserAgent, entry.Term = ctx.Surface, ctx.UserAgent, ctx.Term
+			entry.ColorTerm, entry.InputRegime, entry.Viewport = ctx.ColorTerm, ctx.InputRegime, ctx.Viewport
+		}
+	}
 	go func() {
 		err := submit(entry)
 		u.mu.Lock()

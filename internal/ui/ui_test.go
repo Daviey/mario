@@ -4,6 +4,7 @@ package ui
 // driven to game over with the deterministic demo script.
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -267,6 +268,72 @@ func TestTitleLOpensBoard(t *testing.T) {
 	}
 	if ui.quitRequested() {
 		t.Fatal("closing the title board must not quit")
+	}
+}
+
+func TestFetchRetriesTransientError(t *testing.T) {
+	// One transient fetch failure must not read as OFFLINE: the board
+	// retries once (observed live — a fetch in a blue moon hangs to the
+	// 15s timeout against the Supabase/Cloudflare edge).
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	calls := 0
+	ui := NewUI(nil, func() ([]board.Row, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("transient edge hiccup")
+		}
+		return []board.Row{{Name: "KIM", Score: 900}}, nil
+	})
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ui.note([]byte("l"))
+	tickUntil(t, ui, g, 1)
+	waitFor(t, 2*time.Second, func() bool {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		return len(ui.rows) == 1
+	})
+	if calls != 2 {
+		t.Fatalf("fetch called %d times, want 2 (one retry)", calls)
+	}
+	ui.mu.Lock()
+	status := ui.status
+	ui.mu.Unlock()
+	if status == "OFFLINE" {
+		t.Fatal("transient failure surfaced as OFFLINE")
+	}
+}
+
+func TestSubmitCarriesPlayContext(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var mu sync.Mutex
+	var got board.Entry
+	ui := NewUI(func(e board.Entry) error {
+		mu.Lock()
+		got = e
+		mu.Unlock()
+		return nil
+	}, nil)
+	ui.SetReplaySource(func() (string, bool) { return `{"v":1,"ticks":2,"runs":[[0,2]]}`, true })
+	ui.SetPlayContext(func() board.Entry {
+		return board.Entry{Surface: "ssh", Term: "xterm-256color", ColorTerm: "truecolor",
+			InputRegime: "legacy", Viewport: "60x14"}
+	})
+	g := gameOverGame(t)
+	tickUntil(t, ui, g, 1) // ask
+	ui.FeedKeys([]byte("y"))
+	tickUntil(t, ui, g, 1) // entry
+	ui.FeedKeys([]byte("\r"))
+	tickUntil(t, ui, g, 1) // submit
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return got.Replay != ""
+	})
+	if got.Surface != "ssh" || got.Term != "xterm-256color" || got.ColorTerm != "truecolor" ||
+		got.InputRegime != "legacy" || got.Viewport != "60x14" {
+		t.Fatalf("play context missing from submission: %+v", got)
 	}
 }
 

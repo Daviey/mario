@@ -75,7 +75,7 @@ func runVerifyPending() error {
 						return fmt.Errorf("verify: mark %s: %w", p.ID, err)
 					}
 					kept++
-					fmt.Printf("KEEP   %-8s %6d  L%d %s\n", board.SanitizeDisplayName(p.Name), p.Score, p.Level, p.Mode)
+					fmt.Printf("KEEP   %-8s %6d  L%d %-7s %s\n", board.SanitizeDisplayName(p.Name), p.Score, p.Level, p.Mode, playContext(p))
 					continue
 				}
 			}
@@ -91,4 +91,14 @@ func runVerifyPending() error {
 	}
 	fmt.Printf("verified=%d dropped=%d\n", kept, dropped)
 	return nil
+}
+
+// playContext renders a pending row's operator-only diagnostics: surface,
+// input regime, viewport, TERM, and the user agent (trimmed).
+func playContext(p board.PendingRow) string {
+	ua := p.UserAgent
+	if len(ua) > 60 {
+		ua = ua[:60] + "…"
+	}
+	return fmt.Sprintf("[%s %s %s term=%s ua=%s]", p.Surface, p.InputRegime, p.Viewport, p.Term, ua)
 }

@@ -89,7 +89,8 @@ type Mapper struct {
 	deadAt       [keyCount]int  // tick a demoted hold finally expired; 0 = none
 	lastByte     int            // tick of the most recent decoded event, any key
 	buf          []byte
-	feedAge      int // polls since the last Feed delivered bytes
+	feedAge      int  // polls since the last Feed delivered bytes
+	sawKitty     bool // any explicit CSI-u event type seen (kitty protocol active)
 	pendQuit     bool
 	pendPause    bool
 	pendRestart  bool
@@ -277,6 +278,15 @@ func (m *Mapper) Calibration() Calibration {
 	}
 }
 
+// SawKitty reports whether any explicit kitty-protocol event (press,
+// repeat or release with an event type) has been decoded — the session's
+// input regime, surfaced for play-context logging.
+func (m *Mapper) SawKitty() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sawKitty
+}
+
 // ApplyCalibration restores persisted learning. Values are clamped to
 // sane bounds and mismatched key arrays are ignored.
 func (m *Mapper) ApplyCalibration(c Calibration) {
@@ -338,6 +348,9 @@ func (m *Mapper) drain() {
 			break // incomplete escape sequence; wait for more bytes
 		}
 		m.buf = m.buf[n:]
+		if ev.evType >= 1 { // explicit kitty event type (press/repeat/release)
+			m.sawKitty = true
+		}
 		m.apply(ev)
 	}
 }
