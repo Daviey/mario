@@ -315,10 +315,13 @@ type conn struct {
 	// the wmu-held frame chunk stuck on a full kernel send buffer (up
 	// to writeTimeoutSec), stalling every later inbound packet too:
 	// keystrokes, the client's own window adjusts, disconnects.
-	// Replies go through ctl, owed adjusts through ch.owe (lossless —
-	// a dropped adjust would wedge the client after 2MB), both sent by
-	// pumpControl. Input handling stays pure: read → feed.
-	ctl       chan ctlMsg   // small reader-side replies + sync markers
+	// Replies go through ctlQ, owed adjusts through ch.owe (both
+	// lossless — a dropped adjust would wedge the client after 2MB, a
+	// dropped ChannelSuccess hangs ssh(1) on a want-reply request),
+	// both sent by pumpControl. Input handling stays pure: read → feed.
+	ctlMu     sync.Mutex
+	ctlQ      []ctlMsg      // FIFO of replies, sync markers, keepalives
+	ctlWake   chan struct{} // pump wake-up (cap 1, edge)
 	adjustSig chan struct{} // "owed ≥ adjustFloor" edge
 	dead      chan struct{} // closed when serveConn returns
 }
@@ -328,26 +331,54 @@ type conn struct {
 type ctlMsg struct {
 	pkt  []byte
 	done chan struct{}
+	drop bool // keepalive-class: droppable at capacity
 }
 
-// writeControl hands a small reply packet to the control pump. Never
-// blocks, never fails: at capacity (only reachable under sustained
-// congestion, with the queue already holding a reply round) the packet
-// is dropped — at most a keepalive round-trip, and TCP itself is the
-// backpressure then. Window adjusts must NOT use this path; they ride
-// the lossless owed counter instead.
+// ctlKeepaliveCap bounds queued keepalive-class items: losing a
+// keepalive reply costs a disconnect at worst (recoverable), and once
+// a round of them sits unwritten, TCP itself is the backpressure.
+// ctlMax is the hard FIFO bound for everything lossless; reaching it
+// means the link is dead in practice, so the connection is torn down
+// (a reconnect) rather than risking unbounded memory.
+const (
+	ctlKeepaliveCap = 8
+	ctlMax          = 1024
+)
+
+// writeControl hands a reply packet to the control pump: lossless.
+// writeControlDrop is the keepalive-class variant, droppable at
+// capacity. Window adjusts use neither; they ride the lossless owed
+// counter.
 func (c *conn) writeControl(pkt []byte) {
 	c.sendControl(ctlMsg{pkt: pkt})
 }
 
-// sendControl enqueues one item, never blocking or failing: at capacity
-// (only reachable under sustained congestion, with the queue already
-// holding a reply round) a packet is dropped — at most a keepalive
-// round-trip, and TCP itself is the backpressure then. Window adjusts
-// must NOT use this path; they ride the lossless owed counter instead.
+func (c *conn) writeControlDrop(pkt []byte) {
+	c.sendControl(ctlMsg{pkt: pkt, drop: true})
+}
+
+// sendControl enqueues one item, never blocking. Keepalive-class items
+// are dropped once the queue holds a full round of them; everything
+// else queues without loss until ctlMax, where the connection is
+// closed instead — ssh(1) waits forever on a missing reply to a
+// want-reply request (a silent hang, worse than a disconnect), so the
+// reply lane must never drop.
 func (c *conn) sendControl(m ctlMsg) {
+	c.ctlMu.Lock()
+	if m.drop && len(c.ctlQ) >= ctlKeepaliveCap {
+		c.ctlMu.Unlock()
+		return
+	}
+	if len(c.ctlQ) >= ctlMax {
+		c.ctlMu.Unlock()
+		c.srv.Log.Printf("session %s: control queue overflow, closing", c.t.conn.RemoteAddr())
+		c.t.conn.Close()
+		return
+	}
+	c.ctlQ = append(c.ctlQ, m)
+	c.ctlMu.Unlock()
 	select {
-	case c.ctl <- m:
+	case c.ctlWake <- struct{}{}:
 	default:
 	}
 }
@@ -372,24 +403,34 @@ func (c *conn) syncControl() {
 // write (conn already closing elsewhere) also tears it down.
 func (c *conn) pumpControl() {
 	for {
-		var m ctlMsg
 		select {
 		case <-c.dead:
 			return
-		case m = <-c.ctl:
 		case <-c.adjustSig:
-			m = ctlMsg{pkt: c.ch.takeOwed()}
-		}
-		if m.done != nil {
-			close(m.done)
-			continue
-		}
-		if m.pkt == nil {
-			continue
-		}
-		if err := c.t.writePacket(m.pkt); err != nil {
-			c.t.conn.Close()
-			return
+			if pkt := c.ch.takeOwed(); pkt != nil {
+				if err := c.t.writePacket(pkt); err != nil {
+					c.t.conn.Close()
+					return
+				}
+			}
+		case <-c.ctlWake:
+			c.ctlMu.Lock()
+			q := c.ctlQ
+			c.ctlQ = nil
+			c.ctlMu.Unlock()
+			for _, m := range q {
+				if m.done != nil {
+					close(m.done)
+					continue
+				}
+				if m.pkt == nil {
+					continue
+				}
+				if err := c.t.writePacket(m.pkt); err != nil {
+					c.t.conn.Close()
+					return
+				}
+			}
 		}
 	}
 }
@@ -534,7 +575,7 @@ func (s *Server) serveConn(nc net.Conn) {
 	c := &conn{
 		t:         newTransport(nc),
 		srv:       s,
-		ctl:       make(chan ctlMsg, 8),
+		ctlWake:   make(chan struct{}, 1),
 		adjustSig: make(chan struct{}, 1),
 		dead:      make(chan struct{}),
 	}
@@ -682,7 +723,7 @@ func (c *conn) loop() error {
 				if name == "keepalive@openssh.com" {
 					code = msgRequestSuccess
 				}
-				c.writeControl([]byte{code})
+				c.writeControlDrop([]byte{code})
 			}
 		case msgChannelOpen:
 			if err := c.openChannel(p); err != nil {
