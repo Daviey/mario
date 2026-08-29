@@ -94,6 +94,7 @@ type Game struct {
 	Best       int      // local best score; hydrated by the host, kept live
 	Daily      bool     // daily-challenge run (card title + leaderboard mode)
 	Demo       bool     // attract mode: title art is drawn over live play
+	Cheats     bool     // cheat mode: no fireball cap (host also refuses to record/submit)
 	Hurry      bool     // time crossed HurryTime: HUD turns red
 	HurryT     int      // "HURRY!" flash countdown
 	FlagDrop   float64  // 0 pennant at the top of the pole, 1 at the base
@@ -332,8 +333,9 @@ func (g *Game) updatePlaying(in Input) {
 	}
 
 	// Fireballs throw on the run-key rising edge (run and fire share the
-	// key, exactly like SMB's B button).
-	if in.Run && !g.prevIn.Run && g.Player.Power == PowerFire && g.aliveFireballs() < MaxFireballs {
+	// key, exactly like SMB's B button). Cheat mode lifts the cap.
+	if in.Run && !g.prevIn.Run && g.Player.Power == PowerFire &&
+		(g.Cheats || g.aliveFireballs() < MaxFireballs) {
 		g.throwFireball()
 	}
 

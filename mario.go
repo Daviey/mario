@@ -55,6 +55,13 @@ type Options struct {
 	// Apps in one process (the SSH server gives each connection one).
 	// nil keeps the process-wide identity (the native terminal path).
 	Session *persist.Session
+
+	// Cheats enables cheat mode: the fireball cap is lifted and the run
+	// is deliberately NOT recorded, which keeps it off the leaderboard
+	// (the UI shows UNRECORDED and refuses to submit; the server's
+	// require_replay trigger rejects recording-less rows as well).
+	// Opt-in only — it can never affect a normal run.
+	Cheats bool
 }
 
 // App is one wired-up game session: engine, input routing and leaderboard
@@ -127,6 +134,7 @@ func New(opts *Options) *App {
 	}
 
 	g := engine.NewGame(levels, viewW, viewH)
+	g.Cheats = opts.Cheats
 	if opts.Session != nil {
 		g.Best = opts.Session.Player().Best
 	} else if pc, err := persist.LoadPlayer(); err == nil {
@@ -222,7 +230,10 @@ func (a *App) Step() {
 			a.demoT++
 		}
 	}
-	if !g.Demo {
+	// Cheat runs are deliberately unrecorded: without a shippable
+	// recording the UI refuses to submit (UNRECORDED) and the server's
+	// require_replay trigger would reject the row anyway.
+	if !g.Demo && !g.Cheats {
 		switch g.State {
 		case engine.StateWorldCard:
 			// A fresh run begins here — unless the card follows a death

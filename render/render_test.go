@@ -32,6 +32,17 @@ func TestHUD(t *testing.T) {
 	}
 }
 
+func TestHUDCheatTag(t *testing.T) {
+	g := newGame(t)
+	if hud := rowText(Render(g, testPal), 0); strings.Contains(hud, "CHEATS") {
+		t.Fatalf("HUD shows CHEATS without cheat mode: %q", hud)
+	}
+	g.Cheats = true
+	if hud := rowText(Render(g, testPal), 0); !strings.Contains(hud, "CHEATS") {
+		t.Fatalf("HUD missing CHEATS tag in cheat mode: %q", hud)
+	}
+}
+
 func TestStatusLine(t *testing.T) {
 	s := Render(newGame(t), testPal)
 	if !strings.Contains(rowText(s, s.H-1), "q quit") {
