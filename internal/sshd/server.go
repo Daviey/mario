@@ -770,14 +770,24 @@ func (c *conn) channelRequest(p []byte) error {
 		if err := reply(true); err != nil {
 			return err
 		}
-		if c.ch.probe == nil && c.ch.term != "" {
-			// Ask the client's terminal to identify itself (DA2+DA3);
-			// the replies set the session's color depth (termprobe.go).
-			// Shell sessions only: the mosh wrapper runs its ssh with
-			// -n (stdin from /dev/null), so a reply can never come
-			// back through a handshake — don't send the query or pay
-			// the wait there. Queries draw nothing on screen.
+		// Ask the client's terminal to identify itself (DA2+DA3); the
+		// replies set the session's color depth (termprobe.go). Shell
+		// sessions only: the mosh wrapper runs its ssh with -n (stdin
+		// from /dev/null), so a reply can never come back through a
+		// handshake — don't send the query or pay the wait there.
+		// Queries draw nothing on screen. The field write is locked to
+		// match every other access (the data loop on this same goroutine
+		// is sequential with it, and the handler goroutines only spawn
+		// after — but don't leave an unlocked accessor behind); the
+		// query write itself stays outside the lock: ch.write can block
+		// on the channel window and takes ch.mu itself.
+		c.ch.mu.Lock()
+		needProbe := c.ch.probe == nil && c.ch.term != ""
+		if needProbe {
 			c.ch.probe = newTermProbe()
+		}
+		c.ch.mu.Unlock()
+		if needProbe {
 			if _, err := c.ch.write([]byte(termQuery)); err != nil {
 				return err
 			}
