@@ -1,6 +1,8 @@
-// Service worker for SUPER CLI MARIO: the whole site is static, so
-// same-origin GETs are cache-first with a network fallback (successful
-// responses go into the cache). Everything else — POSTs, cross-origin
+// Service worker for SUPER CLI MARIO: same-origin GETs are network-first
+// with a cache fallback (offline play keeps working). The revalidation is
+// forced ('no-cache') so a release goes live on the visitor's very next
+// page load — the browser's HTTP cache would otherwise keep serving a
+// fresh-looking (max-age) old shell. Everything else — POSTs, cross-origin
 // traffic like the Supabase leaderboard — passes straight through.
 const CACHE = 'mario-v0.2.0';
 const ASSETS = [
@@ -38,18 +40,26 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return; // leaderboard writes go to the network
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // supabase & friends pass through
+  // Navigations (any depth) resolve to the shell page.
+  const navigate = req.mode === 'navigate';
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    // Navigations (any depth) resolve to the shell page.
-    const key = req.mode === 'navigate' ? './index.html' : req;
-    const hit = await cache.match(key);
-    if (hit) return hit;
+    const key = navigate ? './index.html' : req;
+    // Network-first: a cache-first SW serves the previous release for a
+    // whole visit after every deploy (the new worker only installs in the
+    // background). 'no-cache' costs one conditional GET per asset (nginx
+    // answers 304 on the etag) instead of a full download.
+    let net = null;
     try {
-      const res = await fetch(req);
-      if (res && res.ok) cache.put(req, res.clone());
-      return res;
-    } catch {
-      return Response.error();
+      net = navigate
+        ? await fetch(new Request('./index.html', { cache: 'no-cache' }))
+        : await fetch(new Request(req, { cache: 'no-cache' }));
+    } catch {}
+    if (net && net.ok) {
+      cache.put(key, net.clone());
+      return net;
     }
+    const hit = await cache.match(key);
+    return hit || net || Response.error();
   })());
 });
