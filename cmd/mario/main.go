@@ -247,7 +247,11 @@ func run(levels []*engine.Level, width int, trueColor, daily, cheats, bellOn boo
 	}
 	cleanup := sync.OnceFunc(func() {
 		// Reset every terminal mode we touched, then hand echo back.
-		os.Stdout.WriteString("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[23t\x1b[?1049l\x1b[0m\r\n")
+		// The kitty pop comes AFTER the alt-screen exit: a terminal
+		// that snapshots keyboard state with the screen (1049's
+		// save/restore) would re-install the pushed level on exit and
+		// leave the shell emitting CSI-u garbage.
+		os.Stdout.WriteString("\x1b[?2026l\x1b[?1049l\x1b[<u\x1b[?25h\x1b[?23t\x1b[0m\r\n")
 		os.Stdout.Sync()
 		restore()
 	})
@@ -268,8 +272,11 @@ func run(levels []*engine.Level, width int, trueColor, daily, cheats, bellOn boo
 	// player who lets go during the gap never gets smooth holds at all.
 	// The leaderboard UI decodes CSI-u back to plain bytes (the Router).
 	// The leading pop heals any mode left over by a previous run that was
-	// killed without cleanup, before we push our own entry.
-	os.Stdout.WriteString("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
+	// killed without cleanup, before we push our own entry. The push
+	// itself comes AFTER the alt-screen enter (and the pop, in cleanup,
+	// after its exit): a terminal that snapshots keyboard state with the
+	// screen would otherwise resurrect the pushed level on exit.
+	os.Stdout.WriteString("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
 
 	// Fill the terminal: width in tiles, height minus HUD/status rows,
 	// Pix/2 terminal rows per tile. A taller window shows more sky/world,

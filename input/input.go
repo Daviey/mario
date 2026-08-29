@@ -66,8 +66,10 @@ type keyEvent struct {
 	k       key
 	hasKey  bool
 	special int
-	evType  int // 0 legacy press, 1 kitty press, 2 kitty repeat, 3 release
-	src     int // kitty source id: codepoint, or 0x10000|key-final; 0 = untracked
+	evType  int  // 0 legacy press, 1 kitty press, 2 kitty repeat, 3 release
+	src     int  // kitty source id: codepoint, or 0x10000|key-final; 0 = untracked
+	csi     bool // arrived as a CSI sequence (not SS3 or a plain byte)
+	kittyU  bool // CSI-u final: only the kitty protocol ever sends these
 }
 
 // Mapper converts a byte stream into per-tick engine.Input values.
@@ -90,7 +92,7 @@ type Mapper struct {
 	lastByte     int            // tick of the most recent decoded event, any key
 	buf          []byte
 	feedAge      int  // polls since the last Feed delivered bytes
-	sawKitty     bool // any explicit CSI-u event type seen (kitty protocol active)
+	sawKitty     bool // kitty protocol detected (CSI-u final or explicit event type)
 	pendQuit     bool
 	pendPause    bool
 	pendRestart  bool
@@ -278,13 +280,31 @@ func (m *Mapper) Calibration() Calibration {
 	}
 }
 
-// SawKitty reports whether any explicit kitty-protocol event (press,
-// repeat or release with an event type) has been decoded — the session's
-// input regime, surfaced for play-context logging.
+// SawKitty reports whether the input stream has spoken the kitty keyboard
+// protocol (a CSI-u final or an explicit press/repeat/release event type) —
+// the session's input regime, surfaced for play-context logging.
 func (m *Mapper) SawKitty() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sawKitty
+}
+
+// ReleaseAll drops every held key and pending press edge, keeping the
+// learned calibration. Call it whenever input stops reaching the mapper —
+// while a leaderboard screen captures the keyboard, releases are routed to
+// the UI alone, so any hold from the dying run would leak into the next
+// one (a held Right at game over runs the restarted game on).
+func (m *Mapper) ReleaseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sticky = [keyCount]bool{}
+	m.latched = [keyCount]bool{}
+	m.lastSeen = [keyCount]int{}
+	m.demoted = [keyCount]bool{}
+	m.deadAt = [keyCount]int{}
+	m.win = [keyCount]int{}
+	m.sawRepeat = [keyCount]bool{}
+	m.sources = make(map[int]key)
 }
 
 // ApplyCalibration restores persisted learning. Values are clamped to
@@ -348,8 +368,19 @@ func (m *Mapper) drain() {
 			break // incomplete escape sequence; wait for more bytes
 		}
 		m.buf = m.buf[n:]
-		if ev.evType >= 1 { // explicit kitty event type (press/repeat/release)
+		// Kitty-regime detection: a CSI-u final or any explicit event
+		// type is unambiguous kitty — legacy terminals send neither.
+		// Once the regime is known, a typeless CSI press (ghostty and
+		// kitty omit ":1" — press is the default event type) is treated
+		// as the press it is: held until its explicit release, never
+		// subject to OS-repeat inference. Without this every first hold
+		// stutters for the repeat delay (~0.5s) and taps overrun by the
+		// calibrated grace — the exact "lag and run-on" feel.
+		if ev.kittyU || ev.evType >= 1 {
 			m.sawKitty = true
+		}
+		if ev.evType == 0 && ev.csi && m.sawKitty {
+			ev.evType = 1
 		}
 		m.apply(ev)
 	}
@@ -548,15 +579,16 @@ func csiEvent(params string, final byte) keyEvent {
 			}
 		}
 	}
+	csi := keyEvent{csi: true}
 	switch final {
 	case 'A':
-		return keyEvent{k: kUp, hasKey: true, evType: evType, src: 0x10000 | 'A'}
+		return keyEvent{k: kUp, hasKey: true, evType: evType, src: 0x10000 | 'A', csi: true}
 	case 'B':
-		return keyEvent{k: kDown, hasKey: true, evType: evType, src: 0x10000 | 'B'}
+		return keyEvent{k: kDown, hasKey: true, evType: evType, src: 0x10000 | 'B', csi: true}
 	case 'C':
-		return keyEvent{k: kRight, hasKey: true, evType: evType, src: 0x10000 | 'C'}
+		return keyEvent{k: kRight, hasKey: true, evType: evType, src: 0x10000 | 'C', csi: true}
 	case 'D':
-		return keyEvent{k: kLeft, hasKey: true, evType: evType, src: 0x10000 | 'D'}
+		return keyEvent{k: kLeft, hasKey: true, evType: evType, src: 0x10000 | 'D', csi: true}
 	case 'u':
 		code := 0
 		if len(parts) > 0 {
@@ -565,21 +597,25 @@ func csiEvent(params string, final byte) keyEvent {
 		}
 		// Ctrl+C via the kitty protocol: CSI 99;5:<event> u (ctrl = mod bit 2).
 		if code == 'c' && csiCtrlHeld(parts) {
-			return keyEvent{special: spQuit, evType: evType}
+			return keyEvent{special: spQuit, evType: evType, csi: true, kittyU: true}
 		}
 		if ev, ok := mappedKey(code); ok {
 			ev.evType = evType
 			ev.src = code
+			ev.csi = true
+			ev.kittyU = true
 			return ev
 		}
+		csi.kittyU = true
 		if evType == 0 || evType == 1 {
-			return keyEvent{special: spAny, evType: evType}
+			csi.special = spAny
 		}
-		return keyEvent{evType: evType}
+		csi.evType = evType
+		return csi
 	case '~':
-		return keyEvent{} // edit/function keys: consume silently
+		return csi // edit/function keys: consume silently
 	default:
-		return keyEvent{} // cursor reports, unknown sequences: consume silently
+		return csi // cursor reports, unknown sequences: consume silently
 	}
 }
 

@@ -111,6 +111,16 @@ func TestServeSSHClientE2E(t *testing.T) {
 			t.Errorf("session output missing %q (len=%d)", marker, len(got))
 		}
 	}
+	// ORDER: the kitty pop must follow the alt-screen exit. Terminals
+	// that snapshot keyboard state with the screen (1049 save/restore)
+	// resurrect the pushed level if we pop before leaving — the player's
+	// shell then emits CSI-u garbage (regression, reported live).
+	if !strings.Contains(got, "\x1b[?1049l\x1b[<u") {
+		t.Error("epilogue must leave the alt screen before popping kitty keyboard flags")
+	}
+	if !strings.Contains(got, "\x1b[?1049h\x1b[>11u") {
+		t.Error("prologue must enter the alt screen before pushing kitty keyboard flags")
+	}
 	if len(got) < 10_000 {
 		t.Fatalf("suspiciously little game output (%d bytes)", len(got))
 	}

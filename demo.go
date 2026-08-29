@@ -15,11 +15,14 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-// LoadLevels returns the built-in levels, or a single custom level when
-// levelPath is set.
+// LoadLevels returns nil when the built-in set should be used (nil is
+// mario.New's "default levels" signal — and what keeps those runs
+// replay-verifiable: New marks explicitly-passed level sets untrusted,
+// because a custom -level file cannot be reconstructed by the server's
+// verifier), or a single custom level when levelPath is set.
 func LoadLevels(levelPath string) ([]*engine.Level, error) {
 	if levelPath == "" {
-		return engine.DefaultLevels(), nil
+		return nil, nil
 	}
 	f, err := os.Open(levelPath)
 	if err != nil {
@@ -55,6 +58,9 @@ func baseName(path string) string {
 
 // RunDemo plays a deterministic scripted session with no terminal needed.
 func RunDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) {
+	if len(levels) == 0 {
+		levels = engine.DefaultLevels()
+	}
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
 	for t := range ticks {
 		g.Update(ui.ScriptInput(t))
