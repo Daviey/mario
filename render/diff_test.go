@@ -152,6 +152,9 @@ func TestStreamSnapshotFlushMatchesDraw(t *testing.T) {
 		sa.Draw(g)
 		sb.Flush(sb.Snapshot(g))
 	}
+	if a.String() != b.String() {
+		t.Fatalf("Snapshot+Flush diverged from Draw: %d vs %d bytes", a.Len(), b.Len())
+	}
 
 	// Frame skipping: render every tick, flush only every fourth frame
 	// plus the final one — the diff must jump the baseline straight to
