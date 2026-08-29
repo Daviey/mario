@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.4.1 — 2026-08-29
+
+This release adds an SSH arcade mode, cuts terminal bandwidth roughly in half, makes the viewport follow terminal resizes live, and auto-deploys the web build to mario.baby.
+
+## Highlights
+- `mario -serve ADDR` runs an unauthenticated SSH server that presents the game — `ssh mario.baby -p 1985` and play.
+- Differential renderer cuts terminal bandwidth ~56% while keeping output byte-exact.
+- The viewport now follows terminal resizes live.
+
+## Added
+- SSH game server (`internal/sshd`, `cmd/mario/serve.go`): stdlib-only SSH2 transport, curve25519/ed25519 KEX, one session per connection; input keeps flowing over slow links via per-packet window adjusts and a latest-frame writer goroutine.
+- CI auto-deploy of the web build to mario.baby on every push to main.
+- AppImage CI build + smoke guard, with the bwrap `CAP_SYS_ADMIN` root cause documented.
+- Release notes job writes the release body and commits CHANGELOG.md.
+- Race test for concurrent Resize vs Step, SSH E2E tests, bandwidth and diff round-trip tests.
+
+## Changed
+- Renderer emits differential SGR, solid-pixel spaces, and bridges clean gaps with rewritten cells instead of cursor addresses; wire-encoding contract documented.
+- Touch pad: restart pill added; mid row wraps on narrow phones.
+- Release body changelog link points at main, not the tag; RELEASE_NOTES.md asset dropped.
+
+## Fixed
+- WEBLDFLAGS credential injection and deploy-mode fix for the web build.
+- Restored the Snapshot+Flush vs Draw equivalence assertion.
+
+## Packaging
+- .deb and .rpm packages ship alongside binaries for all five Linux architectures; AppImage built in CI (linux/amd64).
+
+
 ## v0.4.0 — 2026-08-27
 
 This release spreads mario across every platform: iOS and macOS packages built entirely on Linux, RPM and AppImage formats, a BIOS-bootable ISO, touch controls for mobile play, and a proper README with screenshots.
