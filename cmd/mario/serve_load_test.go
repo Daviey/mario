@@ -15,6 +15,23 @@ package main
 //	LOAD=1 LOAD_N=32 LOAD_SECS=10 go test -run TestServeLoadCapacity -v ./cmd/mario
 //
 // Sweep N with LOAD_N; compare fps against the LOAD_N=1 baseline run.
+//
+// Remote sweep (the serving box runs the server, the client box runs
+// only this test via LOAD_SERVER): copy the binary to the box and start
+// an instrumented instance bound to a management-only IP with the cap
+// raised out of the way — e.g.
+//
+//	nohup ./mario-load -serve 198.51.100.10:2200 -hostkey /tmp/hk \
+//		-maxsessions 400 >/tmp/log 2>&1 </dev/null &
+//
+// (redirect stdin too, or the ssh that started it never exits), then
+// from the client box run the same command with
+// LOAD_SERVER=198.51.100.10:2200. Per-run server CPU is measured on the
+// box itself: snapshot `awk '{print $14+$15}' /proc/$(pgrep -x
+// mario-load)/stat` before and after each run — jiffies divided by
+// 100*LOAD_SECS is cores (pgrep -x; -f matches wrappers). Kill the
+// instance and delete the binary afterwards. Keep LOAD_SECS identical
+// across a sweep: the fps metric depends on the game content on screen.
 
 import (
 	"bytes"
