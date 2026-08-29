@@ -125,3 +125,74 @@ func TestMoshDisabledRefusesHandshake(t *testing.T) {
 	tc.send(w.b)
 	tc.expect(msgChannelFailure)
 }
+
+// The env handed to mosh-server decides the game's color mode: mosh
+// overwrites the child TERM to xterm-256color and never forwards
+// COLORTERM, so the one signal that survives is the COLORTERM we set
+// here. See moshEnv.
+func TestMoshEnv(t *testing.T) {
+	inherited := []string{
+		"PATH=/usr/bin",
+		"TERM=dumb",        // must never shadow the client's TERM
+		"COLORTERM=junk",   // host-side leak; the client decides
+		"LANG=en_GB.UTF-8", // mosh-server needs our forced locale
+		"LC_NUMERIC=C",     // ditto, any LC_*
+		"HOME=/home/mario", // untouched
+	}
+
+	// A truecolor TERM at ssh time: the game may run 24-bit color.
+	env := moshEnv(inherited, "xterm-ghostty", "")
+	if got := termOf(env); got != "xterm-ghostty" {
+		t.Errorf("TERM = %q, want the client's (exactly once)", got)
+	}
+	if got := colorTermOf(env); got != "truecolor" {
+		t.Errorf("COLORTERM = %q, want truecolor for a truecolor TERM", got)
+	}
+	if !hasEnv(env, "HOME=/home/mario") || hasEnv(env, "LC_NUMERIC=C") {
+		t.Errorf("unexpected inherited-env handling: %v", env)
+	}
+
+	// A plain 256-color TERM alone must NOT claim truecolor (real
+	// xterm would ignore 38;2 and lose all color).
+	env = moshEnv(inherited, "xterm-256color", "")
+	if got := colorTermOf(env); got != "" {
+		t.Errorf("COLORTERM = %q for plain TERM, want none", got)
+	}
+
+	// ...but an env-requested COLORTERM (ssh -o SendEnv=COLORTERM)
+	// wins for terminals like VTE that only hint via env.
+	env = moshEnv(inherited, "xterm-256color", "truecolor")
+	if got := colorTermOf(env); got != "truecolor" {
+		t.Errorf("COLORTERM = %q with forwarded client hint, want truecolor", got)
+	}
+}
+
+func termOf(env []string) (got string) {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TERM=") {
+			if got != "" {
+				return "duplicate!"
+			}
+			got = kv[len("TERM="):]
+		}
+	}
+	return
+}
+
+func colorTermOf(env []string) string {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "COLORTERM=") {
+			return kv[len("COLORTERM="):]
+		}
+	}
+	return ""
+}
+
+func hasEnv(env []string, want string) bool {
+	for _, kv := range env {
+		if kv == want {
+			return true
+		}
+	}
+	return false
+}

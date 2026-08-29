@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Daviey/mario/render"
 )
 
 // Mosh support: anonymous players can upgrade their SSH transport to
@@ -151,7 +153,7 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 	if t := c.ch.term; t != "" {
 		req.term = t
 	}
-	cmd.Env = append(os.Environ(), "TERM="+req.term, "LC_ALL=C.UTF-8")
+	cmd.Env = moshEnv(os.Environ(), req.term, c.ch.envColorTerm())
 	// Own process group: the SSH connection ending (or the server
 	// process being signalled) must not end the game session.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -210,4 +212,47 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 		c.ch.shutdown()
 	}()
 	return nil
+}
+
+// moshEnv builds the environment handed to mosh-server. Inherited
+// TERM/COLORTERM/locale entries are stripped first: mosh-server
+// overwrites the child's TERM unconditionally ("xterm-256color" with
+// -c 256 — the client's TERM never survives mosh, verified against
+// mosh 1.4.0 source), and a duplicate earlier entry would shadow the
+// appended one anyway (getenv returns the first match). COLORTERM is
+// the one truecolor signal that reaches the game through mosh-server
+// untouched: set it when the client's ssh-phase TERM names a truecolor
+// terminal (render.TrueColorTerm) or the client forwarded COLORTERM as
+// an env request (ssh -o SendEnv=COLORTERM), so the game runs its
+// truecolor palette instead of ANSI-16 — the "less colours over mosh"
+// bug. Terminals that cannot render 38;2 ignore it gracefully.
+func moshEnv(inherited []string, term, clientColorTerm string) []string {
+	colorTerm := clientColorTerm
+	if colorTerm == "" && render.TrueColorTerm(term) {
+		colorTerm = "truecolor"
+	}
+	var out []string
+	for _, kv := range inherited {
+		k := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			k = kv[:i]
+		}
+		if k == "TERM" || k == "COLORTERM" || k == "LANG" || strings.HasPrefix(k, "LC_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "TERM="+term, "LC_ALL=C.UTF-8")
+	if colorTerm != "" {
+		out = append(out, "COLORTERM="+colorTerm)
+	}
+	return out
+}
+
+// envColorTerm returns the COLORTERM the client sent as an env request
+// (e.g. ssh -o SendEnv=COLORTERM), "" when none.
+func (c *channel) envColorTerm() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.env["COLORTERM"]
 }

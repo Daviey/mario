@@ -555,3 +555,24 @@ func TestRenderPixels(t *testing.T) {
 		t.Errorf("sky rgb = %x %x %x", rgb[i], rgb[i+1], rgb[i+2])
 	}
 }
+
+func TestTrueColorTerm(t *testing.T) {
+	for _, tc := range []struct {
+		term string
+		want bool
+	}{
+		{"xterm-ghostty", true},
+		{"ghostty", true},
+		{"wezterm", true},
+		{"xterm-truecolor", true},
+		{"xterm-direct", true},
+		{"xterm-256color", false},
+		{"xterm", false},
+		{"tmux-256color", false},
+		{"", false},
+	} {
+		if got := TrueColorTerm(tc.term); got != tc.want {
+			t.Errorf("TrueColorTerm(%q) = %v, want %v", tc.term, got, tc.want)
+		}
+	}
+}

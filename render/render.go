@@ -74,6 +74,17 @@ type Palette struct {
 	White        Color
 }
 
+// TrueColorTerm reports whether a TERM value names a terminal that
+// renders 24-bit color sequences without any COLORTERM hint. Hosts that
+// only ever see TERM (mosh overwrites the child's TERM to xterm-256color
+// and drops COLORTERM entirely) use this on the TERM the client sent at
+// ssh time to decide whether the game may run truecolor.
+func TrueColorTerm(term string) bool {
+	return strings.Contains(term, "truecolor") ||
+		strings.Contains(term, "direct") ||
+		term == "ghostty" || term == "xterm-ghostty" || term == "wezterm"
+}
+
 // NewPalette returns the game palette, emitting 24-bit color sequences when
 // trueColor is set and basic ANSI-16 sequences otherwise.
 func NewPalette(trueColor bool) *Palette {

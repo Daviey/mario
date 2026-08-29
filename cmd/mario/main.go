@@ -343,17 +343,10 @@ func isTTY(f *os.File) bool {
 // trueColorSupported sniffs the environment for terminals that render
 // 24-bit color sequences.
 func trueColorSupported() bool {
-	term := os.Getenv("TERM")
-	if strings.Contains(term, "truecolor") || strings.Contains(term, "direct") {
+	// TERM-only rule shared with the SSH/mosh hosts (render.TrueColorTerm);
+	// COLORTERM covers terminals like VTE that only hint via env.
+	if render.TrueColorTerm(os.Getenv("TERM")) {
 		return true
 	}
-	if os.Getenv("COLORTERM") != "" {
-		return true
-	}
-	// Ghostty and WezTerm advertise truecolor capability without either
-	// variable naming it directly.
-	if term == "ghostty" || term == "xterm-ghostty" || term == "wezterm" {
-		return true
-	}
-	return false
+	return os.Getenv("COLORTERM") != ""
 }
