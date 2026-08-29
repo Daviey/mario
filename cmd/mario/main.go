@@ -11,6 +11,7 @@
 //	-level FILE   play a custom ASCII level instead of the built-ins
 //	-width N      viewport width in tiles (0 = terminal width)
 //	-basic        force 16-color ANSI output instead of truecolor
+//	-nobell       disable terminal-bell sound feedback (on by default)
 //	-scores N     print the top N leaderboard scores and exit
 //	-daily        with -scores: the daily board; alone: play today's challenge
 //	-ui-preview M render a leaderboard UI screen headless (ask|entry|board|title-board)
@@ -68,6 +69,7 @@ func main() {
 	moshPorts := flag.String("mosh-ports", "60000:60100", "with -mosh: UDP `RANGE` for mosh sessions, \"lo:hi\"")
 	maxSessions := flag.Int("maxsessions", 0, "with -serve: concurrent session cap (0 = 16); excess connections are refused pre-handshake")
 	cheats := flag.Bool("cheats", false, "cheat mode: unlimited fireballs; the run is not recorded and cannot be submitted to the leaderboard")
+	nobell := flag.Bool("nobell", false, "disable terminal-bell sound feedback (coins, stomps, power-ups...)")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -132,7 +134,7 @@ func main() {
 				mb = ""
 			}
 		}
-		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts, *maxSessions); err != nil {
+		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts, *maxSessions, !*nobell); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
@@ -144,7 +146,7 @@ func main() {
 		return
 	}
 
-	if _, err := run(levels, *width, trueColor, *daily, *cheats); err != nil {
+	if _, err := run(levels, *width, trueColor, *daily, *cheats, !*nobell); err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
@@ -228,7 +230,7 @@ func usage(w io.Writer) {
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, trueColor, daily, cheats bool) (int, error) {
+func run(levels []*engine.Level, width int, trueColor, daily, cheats, bellOn bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -278,7 +280,7 @@ func run(levels []*engine.Level, width int, trueColor, daily, cheats bool) (int,
 	}
 	viewH := (termHeight() - 2) * 2 / render.Pix
 
-	app := mario.New(&mario.Options{
+	opts := &mario.Options{
 		Levels:    levels,
 		ViewW:     viewW,
 		ViewH:     viewH,
@@ -286,7 +288,15 @@ func run(levels []*engine.Level, width int, trueColor, daily, cheats bool) (int,
 		Surface:   "local", // play-context diagnostics with each submission
 		Term:      os.Getenv("TERM"),
 		ColorTerm: os.Getenv("COLORTERM"),
-	})
+	}
+	if bellOn {
+		// Sound feedback: BEL bytes on stdout — the one audio channel
+		// every terminal carries. Mosh runs this same binary as a
+		// plain local process under mosh-server, so local, SSH and
+		// mosh all ring the same bell.
+		opts.Sound = newBell(os.Stdout).ring
+	}
+	app := mario.New(opts)
 	if daily {
 		app.StartDaily()
 	}

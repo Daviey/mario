@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -256,5 +257,39 @@ func TestCheatsDisableRecording(t *testing.T) {
 	}
 	if !b.rec.Live() {
 		t.Fatal("normal run should be recording")
+	}
+}
+
+func TestSoundHookDeliversCoinEvent(t *testing.T) {
+	// The full path: engine coin pickup → Options.Sound notification.
+	// The hook must notify without consuming Game.Events (the browser
+	// build still reads them for its synth).
+	bld := engine.NewBuilder(40, engine.LevelHeight)
+	bld.Flag(30)
+	bld.Set(1, 12, 'c') // coin on the default spawn: collected on the first playing tick
+	lvl, err := engine.ParseLevel("soundtest", bld.Rows())
+	if err != nil {
+		t.Fatalf("ParseLevel: %v", err)
+	}
+	var got []string
+	a := New(&Options{
+		Levels: []*engine.Level{lvl},
+		Sound:  func(ev string) { got = append(got, ev) },
+	})
+	a.Feed([]byte("\r")) // AnyKey: title → world card → playing
+	for range 600 {
+		before := len(got)
+		a.Step()
+		for _, ev := range got[before:] {
+			if !slices.Contains(a.Game.Events, ev) {
+				t.Fatalf("hook event %q missing from Game.Events (the hook must not consume)", ev)
+			}
+		}
+		if slices.Contains(got, "coin") {
+			break
+		}
+	}
+	if !slices.Contains(got, "coin") {
+		t.Fatalf("sound hook never saw a coin event; events = %v", got)
 	}
 }

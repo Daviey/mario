@@ -48,6 +48,12 @@ print the daily board).
 Cheat mode: unlimited fireballs. The run is not recorded and cannot be
 submitted to the leaderboard.
 .TP
+.BR \-nobell
+Disable terminal-bell sound feedback. By default the game rings the
+terminal bell (BEL) for sound events — coins, stomps, power-ups, death,
+level clear — locally and over SSH/mosh; terminals map it to a beep,
+flash or urgency hint according to their own settings.
+.TP
 .BI \-ui\-preview\ MODE
 Render a leaderboard UI screen headless and exit
 .RB ( ask ", " entry ", " board ", " title-board ).

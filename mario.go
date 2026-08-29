@@ -64,6 +64,14 @@ type Options struct {
 	// require_replay trigger rejects recording-less rows as well).
 	// Opt-in only — it can never affect a normal run.
 	Cheats bool
+	// Sound, when non-nil, is invoked once per engine sound event
+	// (Game.Events: "coin", "stomp", "die", ...) right after each
+	// engine update. It is a notification only — events are not
+	// consumed and stay readable on Game.Events (the browser build
+	// reads them there for its WebAudio synth). Attract-mode demo
+	// events are not reported: a title screen must not beep. The hook
+	// runs on the goroutine that calls Step.
+	Sound func(ev string)
 	// Play context — operator-only diagnostics stored with each
 	// submission: where the run was played (local/ssh/web), the
 	// terminal's TERM and COLORTERM, and on the web build the browser's
@@ -95,6 +103,7 @@ type App struct {
 	levelsTrust  bool            // built-in level set: runs are verifiable
 	dailyTrusted bool            // default daily generator: daily runs verifiable
 	saveBest     func(score int) // records the session best (persist or per-connection)
+	sound        func(string)    // optional per-event sound notification (Options.Sound)
 }
 
 // New builds an App from opts and draws nothing yet.
@@ -155,6 +164,7 @@ func New(opts *Options) *App {
 		levelsTrust:  len(opts.Levels) == 0,
 		dailyTrusted: opts.DailyLevel == nil,
 		saveBest:     persist.SaveBest,
+		sound:        opts.Sound,
 	}
 	mach := ui.NewUI(nil, nil)
 	if opts.Session != nil {
@@ -268,6 +278,11 @@ func (a *App) Step() {
 		a.rec.Record(in)
 	}
 	g.Update(in)
+	if a.sound != nil && !g.Demo {
+		for _, ev := range g.Events {
+			a.sound(ev)
+		}
+	}
 	a.prevState = g.State
 	if g.State == engine.StateGameOver || g.State == engine.StateWin {
 		a.rec.Finish()

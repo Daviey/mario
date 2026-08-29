@@ -20,14 +20,14 @@ import (
 
 // runServe serves the game over SSH until the listener fails. moshBin
 // (from -mosh, empty = mosh handshake disabled) enables anonymous mosh
-func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string, maxSessions int) error {
+func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string, maxSessions int, bellOn bool) error {
 	// Calibration warm-start, keyed by client host (see calCache). One
 	// per server process, shared by every session handler.
 	cals := &calCache{}
 	srv := &sshd.Server{
 		Addr:          addr,
 		HostKeyFile:   hostKeyFile,
-		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals) },
+		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals, bellOn) },
 		MoshBin:       moshBin,
 		MoshPortRange: moshPorts,
 	}
@@ -118,7 +118,7 @@ func (w sessWriter) Write(p []byte) (int, error) {
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
-func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache) {
+func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache, bellOn bool) {
 	// Per-session color depth, not the server process's own terminal:
 	// a forwarded COLORTERM env request, the client's TERM family, or
 	// the DA2/DA3 terminal probe decides (Session.TrueColor). The
@@ -136,7 +136,8 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	mapper, saveCal := sessionMapper(cals, s.RemoteAddr())
 	defer saveCal() // the session's learned repeat timing serves the next connect
 
-	app := mario.New(&mario.Options{
+	out := sessWriter{s: s} // frame writer, and the bell sink below
+	opts := &mario.Options{
 		Levels:    levels,
 		ViewW:     viewW,
 		ViewH:     viewH,
@@ -145,7 +146,15 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		Surface:   "ssh",                  // play-context diagnostics
 		Term:      s.Term(),
 		ColorTerm: s.Env("COLORTERM"),
-	})
+	}
+	if bellOn {
+		// Sound feedback as BEL bytes on the session channel. Written
+		// from the tick goroutine while frames flush on the writer
+		// goroutine — channel.write is mutex-guarded, and BEL is a C0
+		// control every terminal parser executes even mid-sequence.
+		opts.Sound = newBell(out).ring
+	}
+	app := mario.New(opts)
 	s.OnFeed(app.Feed) // also flushes keystrokes the color probe buffered
 	// Client-side resizes follow like the native runner's SIGWINCH: new
 	// viewport on the next tick, full repaint at the new size.
@@ -160,7 +169,6 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	// alt-screen exit would print garbage on the player's shell.
 	s.Write([]byte("\x1b[<u\x1b[>11u\x1b[?1049h\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
 
-	out := sessWriter{s: s}
 	st := render.NewStream(out, render.NewPalette(trueColor))
 
 	// Rendering and writing are decoupled. The tick goroutine snapshots
