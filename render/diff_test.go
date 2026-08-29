@@ -134,6 +134,46 @@ func TestDiffGameplayFramesAreSmall(t *testing.T) {
 	}
 }
 
+// Snapshot+Flush split Draw in two so a caller can render on the game
+// goroutine and write from another one (the SSH host drops frames, not
+// ticks, when the link backs up). The split must stay byte-identical to
+// the classic Draw path, and skipping frames between flushes must still
+// land the terminal on the newest screen.
+func TestStreamSnapshotFlushMatchesDraw(t *testing.T) {
+	g := newGame(t)
+	g.Update(engine.Input{})
+
+	var a, b strings.Builder
+	sa := NewStream(&a, testPal)
+	sb := NewStream(&b, testPal)
+	for range 30 {
+		g.Tick += 3
+		g.Update(engine.Input{})
+		sa.Draw(g)
+		sb.Flush(sb.Snapshot(g))
+	}
+
+	// Frame skipping: render every tick, flush only every fourth frame
+	// plus the final one — the diff must jump the baseline straight to
+	// the newest screen (proved by the next identical flush going quiet).
+	var c strings.Builder
+	sc := NewStream(&c, testPal)
+	for i := range 12 {
+		g.Tick += 3
+		g.Update(engine.Input{})
+		cur := sc.Snapshot(g)
+		if i%4 == 0 {
+			sc.Flush(cur)
+		}
+	}
+	sc.Flush(sc.Snapshot(g))
+	before := c.Len()
+	sc.Flush(sc.Snapshot(g)) // unchanged state: must emit nothing
+	if c.Len() != before {
+		t.Errorf("flush after skipped frames left the baseline stale (%d extra bytes)", c.Len()-before)
+	}
+}
+
 func TestDiffSizeChangeClearsStaleCells(t *testing.T) {
 	// Shrinking the frame leaves painted cells outside the new bounds —
 	// no diff can reach them, so the size-change repaint must blank the

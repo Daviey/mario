@@ -33,12 +33,17 @@ type testClient struct {
 }
 
 // startServer boots a Server on its own listener; srv.Addr becomes the
-// bound address.
-func startServer(t *testing.T, handler func(*Session)) *Server {
+// bound address. Optional pre functions configure the Server before it
+// starts — mutating Server fields after Serve is running is a data race
+// (Serve's init reads them).
+func startServer(t *testing.T, handler func(*Session), pre ...func(*Server)) *Server {
 	t.Helper()
 	srv := &Server{
 		Handler: handler,
 		Log:     log.New(io.Discard, "", 0),
+	}
+	for _, f := range pre {
+		f(srv)
 	}
 	if err := srv.init(); err != nil {
 		t.Fatal(err)
@@ -501,6 +506,39 @@ func TestWindowFlowControl(t *testing.T) {
 	}
 }
 
+// Keystroke data consumed by the handler must be replenished with window
+// adjusts: a client that tracks our advertised window (OpenSSH does)
+// stops sending channel data once it believes the window is spent, so a
+// session that never adjusts goes input-dead after ~2MB of cumulative
+// keystrokes — about an hour of held keys, or a few big pastes.
+func TestInputWindowReplenished(t *testing.T) {
+	fed := make(chan int, 8)
+	srv := startServer(t, func(s *Session) {
+		s.OnFeed(func(b []byte) { fed <- len(b) })
+		<-s.Done()
+	})
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	tc.openSession(1<<20, 32768)
+	tc.shell()
+
+	for _, chunk := range []string{"right hold ", "jump!"} {
+		tc.sendData([]byte(chunk))
+
+		// One adjust per consumed packet, for exactly its byte count.
+		p := tc.expect(msgWindowAdjust)
+		r := &reader{b: p[1:]}
+		r.u32() // recipient channel
+		add := r.u32()
+		if !r.ok() || add != uint32(len(chunk)) {
+			t.Fatalf("window adjust = %d, want %d", add, len(chunk))
+		}
+		if n := <-fed; n != len(chunk) {
+			t.Fatalf("fed %d bytes, want %d", n, len(chunk))
+		}
+	}
+}
+
 func TestRekeyMidSession(t *testing.T) {
 	srv := startServer(t, echoHandler)
 	tc := dial(t, srv.Addr)
@@ -519,9 +557,7 @@ func TestRekeyMidSession(t *testing.T) {
 }
 
 func TestSessionCapRefusesExcess(t *testing.T) {
-	srv := startServer(t, echoHandler)
-	srv.MaxSessions = 1
-	srv.sem = make(chan struct{}, 1)
+	srv := startServer(t, echoHandler, func(s *Server) { s.MaxSessions = 1 })
 
 	tc := dial(t, srv.Addr)
 	tc.authNone() // occupies the single slot

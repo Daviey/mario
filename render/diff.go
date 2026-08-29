@@ -88,14 +88,25 @@ func NewStream(out io.Writer, pal *Palette) *Stream { return &Stream{out: out, p
 // Reset drops the diff baseline.
 func (s *Stream) Reset() { s.prev = nil }
 
-// Draw renders one frame, writing only what changed.
-func (s *Stream) Draw(g *engine.Game, ui ...*ScoreUI) {
-	cur := Render(g, s.pal, ui...)
+// Snapshot renders one frame to a Screen without writing anything — for
+// callers that hand the frame to another goroutine (Flush). Rendering
+// reads engine state, so it must run where the game is quiescent.
+func (s *Stream) Snapshot(g *engine.Game, ui ...*ScoreUI) *Screen {
+	return Render(g, s.pal, ui...)
+}
+
+// Flush diffs cur against the last flushed screen and writes the update.
+// Safe to call from a different goroutine than Snapshot (and one at a
+// time): Snapshot only reads the palette, Flush alone touches prev/out.
+func (s *Stream) Flush(cur *Screen) {
 	if d := Diff(s.prev, cur); d != "" {
 		io.WriteString(s.out, d)
 	}
 	s.prev = cur
 }
+
+// Draw renders one frame, writing only what changed.
+func (s *Stream) Draw(g *engine.Game, ui ...*ScoreUI) { s.Flush(s.Snapshot(g, ui...)) }
 
 // writeRun emits one contiguous span of cells [from,to) on row y, starting
 // from a fresh style state.
