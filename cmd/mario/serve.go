@@ -54,6 +54,11 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool) {
 		Session: persist.BeginSession(), // per-connection player identity
 	})
 	s.OnFeed(app.Feed)
+	// Client-side resizes follow like the native runner's SIGWINCH: new
+	// viewport on the next tick, full repaint at the new size.
+	s.OnResize(func(cols, rows int) {
+		app.Resize(cols/render.Pix, (rows-2)*2/render.Pix)
+	})
 
 	// Terminal setup/teardown mirrors run()'s (kitty keyboard protocol,
 	// alt screen, hidden cursor, window title). Unsupported terminals

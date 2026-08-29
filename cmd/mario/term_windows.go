@@ -4,7 +4,9 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -124,3 +126,29 @@ func termWidth() int { _, c := consoleInfo(); return c }
 
 // termHeight returns the console height in rows (0 when unknown).
 func termHeight() int { r, _ := consoleInfo(); return r }
+
+// onResize polls the console size and invokes f when it changes — the
+// Windows console has no SIGWINCH, and its resize event only arrives on
+// the raw input pump we deliberately avoid.
+func onResize(f func()) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		rows, cols := consoleInfo()
+		t := time.NewTicker(250 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				r, c := consoleInfo()
+				if r > 0 && c > 0 && (r != rows || c != cols) {
+					rows, cols = r, c
+					f()
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}

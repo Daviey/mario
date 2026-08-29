@@ -23,6 +23,7 @@
 package mario
 
 import (
+	"sync"
 	"time"
 
 	"github.com/Daviey/mario/engine"
@@ -65,6 +66,11 @@ type App struct {
 	io     *ui.Router
 	ui     *render.ScoreUI // latest leaderboard snapshot (nil when off)
 	quit   bool
+
+	// Viewport change requested from another goroutine (Resize); lands
+	// on the next Step so the engine is only touched from one place.
+	resizeMu         sync.Mutex
+	resizeW, resizeH int
 
 	dailyLevel   func() *engine.Level
 	idle         int             // ticks idle on the title screen (attract mode)
@@ -161,11 +167,40 @@ func New(opts *Options) *App {
 // from the reader side; the game never blocks on it.
 func (a *App) Feed(b []byte) { a.io.Feed(b) }
 
+// Resize requests a new viewport in tiles, following the same policy as
+// New (16..60 wide, at least 4 tall). Safe to call from any goroutine
+// while another Steps: the change is applied on the next Step, and the
+// next drawn frame repaints in full at the new size (render.Diff).
+func (a *App) Resize(viewW, viewH int) {
+	if viewW < 16 {
+		viewW = 16
+	}
+	if viewW > 60 {
+		viewW = 60
+	}
+	if viewH < 4 {
+		viewH = 4
+	}
+	a.resizeMu.Lock()
+	a.resizeW, a.resizeH = viewW, viewH
+	a.resizeMu.Unlock()
+}
+
 // Step advances the game exactly one tick: polls input, updates the
 // engine and the leaderboard UI. Drive it from your own clock (the
 // terminal runner uses 60 Hz) and read Game/UI afterwards.
 func (a *App) Step() {
 	g := a.Game
+
+	// A viewport change requested from another goroutine (SIGWINCH,
+	// SSH window-change) lands here, on the tick goroutine.
+	a.resizeMu.Lock()
+	w, h := a.resizeW, a.resizeH
+	a.resizeW, a.resizeH = 0, 0
+	a.resizeMu.Unlock()
+	if w != 0 {
+		g.SetViewport(w, h)
+	}
 
 	// Title-screen 'd' starts the daily challenge (checked before the
 	// update so the same press cannot also dismiss the title).

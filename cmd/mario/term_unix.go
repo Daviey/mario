@@ -5,8 +5,11 @@ package main
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 )
 
 // rawMode puts the terminal into raw no-echo mode via stty and returns a
@@ -62,3 +65,24 @@ func termWidth() int { _, c := termSize(); return c }
 
 // termHeight returns the terminal height in rows (0 when unknown).
 func termHeight() int { r, _ := termSize(); return r }
+
+// onResize invokes f whenever the terminal is resized (SIGWINCH). The
+// returned function stops watching.
+func onResize(f func()) (stop func()) {
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-winch:
+				f()
+			case <-done:
+				signal.Stop(winch)
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}

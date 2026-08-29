@@ -275,6 +275,17 @@ func (tc *testClient) shell() {
 	tc.expect(msgChannelSuccess)
 }
 
+func (tc *testClient) winch(cols, rows uint32) {
+	w := &buf{}
+	w.u8(msgChannelRequest)
+	w.u32(0)
+	w.cstr("window-change")
+	w.boolean(false)
+	w.u32(cols)
+	w.u32(rows)
+	tc.send(w.b)
+}
+
 func (tc *testClient) sendData(b []byte) {
 	w := &buf{}
 	w.u8(msgChannelData)
@@ -343,6 +354,54 @@ func TestServeSessionFlow(t *testing.T) {
 	w.u32(0)
 	tc.send(w.b)
 	// Teardown order: exit-status request, EOF, then channel close.
+	p := tc.read()
+	r := &reader{b: p[1:]}
+	if len(p) == 0 || p[0] != msgChannelRequest || r.u32() != 0 || string(r.str()) != "exit-status" {
+		t.Fatalf("expected exit-status request, got %v", p)
+	}
+	tc.expect(msgChannelEOF)
+	tc.expect(msgChannelClose)
+}
+
+// resizeHandler reports the launch size, then every window-change the
+// client sends mid-session.
+func resizeHandler(s *Session) {
+	cols, rows := s.Size()
+	fmt.Fprintf(s, "SIZE=%dx%d", cols, rows)
+	s.OnResize(func(cols, rows int) {
+		fmt.Fprintf(s, "RESIZE=%dx%d", cols, rows)
+	})
+	<-s.Done()
+}
+
+func TestServeWindowChangeMidSession(t *testing.T) {
+	srv := startServer(t, resizeHandler)
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	tc.openSession(1<<20, 32768)
+	tc.ptyReq(120, 40)
+	tc.shell()
+	if got := string(tc.readData()); got != "SIZE=120x40" {
+		t.Fatalf("initial size report = %q", got)
+	}
+
+	tc.winch(100, 30)
+	if got := string(tc.readData()); got != "RESIZE=100x30" {
+		t.Fatalf("resize report = %q", got)
+	}
+	// Zero fields are ignored per RFC 4254 — if the server wrongly fired
+	// for this one, the next read sees the stray report and fails.
+	tc.winch(0, 0)
+	tc.winch(80, 24)
+	if got := string(tc.readData()); got != "RESIZE=80x24" {
+		t.Fatalf("second resize report = %q", got)
+	}
+
+	// Graceful end, mirroring TestServeSessionFlow.
+	w := &buf{}
+	w.u8(msgChannelClose)
+	w.u32(0)
+	tc.send(w.b)
 	p := tc.read()
 	r := &reader{b: p[1:]}
 	if len(p) == 0 || p[0] != msgChannelRequest || r.u32() != 0 || string(r.str()) != "exit-status" {
