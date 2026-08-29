@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/Daviey/mario/render"
@@ -156,7 +155,7 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 	cmd.Env = moshEnv(os.Environ(), req.term, c.ch.envColorTerm())
 	// Own process group: the SSH connection ending (or the server
 	// process being signalled) must not end the game session.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = ownProcessGroup()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -202,8 +201,7 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 	// Without this teardown it waits forever — the classic hang.
 	go func() {
 		defer moshRunning.Add(-1)
-		var ws syscall.WaitStatus
-		syscall.Wait4(pid, &ws, 0, nil)
+		reap(pid)
 		// The CONNECT line is in the pipe buffer before the parent
 		// exits, but the relays may not have pumped it to the wire
 		// yet — and the forked child holds the pipes open, so there
