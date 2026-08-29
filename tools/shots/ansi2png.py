@@ -35,13 +35,23 @@ def parse_ansi(data):
     while i < n:
         b = data[i]
         if b == ESC:
-            m = re.match(rb"\x1b\[([0-9;]*)([A-Za-z])", data[i:])
+            m = re.match(rb"\x1b\[([?0-9;]*)([A-Za-z])", data[i:])
             if not m:
                 i += 1
                 continue
             params, final = m.group(1), m.group(2)
-            if final == b"H":
-                x = y = 0
+            if params.startswith(b"?"):
+                pass  # private modes (e.g. synchronized output): ignore
+            elif final == b"H":
+                pp = [int(v) if v else 1 for v in params.split(b";")] or [1, 1]
+                while len(pp) < 2:
+                    pp.append(1)
+                y = pp[0] - 1
+                x = pp[1] - 1
+            elif final == b"C":
+                # NB: do not shadow n (the data length bound).
+                k = int(params.decode() or "1")
+                x += k
             elif final == b"m":
                 parts = params.split(b";") if params else [b"0"]
                 j = 0

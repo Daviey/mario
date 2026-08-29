@@ -1,6 +1,7 @@
 package render
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -401,7 +402,9 @@ func TestTrueColorVsBasicSequences(t *testing.T) {
 	if strings.Contains(basic, "38;2;") {
 		t.Error("basic frame must not emit 24-bit sequences")
 	}
-	if !strings.Contains(basic, "\x1b[0;3") && !strings.Contains(basic, "\x1b[0;9") {
+	// Differential SGR emits bare ANSI-16 codes ("36") without the old
+	// "0;" reset prefix; match them in any position.
+	if !regexp.MustCompile(`\x1b\[[0-9;]*(3[0-7]|9[0-7])m`).MatchString(basic) {
 		t.Error("basic frame missing ANSI-16 codes")
 	}
 }
@@ -418,8 +421,30 @@ func TestANSIFrame(t *testing.T) {
 	if n := strings.Count(f, "\r\n"); n != s.H-1 {
 		t.Errorf("row breaks = %d, want %d", n, s.H-1)
 	}
-	if !strings.Contains(rowText(s, 5), "▀") {
-		t.Error("world rows must use half blocks")
+	// World rows pack two pixels per cell: differing halves ride the
+	// half block, solid pairs are a space over the colour.
+	blocks, solid := 0, 0
+	for y := 1; y < s.H-1; y++ {
+		for x := range s.W {
+			c := s.At(x, y)
+			switch c.Ch {
+			case '▀':
+				blocks++
+				if c.Fg == c.Bg {
+					t.Errorf("cell (%d,%d): solid pair encoded as half block", x, y)
+				}
+			case ' ':
+				solid++
+				if c.Fg != c.Bg {
+					t.Errorf("cell (%d,%d): split pair encoded as space", x, y)
+				}
+			default:
+				t.Errorf("cell (%d,%d): unexpected world glyph %q", x, y, c.Ch)
+			}
+		}
+	}
+	if blocks == 0 || solid == 0 {
+		t.Error("world rows must use both half blocks and solid spaces")
 	}
 }
 

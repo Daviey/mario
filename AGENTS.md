@@ -16,7 +16,7 @@ stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plai
 60 Hz ticker ─▶ play() (main.go) ─▶ engine.Game.Update(engine.Input)
                                     │
                      render.Stream.Draw(g, ui) ─▶ worldFrame → Frame (square pixels)
-                     native: Diff → ANSI half-blocks to stdout
+                     native: Diff → ANSI half-blocks/spaces to stdout (differential SGR, see Gotchas)
                      wasm:   RenderPixels → RGB bytes → page's marioFrame()
                     efi:    RenderPixels → RGB bytes → scaled fbdev blit (/dev/fb0)
 ```
@@ -139,6 +139,8 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 - Coverage: `make cover`; no enforced threshold.
 
 ## Gotchas
+
+- **Wire-encoding contract (bandwidth is a feature)**: SGR styles were 80% of frame bytes; `render.String`/`Diff` share `sgrState`, a minimal-diff SGR encoder (state persists across cells/runs/rows; a space never carries fg; attribute *clears* fall back to a full `0;…` form — `ansi2png.py` and `diff_roundtrip_test.go`'s terminal model must both parse whatever you emit). Solid pixel pairs (upper==lower) are `' '` over the colour, not `▀`. `Diff` bridges ≤12-cell clean gaps by re-writing identical cells when the exact serialized cost (styles included) beats a cursor address, and advances continuation rows with `\r\n`. Tripwires: `TestDiffStreamRoundTrip` (byte-stream → screen reconstruction) and `TestStreamBandwidth` (B/tick caps). Keep `tools/shots/ansi2png.py` able to consume real output — it now parses CUP row/col, CUF and private modes; its CUF handler once shadowed the loop bound `n`.
 
 - **Worktree policy (this machine)**: agent work happens in linked worktrees (`git worktree add .worktrees/<feature> -b <branch>`, or sibling `../game-<feature>`), never in the direct checkout; copy `.env` in; merge back into `main` (expect divergence — the user commits concurrently) and re-run the full suite on merged `main` before pushing. **Hook-enforced since 2026-08-25**: `.omp/hooks/pre/worktree-guard.ts` blocks `edit`/`write` calls targeting the main checkout in every omp session here (`.worktrees/**` and sibling worktrees pass; `bash` — git merge/push — is untouched; the guard fails open on unusual shapes, so it is a guardrail, not a jail).
 - **Branch hygiene (2026-08-27, user rule)**: worktree branches stay LOCAL — merge into `main`, push ONLY `main`, then delete the branch. Never `git push origin <feature-branch>`: stale remote feature branches accumulated that way (six were purged with the history rewrite). The remote carries `main` + tags, nothing else.

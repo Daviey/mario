@@ -74,11 +74,19 @@ func TestDiffTwoSpansSameRow(t *testing.T) {
 	b.Set(1, 0, 'A', testPal.Text)
 	b.Set(8, 0, 'B', testPal.Text)
 	d := Diff(a, b)
-	if got := strings.Count(d, "\x1b[1;"); got != 2 {
-		t.Errorf("row-1 cursor addresses = %d, want 2: %q", got, d)
+	// Both spans are addressed (the second via the cheaper relative
+	// forward move over the 6-cell gap), never a full repaint.
+	if !strings.Contains(d, "\x1b[1;2H") {
+		t.Errorf("first span not cursor-addressed: %q", d)
 	}
-	if !strings.Contains(d, "\x1b[1;2H") || !strings.Contains(d, "\x1b[1;9H") {
-		t.Errorf("span addresses wrong: %q", d)
+	if !strings.Contains(d, "\x1b[6C") {
+		t.Errorf("second span not reached by relative move: %q", d)
+	}
+	if strings.Contains(d, "\x1b[H") {
+		t.Error("diff must not full-repaint")
+	}
+	if n := strings.Count(d, "A") + strings.Count(d, "B"); n != 2 {
+		t.Errorf("span glyphs written %d times, want 2: %q", n, d)
 	}
 }
 
