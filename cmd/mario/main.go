@@ -277,7 +277,14 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 	}
 	viewH := (termHeight() - 2) * 2 / render.Pix
 
-	app := mario.New(&mario.Options{Levels: levels, ViewW: viewW, ViewH: viewH})
+	app := mario.New(&mario.Options{
+		Levels:    levels,
+		ViewW:     viewW,
+		ViewH:     viewH,
+		Surface:   "local", // play-context diagnostics with each submission
+		Term:      os.Getenv("TERM"),
+		ColorTerm: os.Getenv("COLORTERM"),
+	})
 	if daily {
 		app.StartDaily()
 	}

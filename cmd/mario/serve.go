@@ -129,11 +129,14 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	defer saveCal() // the session's learned repeat timing serves the next connect
 
 	app := mario.New(&mario.Options{
-		Levels:  levels,
-		ViewW:   viewW,
-		ViewH:   viewH,
-		Mapper:  mapper,                 // warm calibration, per-remote-host
-		Session: persist.BeginSession(), // per-connection player identity
+		Levels:    levels,
+		ViewW:     viewW,
+		ViewH:     viewH,
+		Mapper:    mapper,                 // warm calibration, per-remote-host
+		Session:   persist.BeginSession(), // per-connection player identity
+		Surface:   "ssh",                  // play-context diagnostics
+		Term:      s.Term(),
+		ColorTerm: s.Env("COLORTERM"),
 	})
 	s.OnFeed(app.Feed)
 	// Client-side resizes follow like the native runner's SIGWINCH: new

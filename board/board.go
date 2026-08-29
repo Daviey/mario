@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +26,10 @@ const EngineVersion = "2026.08.26a"
 
 // Client is a configured PostgREST endpoint.
 type Client struct {
-	BaseURL string // e.g. https://xyz.supabase.co
-	Key     string // publishable key
-	HTTP    *http.Client
+	BaseURL   string // e.g. https://xyz.supabase.co
+	Key       string // publishable key
+	UserAgent string // HTTP User-Agent; empty = mario/<EngineVersion>
+	HTTP      *http.Client
 }
 
 // New returns a client for the given Supabase project URL and key.
@@ -39,7 +41,7 @@ func New(baseURL, key string) *Client {
 // publishable key, injected via -ldflags -X (see the Makefile web target).
 // The publishable key is safe to embed — RLS limits it to anon insert +
 // public read. They exist so the WASM build, which has no environment
-// variables, can still reach the leaderboard; real env vars always win.
+// variables, can still reach the leaderboard; real env variables always win.
 var DefaultURL, DefaultKey string
 
 // FromEnv builds a client from SUPABASE_URL and SUPABASE_KEY, falling
@@ -72,6 +74,51 @@ type Entry struct {
 	Day           string `json:"day,omitempty"`  // daily rows: YYYY-MM-DD
 	EngineVersion string `json:"engine_version"`
 	Replay        string `json:"replay"`
+
+	// Play context — operator-only diagnostics, hidden from anon by the
+	// DB column grants (like device_id and ip): where and how the run
+	// was played.
+	Surface     string `json:"surface,omitempty"`      // local / ssh / web
+	UserAgent   string `json:"user_agent,omitempty"`   // web: the browser's UA
+	Term        string `json:"term,omitempty"`         // TERM from pty-req / env
+	ColorTerm   string `json:"colorterm,omitempty"`    // COLORTERM when present
+	InputRegime string `json:"input_regime,omitempty"` // kitty / legacy
+	Viewport    string `json:"viewport,omitempty"`     // WxH tiles at submit
+}
+
+// viewportPat is the one shape the viewport diagnostic may take.
+var viewportPat = regexp.MustCompile(`^[0-9]+x[0-9]+$`)
+
+// ClampPlayContext bounds the client-supplied diagnostic fields so a hostile
+// client cannot stuff the operator's table (the DB CHECKs mirror this).
+func ClampPlayContext(e *Entry) {
+	e.Surface = clampMeta(e.Surface, 16)
+	if e.Surface != "local" && e.Surface != "ssh" && e.Surface != "web" {
+		e.Surface = ""
+	}
+	e.UserAgent = clampMeta(e.UserAgent, 256)
+	e.Term = clampMeta(e.Term, 64)
+	e.ColorTerm = clampMeta(e.ColorTerm, 32)
+	if e.InputRegime != "kitty" && e.InputRegime != "legacy" {
+		e.InputRegime = ""
+	}
+	if !viewportPat.MatchString(e.Viewport) {
+		e.Viewport = ""
+	}
+}
+
+// clampMeta drops control characters and caps the length.
+func clampMeta(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > n {
+		s = s[:n]
+	}
+	return s
 }
 
 // Row is a leaderboard entry as served by the board_rows RPC. The raw
@@ -97,6 +144,7 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 	}
 	e.PowNonce = solvePow(e.DeviceID, e.Score)
 	e.Level = clampLevel(e.Level)
+	ClampPlayContext(&e)
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -146,7 +194,8 @@ func (c *Client) TopMode(ctx context.Context, n int, deviceID, mode, day string)
 }
 
 // PendingRow is an unverified submission awaiting replay verification.
-// Only the service-role verifier may see these.
+// Only the service-role verifier may see these. The play-context columns
+// ride along for the operator log; anon never sees them.
 type PendingRow struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -156,13 +205,19 @@ type PendingRow struct {
 	Day           string `json:"day"`
 	EngineVersion string `json:"engine_version"`
 	Replay        string `json:"replay"`
+	Surface       string `json:"surface"`
+	UserAgent     string `json:"user_agent"`
+	Term          string `json:"term"`
+	ColorTerm     string `json:"colorterm"`
+	InputRegime   string `json:"input_regime"`
+	Viewport      string `json:"viewport"`
 }
 
 // Pending fetches up to n unverified rows that carry a replay. Requires a
 // client built with the service-role key.
 func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 	q := url.Values{
-		"select":   {`id,name,score,level,mode,day,engine_version,replay`},
+		"select":   {`id,name,score,level,mode,day,engine_version,replay,surface,user_agent,term,colorterm,input_regime,viewport`},
 		"verified": {"eq.false"},
 		"replay":   {"not.is.null"},
 		"order":    {"created_at.asc"},
@@ -257,6 +312,11 @@ func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, b
 	}
 	req.Header.Set("apikey", c.Key)
 	req.Header.Set("Authorization", "Bearer "+c.Key)
+	ua := c.UserAgent
+	if ua == "" {
+		ua = "mario/" + EngineVersion
+	}
+	req.Header.Set("User-Agent", ua)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

@@ -23,9 +23,11 @@
 package mario
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/Daviey/mario/board"
 	"github.com/Daviey/mario/engine"
 	"github.com/Daviey/mario/input"
 	"github.com/Daviey/mario/internal/persist"
@@ -55,6 +57,12 @@ type Options struct {
 	// Apps in one process (the SSH server gives each connection one).
 	// nil keeps the process-wide identity (the native terminal path).
 	Session *persist.Session
+
+	// Play context — operator-only diagnostics stored with each
+	// submission: where the run was played (local/ssh/web), the
+	// terminal's TERM and COLORTERM, and on the web build the browser's
+	// user agent. The input regime and viewport are read live at submit.
+	Surface, Term, ColorTerm, UserAgent string
 }
 
 // App is one wired-up game session: engine, input routing and leaderboard
@@ -157,6 +165,17 @@ func New(opts *Options) *App {
 			return app.rec.JSON(), app.dailyTrusted
 		}
 		return app.rec.JSON(), app.levelsTrust
+	})
+	surface, term, colorterm, userAgent := opts.Surface, opts.Term, opts.ColorTerm, opts.UserAgent
+	mach.SetPlayContext(func() board.Entry {
+		e := board.Entry{Surface: surface, UserAgent: userAgent, Term: term, ColorTerm: colorterm}
+		if mapper.SawKitty() {
+			e.InputRegime = "kitty"
+		} else {
+			e.InputRegime = "legacy"
+		}
+		e.Viewport = strconv.Itoa(g.ViewW) + "x" + strconv.Itoa(g.ViewH)
+		return e
 	})
 	app.io = ui.NewRouter(mapper, mach)
 	return app

@@ -582,3 +582,20 @@ func TestSuicideKey(t *testing.T) {
 		t.Error("release fired the suicide edge")
 	}
 }
+
+func TestSawKittyRegime(t *testing.T) {
+	// The mapper's regime flag: explicit CSI-u event types (press/repeat/
+	// release) mark a kitty-protocol session; plain legacy bytes never do.
+	// Play-context logging reports it as the input regime.
+	m := NewMapper()
+	m.Feed([]byte("ad   d"))
+	m.Poll()
+	if m.SawKitty() {
+		t.Fatal("legacy bytes must not report kitty")
+	}
+	m.Feed([]byte("\x1b[100;1:1u")) // kitty press 'd'
+	m.Poll()
+	if !m.SawKitty() {
+		t.Fatal("explicit kitty event must report kitty")
+	}
+}

@@ -51,7 +51,13 @@ func (j *jsRGB) deliver(f *render.Frame) {
 }
 
 func main() {
-	app := mario.New(nil)
+	// Play-context diagnostics: the browser's user agent rides along on
+	// every submission (surface "web"); UA header + column on the DB side.
+	ua := ""
+	if n := js.Global().Get("navigator"); n.Truthy() {
+		ua = n.Get("userAgent").String()
+	}
+	app := mario.New(&mario.Options{Surface: "web", UserAgent: ua})
 
 	js.Global().Set("marioFeed", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		app.Feed([]byte(args[0].String()))
