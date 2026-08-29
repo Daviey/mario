@@ -5,10 +5,14 @@ package main
 // and its own render stream; the SSH session is just a terminal pipe.
 
 import (
+	"net"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/Daviey/mario"
 	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/input"
 	"github.com/Daviey/mario/internal/persist"
 	"github.com/Daviey/mario/internal/sshd"
 	"github.com/Daviey/mario/render"
@@ -16,15 +20,14 @@ import (
 
 // runServe serves the game over SSH until the listener fails. moshBin
 // (from -mosh, empty = mosh handshake disabled) enables anonymous mosh
-// roaming: exec requests shaped like "mosh-server new ..." spawn that
-// binary running this game, on moshPorts ("lo:hi" colon form).
-// maxSessions (from -maxsessions, 0 = default 16) caps concurrent
-// sessions; the excess queue (see internal/sshd/admission.go).
 func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string, maxSessions int) error {
+	// Calibration warm-start, keyed by client host (see calCache). One
+	// per server process, shared by every session handler.
+	cals := &calCache{}
 	srv := &sshd.Server{
 		Addr:          addr,
 		HostKeyFile:   hostKeyFile,
-		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor) },
+		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals) },
 		MoshBin:       moshBin,
 		MoshPortRange: moshPorts,
 	}
@@ -32,6 +35,71 @@ func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, 
 		srv.MaxSessions = maxSessions
 	}
 	return srv.ListenAndServe()
+}
+
+// calCache carries mapper calibration — the measured OS key-repeat delay
+// and per-key hold habits — across connections of the same client host,
+// in memory only, for the life of the server process. Nothing is ever
+// written to a player's machine (that privacy rule is untouched); the
+// host remembering how a repeat player's terminal times its repeats is
+// the same class of state as the leaderboard's device id. Without it
+// every SSH connection starts a cold mapper, and the first hold of each
+// movement key stalls for the OS repeat delay (~0.5s) — every connect,
+// forever (the contract is modeled in input/feel_test.go,
+// TestCalibrationSurvivesRestart).
+type calCache struct {
+	mu sync.Mutex
+	m  map[string]input.Calibration
+}
+
+// calCacheMax bounds the map; when full it is dropped wholesale — every
+// stored entry is re-learned within seconds of play, so a periodic
+// reset is cheaper than an LRU.
+const calCacheMax = 128
+
+func (c *calCache) get(key string) (input.Calibration, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cal, ok := c.m[key]
+	return cal, ok
+}
+
+func (c *calCache) put(key string, cal input.Calibration) {
+	// Only store sessions that learned something: an idle connect must
+	// not blank a repeat player's good entry.
+	if cal.OSDelay == 0 && !slices.Contains(cal.HeldHabit, true) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = make(map[string]input.Calibration)
+	}
+	if len(c.m) >= calCacheMax {
+		clear(c.m)
+	}
+	c.m[key] = cal
+}
+
+// calKey reduces a remote address to its host part, so a player's
+// reconnects (new source port every time) share one entry.
+func calKey(remote string) string {
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
+}
+
+// sessionMapper builds the session's input mapper, warm from the cache
+// when this host has played before. The returned func stores what the
+// session learned (call it when the session ends).
+func sessionMapper(cals *calCache, remote string) (*input.Mapper, func()) {
+	key := calKey(remote)
+	m := input.NewMapper()
+	if cal, ok := cals.get(key); ok {
+		m.ApplyCalibration(cal)
+	}
+	return m, func() { cals.put(key, m.Calibration()) }
 }
 
 // sessWriter adapts Session to io.Writer for render.Stream, translating a
@@ -50,17 +118,21 @@ func (w sessWriter) Write(p []byte) (int, error) {
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
-func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool) {
+func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache) {
 	// Fill the terminal like the native runner does: width in tiles,
 	// height minus HUD/status rows, Pix/2 terminal rows per tile.
 	cols, rows := s.Size()
 	viewW := cols / render.Pix
 	viewH := (rows - 2) * 2 / render.Pix
 
+	mapper, saveCal := sessionMapper(cals, s.RemoteAddr())
+	defer saveCal() // the session's learned repeat timing serves the next connect
+
 	app := mario.New(&mario.Options{
 		Levels:  levels,
 		ViewW:   viewW,
 		ViewH:   viewH,
+		Mapper:  mapper,                 // warm calibration, per-remote-host
 		Session: persist.BeginSession(), // per-connection player identity
 	})
 	s.OnFeed(app.Feed)

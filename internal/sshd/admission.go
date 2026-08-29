@@ -91,7 +91,9 @@ func (a *admission) enter(s *Session, maxSessions, maxQueue int, timeout time.Du
 	}
 
 	deadline := now().Add(timeout)
-	lastPos := w.pos
+	a.mu.Lock()
+	lastPos := w.pos // under mu: exit/remove shift positions concurrently
+	a.mu.Unlock()
 	for {
 		select {
 		case <-w.ready:

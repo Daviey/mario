@@ -612,3 +612,24 @@ func TestSessionCapRefusesExcess(t *testing.T) {
 		t.Fatalf("disconnect reason = %d", code)
 	}
 }
+
+func TestSessionRemoteAddr(t *testing.T) {
+	addrs := make(chan string, 1)
+	srv := startServer(t, func(s *Session) {
+		addrs <- s.RemoteAddr()
+		<-s.Done()
+	})
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	tc.openSession(1<<20, 32768)
+	tc.shell()
+	select {
+	case a := <-addrs:
+		host, _, err := net.SplitHostPort(a)
+		if err != nil || host != "127.0.0.1" {
+			t.Fatalf("RemoteAddr = %q, want the dialed loopback host", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler never ran")
+	}
+}

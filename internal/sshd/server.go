@@ -80,6 +80,11 @@ type Session struct {
 // control window; blocks until the client drains).
 func (s *Session) Write(p []byte) (int, error) { return s.ch.write(p) }
 
+// RemoteAddr returns the connected client's address (host:port) — for
+// hosts that key per-player state such as input-calibration warm-start
+// by origin.
+func (s *Session) RemoteAddr() string { return s.ch.conn.RemoteAddr().String() }
+
 // Size returns the pty size in character cells (80x24 if no pty-req).
 func (s *Session) Size() (cols, rows int) {
 	s.ch.mu.Lock()
