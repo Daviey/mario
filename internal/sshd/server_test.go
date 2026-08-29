@@ -256,6 +256,12 @@ func (tc *testClient) ptyReq(cols, rows uint32) {
 	w.cstr("")
 	tc.send(w.b)
 	tc.expect(msgChannelSuccess)
+	// The color-depth probe follows the success with its own
+	// CHANNEL_DATA (termprobe.go): consume it here so later reads see
+	// only game output.
+	if q := tc.readData(); string(q) != termQuery {
+		tc.t.Fatalf("expected term probe query after pty-req, got %q", q)
+	}
 }
 
 func (tc *testClient) envReq(name, val string) {

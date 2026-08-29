@@ -48,6 +48,11 @@ type Server struct {
 	// 10m). Zero means the default.
 	QueueTimeout time.Duration
 
+	// ProbeWait bounds how long a session waits for the client
+	// terminal's DA2/DA3 color-depth reply before falling back to the
+	// TERM rules (default 250ms). Tests shrink it.
+	ProbeWait time.Duration
+
 	// Handler runs one game per session. It must return when the session
 	// is done (Session.Done closed, Write errors, or its own quit path).
 	Handler func(*Session)
@@ -107,11 +112,44 @@ func (s *Session) Env(name string) string {
 }
 
 // OnFeed installs the keystroke handler (raw terminal bytes from the
-// client, e.g. app.Feed).
+// client, e.g. app.Feed). It also releases the color-depth probe's
+// buffer: keystrokes typed while the probe waited for the terminal's
+// DA2/DA3 reply are replayed into f, and later input flows directly
+// (the probe keeps only stripping any late replies).
 func (s *Session) OnFeed(f func([]byte)) {
 	s.ch.mu.Lock()
 	s.ch.feed = f
+	p := s.ch.probe
 	s.ch.mu.Unlock()
+	if p != nil {
+		if b := p.drain(); len(b) > 0 {
+			f(b)
+		}
+	}
+}
+
+// TrueColor reports whether the client's terminal renders 24-bit
+// color. Resolution order: a COLORTERM the client forwarded as an env
+// request (ssh -o SendEnv=COLORTERM), then the TERM family, then the
+// DA2/DA3 probe fired at pty-req (waits up to the server's ProbeWait
+// for the terminal to identify itself; silent terminals fall back to
+// the TERM rules). See termprobe.go.
+func (s *Session) TrueColor() bool {
+	return s.ch.decideColorTerm() != ""
+}
+
+// DrainProbe stops the color-depth probe and returns any player
+// keystrokes it buffered while waiting for the DA2/DA3 reply. Call
+// right after OnFeed so nothing typed during the probe window is
+// lost; later input flows to the feed directly.
+func (s *Session) DrainProbe() []byte {
+	s.ch.mu.Lock()
+	p := s.ch.probe
+	s.ch.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.drain()
 }
 
 // OnResize installs the pty-size handler (fired on every window-change
@@ -149,6 +187,10 @@ type channel struct {
 	shelled    bool // shell request seen
 	remoteGone bool
 	sendErr    bool
+
+	// Color-depth probe state (termprobe.go): created at pty-req.
+	probe *termProbe
+	wait  time.Duration // per-session ProbeWait, copied at channel open
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -544,8 +586,20 @@ func (c *conn) loop() error {
 				}
 				c.ch.mu.Lock()
 				feed := c.ch.feed
+				probe := c.ch.probe
 				c.ch.mu.Unlock()
-				if feed != nil {
+				if probe != nil {
+					// The color-depth probe (termprobe.go) buffers bytes
+					// until the session installs its feed, then strips
+					// any late DA2/DA3 replies from passing input.
+					rest, buffered := probe.offer(data)
+					if buffered {
+						data = nil
+					} else {
+						data = rest
+					}
+				}
+				if feed != nil && len(data) > 0 {
 					feed(data)
 				}
 			}
@@ -611,6 +665,7 @@ func (c *conn) openChannel(p []byte) error {
 		cols:   80,
 		rows:   24,
 		env:    map[string]string{},
+		wait:   c.srv.ProbeWait,
 		done:   make(chan struct{}),
 	}
 	c.ch.cond = sync.NewCond(&c.ch.mu)
@@ -666,7 +721,20 @@ func (c *conn) channelRequest(p []byte) error {
 			c.ch.rows = int(min(rows, 10000))
 		}
 		c.ch.mu.Unlock()
-		return reply(true)
+		if err := reply(true); err != nil {
+			return err
+		}
+		if c.ch.probe == nil && term != "" {
+			// Ask the client's terminal to identify itself (DA2+DA3);
+			// the replies set the session's color depth (termprobe.go).
+			// Sent after CHANNEL_SUCCESS so the client has an open
+			// channel to answer on. Queries draw nothing on screen.
+			c.ch.probe = newTermProbe()
+			if _, err := c.ch.write([]byte(termQuery)); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "env":
 		name := string(r.str())
 		val := string(r.str())

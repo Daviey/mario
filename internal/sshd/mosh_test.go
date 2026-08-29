@@ -129,41 +129,59 @@ func TestMoshDisabledRefusesHandshake(t *testing.T) {
 // The env handed to mosh-server decides the game's color mode: mosh
 // overwrites the child TERM to xterm-256color and never forwards
 // COLORTERM, so the one signal that survives is the COLORTERM we set
-// here. See moshEnv.
+// here. colorTerm arrives fully decided (channel.decideColorTerm).
 func TestMoshEnv(t *testing.T) {
 	inherited := []string{
 		"PATH=/usr/bin",
-		"TERM=dumb",        // must never shadow the client's TERM
+		"TERM=dumb",        // must never shadow the appended TERM
 		"COLORTERM=junk",   // host-side leak; the client decides
 		"LANG=en_GB.UTF-8", // mosh-server needs our forced locale
 		"LC_NUMERIC=C",     // ditto, any LC_*
 		"HOME=/home/mario", // untouched
 	}
 
-	// A truecolor TERM at ssh time: the game may run 24-bit color.
-	env := moshEnv(inherited, "xterm-ghostty", "")
-	if got := termOf(env); got != "xterm-ghostty" {
+	// A decided truecolor client: the game runs 24-bit color.
+	env := moshEnv(inherited, "xterm-256color", "truecolor")
+	if got := termOf(env); got != "xterm-256color" {
 		t.Errorf("TERM = %q, want the client's (exactly once)", got)
 	}
 	if got := colorTermOf(env); got != "truecolor" {
-		t.Errorf("COLORTERM = %q, want truecolor for a truecolor TERM", got)
+		t.Errorf("COLORTERM = %q, want the decided truecolor", got)
 	}
 	if !hasEnv(env, "HOME=/home/mario") || hasEnv(env, "LC_NUMERIC=C") {
 		t.Errorf("unexpected inherited-env handling: %v", env)
 	}
 
-	// A plain 256-color TERM alone must NOT claim truecolor (real
-	// xterm would ignore 38;2 and lose all color).
+	// Undecided (plain 256-color client, silent probe): 16-color — a
+	// genuinely 256-only terminal given 38;2 loses all color.
 	env = moshEnv(inherited, "xterm-256color", "")
 	if got := colorTermOf(env); got != "" {
-		t.Errorf("COLORTERM = %q for plain TERM, want none", got)
+		t.Errorf("COLORTERM = %q for undecided client, want none", got)
 	}
 
-	// ...but an env-requested COLORTERM (ssh -o SendEnv=COLORTERM)
-	// wins for terminals like VTE that only hint via env.
-	env = moshEnv(inherited, "xterm-256color", "truecolor")
-	if got := colorTermOf(env); got != "truecolor" {
-		t.Errorf("COLORTERM = %q with forwarded client hint, want truecolor", got)
+	// An env-requested COLORTERM (ssh -o SendEnv=COLORTERM) passes
+	// through verbatim.
+	env = moshEnv(inherited, "xterm-256color", "24bit")
+	if got := colorTermOf(env); got != "24bit" {
+		t.Errorf("COLORTERM = %q, want the forwarded value", got)
+	}
+}
+
+// decideColorTerm resolves the session's color depth: env request >
+// TERM family > probe. The probe paths are covered in
+// termprobe_test.go; this is the TERM/env precedence without a probe.
+func TestDecideColorTerm(t *testing.T) {
+	ch := &channel{term: "xterm-256color"}
+	if got := ch.decideColorTerm(); got != "" {
+		t.Errorf("plain 256color TERM = %q, want none", got)
+	}
+	ch = &channel{term: "xterm-ghostty"}
+	if got := ch.decideColorTerm(); got != "truecolor" {
+		t.Errorf("ghostty TERM = %q, want truecolor", got)
+	}
+	ch = &channel{term: "xterm-256color", env: map[string]string{"COLORTERM": "truecolor"}}
+	if got := ch.decideColorTerm(); got != "truecolor" {
+		t.Errorf("forwarded COLORTERM = %q, want truecolor", got)
 	}
 }
 
