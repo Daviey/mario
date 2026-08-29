@@ -6,7 +6,8 @@
 
 <p align="center">
   A complete Super Mario Bros–style platformer that runs <b>in your terminal</b> —<br />
-  and in the browser, on your phone, as a <code>.deb</code>/<code>.rpm</code>/AUR/Nix package, AppImage or Android APK, and bootable on bare metal via UEFI.
+  and in the browser, on your phone, over plain <code>ssh</code> or <code>mosh</code> with no client install,<br />
+  as a <code>.deb</code>/<code>.rpm</code>/AUR/Nix package, AppImage or Android APK, and bootable on bare metal via UEFI.
 </p>
 
 <p align="center">
@@ -75,7 +76,7 @@ skip the bundle and run the binary from Terminal: `Mario.app/Contents/MacOS/mari
 Sideloadly/AltStore (it re-signs with your Apple ID; free accounts expire every 7 days) —
 or just play the web build, which is the same game.
 
-**Browser:** play it at **[daviey.github.io/mario](https://daviey.github.io/mario/)** — no install, works offline once loaded, touch controls on phones.
+**Browser:** play it at **[mario.baby](https://mario.baby)** or **[daviey.github.io/mario](https://daviey.github.io/mario/)** — no install, works offline once loaded, touch controls on phones.
 
 **Bare metal:** `make efi` produces a single-file UEFI executable that boots straight into the game — no OS required.
 
@@ -87,7 +88,18 @@ standard library (curve25519 key exchange, ed25519 host key, AES-CTR + HMAC) and
 shell, no exec, no forwarding — every connection gets its own game, leaderboard identity and replay-verified scores.
 `-hostkey /path` pins the host key across restarts; `-basic` falls back to 16-color output.
 
+**Over mosh:** add `-mosh auto` (plus `-mosh-ports 60000:60100` in the firewall) and players connect with
+`mosh anyuser@yourhost` — same game, but over mosh's UDP protocol: roaming between Wi-Fi and cellular, surviving
+laptop sleep/resume, interpolating over packet loss. Input feel is tuned for both transports: over slow links the
+server drops rendered frames, never simulation ticks, and keystrokes keep flowing.
+
+The server also **identifies your terminal and picks the right color depth** — no config, no env vars. GNOME Terminal,
+iTerm2, kitty, WezTerm, ghostty, Konsole and friends get full truecolor automatically (even through mosh, which
+normally flattens everything to 256 colors); Terminal.app gets an honest 16-color palette, because that's what it has.
+When all sessions are taken, extra players queue with a live position and ETA instead of bouncing.
+
 Play it right now: `ssh -t mario@mario.daviey.com` (port 22) or `ssh -t mario@mario.daviey.com -p 1985` — IPv6.
+Or roam: `mosh mario@mario.daviey.com`.
 
 ### Controls
 
@@ -100,6 +112,13 @@ Play it right now: `ssh -t mario@mario.daviey.com` (port 22) or `ssh -t mario@ma
 | `l` | leaderboard (from the title screen) |
 | `d` | daily challenge (from the title screen) |
 | `r` | restart after game over |
+
+Sound comes through the terminal bell — coins, stomps, power-ups, level clear — locally, over ssh and even
+through mosh; terminals map it to a beep, flash or urgency hint. `-nobell` silences it. (The browser build
+synthesizes its own WebAudio soundtrack instead.)
+
+Feeling cheeky? `mario -cheats` lifts the two-fireball cap — but the run is deliberately unrecorded and can
+never touch the leaderboard.
 
 Play your own levels, too — levels are plain ASCII text files: `./mario -level mylevel.txt`.
 
@@ -131,10 +150,13 @@ leaderboard.
 
 * **Zero dependencies.** The whole game — engine, renderer, leaderboard
   client, WASM target, even the `.deb` packager — is Go standard library.
-* **Terminal renderer.** Truecolor half-block pixels, diffed per frame; falls
-  back to 16-color ANSI. Speaks the kitty keyboard protocol for real
-  press/repeat/release events, with legacy key-repeat inference for terminals
-  that don't.
+* **Terminal renderer.** Truecolor half-block pixels, streamed as a
+  bandwidth-minimal diff of only what changed — about 1.2 KB per frame on a
+  200-column terminal at 60 fps (~73 KiB/s, roughly a third of that in
+  16-color mode), so remote play feels local; falls back to 16-color ANSI,
+  and the viewport follows terminal resizes live. Speaks the kitty keyboard
+  protocol for real press/repeat/release events, with legacy key-repeat
+  inference for terminals that don't.
 * **Deterministic engine.** Fixed 60 Hz tick, pure `Game.Update(Input)`
   transition — the determinism tests byte-compare full rendered runs, and the
   replay verifier leans on the same property.
@@ -143,9 +165,13 @@ leaderboard.
   `make deb` / `make rpm` / `packaging/aur` / `flake.nix` package it for distros; `make efi`
   builds the bootable image, `make iso` its BIOS-bootable hybrid ISO. The
   Windows exe icon is rendered from the game's own sprite data.
-* **Its own SSH server.** `mario -serve` implements the transport, key
-  exchange, `none` auth and session channels from scratch — stdlib only —
-  so `ssh -t host` is a first-class way to play.
+* **Its own SSH server — with mosh.** `mario -serve` implements the
+  transport, key exchange, `none` auth and session channels from scratch —
+  stdlib only — so `ssh -t host` is a first-class way to play. It proxies the
+  mosh roaming handshake (never exec'ing the client's own command line),
+  probes each terminal's real color capabilities via device-attribute
+  queries, and keeps the 60 Hz simulation honest under backpressure and
+  capacity pressure.
 * **Importable as a library.** The root package is a facade — `mario.New`,
   `Feed`, `Step`, `Run` — so you can embed the game as an easter egg in your
   own Go program.
