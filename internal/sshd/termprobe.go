@@ -183,7 +183,9 @@ func daDecision(da2, da3 string) (decided, trueColor bool) {
 	if strings.Contains(da3, "Apple_Terminal") {
 		return true, false
 	}
-	for _, n := range []string{"kitty", "wezterm", "ghostty", "contour", "foot"} {
+	// iTerm2 encodes its name in hex instead of sending it literally:
+	// DA3 "6954726D" is "iTrm" (VT100Output.m reportTertiaryDeviceAttribute).
+	for _, n := range []string{"kitty", "wezterm", "ghostty", "contour", "foot", "6954726D"} {
 		if strings.Contains(da3, n) {
 			return true, true
 		}

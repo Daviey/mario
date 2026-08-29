@@ -15,6 +15,7 @@ func TestDADecision(t *testing.T) {
 		{"", "Apple_Terminal", true, false}, // macOS Terminal.app: no truecolor
 		{"", "kitty", true, true},           // DA3 names 24-bit terminals
 		{"", "wezterm", true, true},
+		{"", "6954726D", true, true},         // iTerm2 sends its name hex-encoded
 		{"", "someUnknownEmu", false, false}, // unknown family: no decision
 		{">65;58021;0", "", true, true},      // VTE (gnome-terminal)
 		{">84;0;0", "", true, true},          // tmux quantizes to outer

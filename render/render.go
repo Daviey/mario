@@ -80,9 +80,12 @@ type Palette struct {
 // and drops COLORTERM entirely) use this on the TERM the client sent at
 // ssh time to decide whether the game may run truecolor.
 func TrueColorTerm(term string) bool {
+	// kitty and Alacritty name themselves in TERM and are always
+	// 24-bit; like ghostty/wezterm they need no COLORTERM hint.
 	return strings.Contains(term, "truecolor") ||
 		strings.Contains(term, "direct") ||
-		term == "ghostty" || term == "xterm-ghostty" || term == "wezterm"
+		term == "ghostty" || term == "xterm-ghostty" || term == "wezterm" ||
+		term == "kitty" || term == "xterm-kitty" || term == "alacritty"
 }
 
 // NewPalette returns the game palette, emitting 24-bit color sequences when
