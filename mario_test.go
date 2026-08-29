@@ -232,6 +232,19 @@ func TestCheatsDisableRecording(t *testing.T) {
 	if a.rec.Live() || a.rec.Shippable() {
 		t.Fatal("cheat run must not be recorded")
 	}
+	// Cheats must survive a mid-run restart: Reset() reuses the same Game
+	// object and must not clear the flag (pause-menu 'r' path).
+	a.Feed([]byte("p"))
+	for range 5 {
+		a.Step()
+	}
+	a.Feed([]byte("r"))
+	for range 5 {
+		a.Step()
+	}
+	if !a.Game.Cheats {
+		t.Fatal("Game.Cheats must survive Reset")
+	}
 	// A normal run arms the recorder at its first world card.
 	b := New(nil)
 	b.Feed([]byte("\r"))
