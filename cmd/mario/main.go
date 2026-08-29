@@ -66,6 +66,7 @@ func main() {
 	hostKeyPath := flag.String("hostkey", "", "with -serve: persist the SSH host key at `PATH` (created if missing)")
 	moshBin := flag.String("mosh", "", "with -serve: enable the mosh handshake via mosh-server at `PATH` (\"\" = off, \"auto\" = look up in PATH)")
 	moshPorts := flag.String("mosh-ports", "60000:60100", "with -mosh: UDP `RANGE` for mosh sessions, \"lo:hi\"")
+	maxSessions := flag.Int("maxsessions", 0, "with -serve: concurrent session cap (0 = 16); excess connections are refused pre-handshake")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -130,7 +131,7 @@ func main() {
 				mb = ""
 			}
 		}
-		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts); err != nil {
+		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts, *maxSessions); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}

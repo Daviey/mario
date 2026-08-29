@@ -18,13 +18,18 @@ import (
 // (from -mosh, empty = mosh handshake disabled) enables anonymous mosh
 // roaming: exec requests shaped like "mosh-server new ..." spawn that
 // binary running this game, on moshPorts ("lo:hi" colon form).
-func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string) error {
+// maxSessions (from -maxsessions, 0 = default 16) caps concurrent
+// sessions; the excess queue (see internal/sshd/admission.go).
+func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string, maxSessions int) error {
 	srv := &sshd.Server{
 		Addr:          addr,
 		HostKeyFile:   hostKeyFile,
 		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor) },
 		MoshBin:       moshBin,
 		MoshPortRange: moshPorts,
+	}
+	if maxSessions > 0 {
+		srv.MaxSessions = maxSessions
 	}
 	return srv.ListenAndServe()
 }

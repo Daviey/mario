@@ -35,9 +35,18 @@ type Server struct {
 	// want TOFU stability).
 	HostKeyFile string
 
-	// MaxSessions caps concurrent connections (default 16). Excess
-	// connections are disconnected with reason "too many connections".
+	// MaxSessions caps concurrent playing sessions (default 16).
 	MaxSessions int
+
+	// MaxQueue caps sessions waiting in line when MaxSessions is full
+	// (default 32). Waiting players see their position and an estimated
+	// wait; they are admitted FIFO as slots free. Negative disables the
+	// queue: excess connections are refused, in the clear, pre-handshake.
+	MaxQueue int
+
+	// QueueTimeout drops a waiting session after this long (default
+	// 10m). Zero means the default.
+	QueueTimeout time.Duration
 
 	// Handler runs one game per session. It must return when the session
 	// is done (Session.Done closed, Write errors, or its own quit path).
@@ -59,7 +68,7 @@ type Server struct {
 	MoshPortRange string
 
 	hk  *hostKey
-	sem chan struct{}
+	adm *admission
 }
 
 // Session is one connected player.
@@ -239,11 +248,17 @@ func (s *Server) init() error {
 	if s.MaxSessions <= 0 {
 		s.MaxSessions = 16
 	}
+	if s.QueueTimeout <= 0 {
+		s.QueueTimeout = defaultQueueTimeout
+	}
+	if s.MaxQueue == 0 {
+		s.MaxQueue = defaultMaxQueue
+	}
 	if s.Log == nil {
 		s.Log = log.New(log.Writer(), "ssh: ", log.LstdFlags|log.Lmsgprefix)
 	}
-	if s.sem == nil {
-		s.sem = make(chan struct{}, s.MaxSessions)
+	if s.adm == nil {
+		s.adm = newAdmission()
 	}
 	if s.hk == nil {
 		hk, err := s.loadHostKey()
@@ -269,19 +284,15 @@ func (s *Server) Serve(ln net.Listener) error {
 			tc.SetKeepAlive(true)
 			tc.SetKeepAlivePeriod(15 * time.Second)
 		}
-		select {
-		case s.sem <- struct{}{}:
-		default:
-			// Over capacity: refuse politely, in the clear.
+		if !s.adm.room(s.MaxSessions, s.MaxQueue) {
+			// No room to play or even to wait: refuse politely, in the
+			// clear, before any crypto work.
 			fmt.Fprintf(nc, "%s\r\n", serverVersion)
 			writePlaintextDisconnect(nc, discTooManyConns, "too many connections")
 			nc.Close()
 			continue
 		}
-		go func() {
-			defer func() { <-s.sem }()
-			s.serveConn(nc)
-		}()
+		go s.serveConn(nc)
 	}
 }
 
@@ -706,7 +717,14 @@ func (c *conn) channelRequest(p []byte) error {
 					c.ch.shutdown()
 				}
 			}()
+			admitted, err := c.srv.adm.enter(sess, c.srv.MaxSessions, c.srv.MaxQueue, c.srv.QueueTimeout, nil)
+			if err != nil {
+				// Refused, gave up or disconnected while waiting.
+				c.ch.shutdown()
+				return
+			}
 			c.srv.Handler(sess)
+			c.srv.adm.exit(time.Since(admitted))
 			c.ch.shutdown()
 		}()
 		return nil
