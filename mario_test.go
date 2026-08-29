@@ -265,6 +265,7 @@ func TestSoundHookDeliversCoinEvent(t *testing.T) {
 	// The hook must notify without consuming Game.Events (the browser
 	// build still reads them for its synth).
 	bld := engine.NewBuilder(40, engine.LevelHeight)
+	bld.Ground(0, 39)
 	bld.Flag(30)
 	bld.Set(1, 12, 'c') // coin on the default spawn: collected on the first playing tick
 	lvl, err := engine.ParseLevel("soundtest", bld.Rows())
