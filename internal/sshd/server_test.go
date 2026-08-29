@@ -7,6 +7,7 @@ package sshd
 // handling against a second implementation of the same RFCs.
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -19,6 +20,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -519,32 +521,144 @@ func TestWindowFlowControl(t *testing.T) {
 // Keystroke data consumed by the handler must be replenished with window
 // adjusts: a client that tracks our advertised window (OpenSSH does)
 // stops sending channel data once it believes the window is spent, so a
-// session that never adjusts goes input-dead after ~2MB of cumulative
-// keystrokes — about an hour of held keys, or a few big pastes.
+// session that never adjusts goes input-dead after 2MB of cumulative
+// input — an hour of held keys, or a few big pastes. Adjusts coalesce
+// server-side at half the window (adjustFloor) and ride the control
+// pump rather than the reader goroutine, so the contract that matters
+// is accounting: every consumed byte is eventually returned, never
+// invented, in amounts the client can reconcile.
 func TestInputWindowReplenished(t *testing.T) {
-	fed := make(chan int, 8)
+	const chunk = 32768
+	const total = 3 << 20 // 1.5× the window the server advertises
+	var fed atomic.Int64
 	srv := startServer(t, func(s *Session) {
-		s.OnFeed(func(b []byte) { fed <- len(b) })
+		s.OnFeed(func(b []byte) { fed.Add(int64(len(b))) })
 		<-s.Done()
 	})
 	tc := dial(t, srv.Addr)
 	tc.authNone()
-	tc.openSession(1<<20, 32768)
+	tc.openSession(1<<20, chunk)
 	tc.shell()
 
-	for _, chunk := range []string{"right hold ", "jump!"} {
-		tc.sendData([]byte(chunk))
-
-		// One adjust per consumed packet, for exactly its byte count.
+	// A faithful window-tracking client: unacknowledged in-flight input
+	// never exceeds the 2MB window. If adjusts stop, this deadlocks
+	// into read()'s 5s deadline instead of passing vacuously.
+	readAdjust := func() int64 {
 		p := tc.expect(msgWindowAdjust)
 		r := &reader{b: p[1:]}
 		r.u32() // recipient channel
 		add := r.u32()
-		if !r.ok() || add != uint32(len(chunk)) {
-			t.Fatalf("window adjust = %d, want %d", add, len(chunk))
+		if !r.ok() || add == 0 || add%chunk != 0 || add < adjustFloor {
+			t.Fatalf("window adjust = %d (want ≥%d, a multiple of %d)", add, adjustFloor, chunk)
 		}
-		if n := <-fed; n != len(chunk) {
-			t.Fatalf("fed %d bytes, want %d", n, len(chunk))
+		return int64(add)
+	}
+	remaining, adjusted := int64(1<<21), int64(0)
+	payload := make([]byte, chunk)
+	for sent := 0; sent < total; sent += chunk {
+		if remaining < chunk {
+			add := readAdjust()
+			remaining += add
+			adjusted += add
+		}
+		tc.sendData(payload)
+		remaining -= chunk
+	}
+	// Trailing adjusts may still be in flight; drain what arrives
+	// promptly. A sub-floor residue can legitimately stay owed
+	// (takeOwed drains the whole counter, so a late collapsed take can
+	// eat the tail that was building toward the next crossing) — it
+	// carries toward the next crossing and the client always keeps
+	// ≥1MB credit, which is exactly the no-stall contract the
+	// faithful send loop above just proved by construction.
+	tc.nc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	for {
+		p, err := tc.tr.readPacket()
+		if err != nil {
+			break
+		}
+		if len(p) > 0 && p[0] == msgWindowAdjust {
+			r := &reader{b: p[1:]}
+			r.u32() // recipient channel
+			add := r.u32()
+			if r.ok() && add > 0 {
+				adjusted += int64(add)
+			}
+		}
+	}
+	if adjusted < total-adjustFloor {
+		t.Fatalf("window adjusts returned %d bytes, want ≥%d (client never starves)", adjusted, total-adjustFloor)
+	}
+	if got := fed.Load(); got != total {
+		t.Fatalf("handler consumed %d bytes, want %d", got, total)
+	}
+}
+
+// A keystroke must reach the handler while the server's own output is
+// wedged. The reader goroutine used to write each input packet's window
+// adjust synchronously — with the kernel send buffer full of undrained
+// frame data, that write stalled for up to writeTimeoutSec and fed the
+// keystroke only after it (measured ~30s locally before the control
+// pump). Input is the real-time path; output is the droppable one.
+func TestKeystrokeFedWhileOutputCongested(t *testing.T) {
+	fedAt := make(chan time.Time, 8)
+	writing := make(chan struct{})
+	srv := startServer(t, func(s *Session) {
+		s.OnFeed(func(b []byte) { fedAt <- time.Now() })
+		go func() {
+			close(writing)
+			s.Write(bytes.Repeat([]byte("x"), 32<<20)) // unread: wedges mid-write
+		}()
+		<-s.Done()
+	})
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	// A huge channel window, so the SSH flow-control window is never
+	// the brake (a window-waiting writer holds no wmu): with a small
+	// window the handler stalls in cond.Wait and the pre-fix reader
+	// write below never contended — the test passed vacuously. Here
+	// the kernel send buffer is the only brake, and the wedged frame
+	// write holds wmu through its blocked conn.Write.
+	tc.openSession(1<<29, 32768)
+	tc.shell()
+
+	<-writing
+	time.Sleep(300 * time.Millisecond) // fill the kernel buffers, wedge the writer
+
+	start := time.Now()
+	tc.sendData([]byte("j"))
+	select {
+	case ts := <-fedAt:
+		if d := ts.Sub(start); d > 2*time.Second {
+			t.Fatalf("keystroke delivered after %v behind congested output", d)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("keystroke delivery stalled behind congested output")
+	}
+
+	// Reader-side replies must survive congestion too: an env request
+	// mid-wedge queues its success on the control lane, and draining
+	// the backlog must deliver it.
+	w := &buf{}
+	w.u8(msgChannelRequest)
+	w.u32(0)
+	w.cstr("env")
+	w.boolean(true)
+	w.cstr("PRIORITY")
+	w.cstr("check")
+	tc.send(w.b)
+	for {
+		p := tc.read()
+		if len(p) == 0 {
+			continue
+		}
+		switch p[0] {
+		case msgChannelData, msgWindowAdjust, msgUserauthBanner, msgIgnore, msgDebug:
+			continue // backlog drain
+		case msgChannelSuccess:
+			return // reply delivered through the congestion
+		default:
+			t.Fatalf("expected CHANNEL_SUCCESS after drain, got msg %d", p[0])
 		}
 	}
 }
