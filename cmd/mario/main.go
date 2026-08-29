@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -63,6 +64,8 @@ func main() {
 	verifyPending := flag.Bool("verify-pending", false, "verify pending replay-backed scores (service key) and exit")
 	serveAddr := flag.String("serve", "", "run an unauthenticated SSH game server on `ADDR` (e.g. :2222) instead of playing")
 	hostKeyPath := flag.String("hostkey", "", "with -serve: persist the SSH host key at `PATH` (created if missing)")
+	moshBin := flag.String("mosh", "", "with -serve: enable the mosh handshake via mosh-server at `PATH` (\"\" = off, \"auto\" = look up in PATH)")
+	moshPorts := flag.String("mosh-ports", "60000:60100", "with -mosh: UDP `RANGE` for mosh sessions, \"lo:hi\"")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -118,7 +121,16 @@ func main() {
 	if *serveAddr != "" {
 		// Truecolor is the default over SSH — the operator cannot know
 		// every client's terminal; -basic forces the 16-color palette.
-		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic); err != nil {
+		mb := *moshBin
+		if mb == "auto" {
+			if p, err := exec.LookPath("mosh-server"); err == nil {
+				mb = p
+			} else {
+				fmt.Fprintf(os.Stderr, "mario: -mosh auto: mosh-server not found in PATH; mosh disabled\n")
+				mb = ""
+			}
+		}
+		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}

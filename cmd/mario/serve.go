@@ -14,12 +14,17 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-// runServe serves the game over SSH until the listener fails.
-func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool) error {
+// runServe serves the game over SSH until the listener fails. moshBin
+// (from -mosh, empty = mosh handshake disabled) enables anonymous mosh
+// roaming: exec requests shaped like "mosh-server new ..." spawn that
+// binary running this game, on moshPorts ("lo:hi" colon form).
+func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string) error {
 	srv := &sshd.Server{
-		Addr:        addr,
-		HostKeyFile: hostKeyFile,
-		Handler:     func(s *sshd.Session) { playSession(levels, s, trueColor) },
+		Addr:          addr,
+		HostKeyFile:   hostKeyFile,
+		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor) },
+		MoshBin:       moshBin,
+		MoshPortRange: moshPorts,
 	}
 	return srv.ListenAndServe()
 }

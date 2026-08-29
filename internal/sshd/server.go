@@ -46,6 +46,18 @@ type Server struct {
 	// Log receives connection lifecycle lines; nil logs to stderr.
 	Log *log.Logger
 
+	// MoshBin enables the mosh handshake when non-empty: the path to a
+	// real mosh-server binary that exec requests shaped like
+	// "mosh-server new ..." are allowed to spawn (strictly validated,
+	// always running this game binary, always on MoshPortRange). The
+	// spawned server outlives the SSH connection by design.
+	MoshBin string
+
+	// MoshPortRange is the UDP range handed to mosh-server, "lo:hi"
+	// colon form (default "60000:60100"). Open the same range in the
+	// host firewall — mosh's data path is pure UDP.
+	MoshPortRange string
+
 	hk  *hostKey
 	sem chan struct{}
 }
@@ -700,8 +712,28 @@ func (c *conn) channelRequest(p []byte) error {
 		return nil
 	case "signal":
 		return reply(true)
+	case "exec":
+		// The one exec the server ever runs: the mosh handshake.
+		// "mosh-server new ..." is strictly validated and rebuilt with
+		// our own command and port range; anything else is refused
+		// exactly like before. Every attempt is logged — this is the
+		// one place a client can ask this server to run something.
+		cmdline := string(r.str())
+		c.srv.Log.Printf("exec request: %q", cmdline)
+		if c.srv.MoshBin != "" {
+			if req, ok := parseMoshArgv(cmdline); ok {
+				if err := reply(true); err != nil {
+					return err
+				}
+				if err := c.srv.startMosh(c, req); err != nil {
+					c.srv.Log.Printf("mosh: %v", err)
+				}
+				return nil
+			}
+		}
+		return reply(false)
 	default:
-		// exec, subsystem, x11, agent…: nothing here but the game.
+		// subsystem, x11, agent…: nothing here but the game.
 		return reply(false)
 	}
 }
