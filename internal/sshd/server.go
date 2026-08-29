@@ -173,20 +173,21 @@ type channel struct {
 	t    *transport
 	conn net.Conn
 
-	mu         sync.Mutex
-	cond       *sync.Cond
-	peerID     uint32
-	window     int // client's receive window for our CHANNEL_DATA
-	maxPkt     int // client's max packet size
-	feed       func([]byte)
-	onResize   func(cols, rows int)
-	term       string
-	cols       int
-	rows       int
-	env        map[string]string
-	shelled    bool // shell request seen
-	remoteGone bool
-	sendErr    bool
+	mu          sync.Mutex
+	cond        *sync.Cond
+	peerID      uint32
+	window      int // client's receive window for our CHANNEL_DATA
+	maxPkt      int // client's max packet size
+	feed        func([]byte)
+	onResize    func(cols, rows int)
+	term        string
+	cols        int
+	rows        int
+	env         map[string]string
+	shelled     bool // shell request seen
+	execStarted bool // mosh-handshake exec seen
+	remoteGone  bool
+	sendErr     bool
 
 	// Color-depth probe state (termprobe.go): created at pty-req.
 	probe *termProbe
@@ -721,20 +722,7 @@ func (c *conn) channelRequest(p []byte) error {
 			c.ch.rows = int(min(rows, 10000))
 		}
 		c.ch.mu.Unlock()
-		if err := reply(true); err != nil {
-			return err
-		}
-		if c.ch.probe == nil && term != "" {
-			// Ask the client's terminal to identify itself (DA2+DA3);
-			// the replies set the session's color depth (termprobe.go).
-			// Sent after CHANNEL_SUCCESS so the client has an open
-			// channel to answer on. Queries draw nothing on screen.
-			c.ch.probe = newTermProbe()
-			if _, err := c.ch.write([]byte(termQuery)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return reply(true)
 	case "env":
 		name := string(r.str())
 		val := string(r.str())
@@ -782,6 +770,18 @@ func (c *conn) channelRequest(p []byte) error {
 		if err := reply(true); err != nil {
 			return err
 		}
+		if c.ch.probe == nil && c.ch.term != "" {
+			// Ask the client's terminal to identify itself (DA2+DA3);
+			// the replies set the session's color depth (termprobe.go).
+			// Shell sessions only: the mosh wrapper runs its ssh with
+			// -n (stdin from /dev/null), so a reply can never come
+			// back through a handshake — don't send the query or pay
+			// the wait there. Queries draw nothing on screen.
+			c.ch.probe = newTermProbe()
+			if _, err := c.ch.write([]byte(termQuery)); err != nil {
+				return err
+			}
+		}
 		sess := &Session{ch: c.ch}
 		go func() {
 			defer func() {
@@ -813,12 +813,24 @@ func (c *conn) channelRequest(p []byte) error {
 		c.srv.Log.Printf("exec request: %q", cmdline)
 		if c.srv.MoshBin != "" {
 			if req, ok := parseMoshArgv(cmdline); ok {
+				c.ch.mu.Lock()
+				started := c.ch.execStarted
+				c.ch.execStarted = true
+				c.ch.mu.Unlock()
+				if started {
+					return reply(false)
+				}
 				if err := reply(true); err != nil {
 					return err
 				}
-				if err := c.srv.startMosh(c, req); err != nil {
-					c.srv.Log.Printf("mosh: %v", err)
-				}
+				// Off the conn goroutine: startMosh waits for the
+				// color probe's reply, and this loop is what delivers
+				// inbound CHANNEL_DATA to the probe.
+				go func() {
+					if err := c.srv.startMosh(c, req); err != nil {
+						c.srv.Log.Printf("mosh: %v", err)
+					}
+				}()
 				return nil
 			}
 		}

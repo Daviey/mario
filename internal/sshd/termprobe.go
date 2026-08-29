@@ -32,10 +32,12 @@ import (
 // that stay silent (piped clients, high latency) fall back to the TERM
 // rules — never worse than before the probe existed.
 
-// termQuery is written to the client at pty-req: DA2 (CSI > c) then
-// DA3 (CSI = c). Queries produce no output themselves, so the stray
-// bytes are invisible to the player.
-const termQuery = "\x1b[>c\x1b[=c"
+// termQuery is written to the client when a shell session starts: DA2
+// (CSI > c) then DA3 (CSI = c). Queries produce no output themselves,
+// so the stray bytes are invisible to the player; the trailing CRLF
+// keeps any line-based consumer behind the terminal from tripping over
+// the unterminated sequence.
+const termQuery = "\x1b[>c\x1b[=c\r\n"
 
 const defaultProbeWait = 250 * time.Millisecond
 

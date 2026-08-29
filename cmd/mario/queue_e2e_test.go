@@ -75,13 +75,14 @@ func TestServeQueueHandoverE2E(t *testing.T) {
 
 	p1 := startPTYSSH(t, sshPath, port)
 	defer p1.close()
-	p2 := startPTYSSH(t, sshPath, port)
-	defer p2.close()
-
-	// Player 1 is in the game (alt screen); player 2 is queued.
+	// Player 1 must be admitted before player 2 exists: shell requests
+	// race across connection goroutines otherwise, and either player
+	// can win the single slot.
 	if !p1.waitFor(t, "\x1b[?1049h", 10*time.Second) {
 		t.Fatalf("player 1 never entered the game: %q", p1.Out())
 	}
+	p2 := startPTYSSH(t, sshPath, port)
+	defer p2.close()
 	if !p2.waitFor(t, "in line", 10*time.Second) {
 		t.Fatalf("player 2 never saw the queue screen: %q", p2.Out())
 	}

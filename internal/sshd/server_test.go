@@ -30,6 +30,7 @@ type testClient struct {
 	nc        net.Conn
 	tr        *transport
 	sessionID []byte
+	hadPty    bool
 }
 
 // startServer boots a Server on its own listener; srv.Addr becomes the
@@ -243,6 +244,7 @@ func (tc *testClient) openSession(window, maxPkt uint32) {
 }
 
 func (tc *testClient) ptyReq(cols, rows uint32) {
+	tc.hadPty = true
 	w := &buf{}
 	w.u8(msgChannelRequest)
 	w.u32(0)
@@ -256,12 +258,6 @@ func (tc *testClient) ptyReq(cols, rows uint32) {
 	w.cstr("")
 	tc.send(w.b)
 	tc.expect(msgChannelSuccess)
-	// The color-depth probe follows the success with its own
-	// CHANNEL_DATA (termprobe.go): consume it here so later reads see
-	// only game output.
-	if q := tc.readData(); string(q) != termQuery {
-		tc.t.Fatalf("expected term probe query after pty-req, got %q", q)
-	}
 }
 
 func (tc *testClient) envReq(name, val string) {
@@ -284,6 +280,14 @@ func (tc *testClient) shell() {
 	w.boolean(true)
 	tc.send(w.b)
 	tc.expect(msgChannelSuccess)
+	// The color-depth probe follows the success with its own
+	// CHANNEL_DATA (termprobe.go): consume it here so later reads see
+	// only game output.
+	if tc.hadPty {
+		if q := tc.readData(); string(q) != termQuery {
+			tc.t.Fatalf("expected term probe query after shell, got %q", q)
+		}
+	}
 }
 
 func (tc *testClient) winch(cols, rows uint32) {
