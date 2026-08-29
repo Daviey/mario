@@ -23,6 +23,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"syscall/js"
 
 	"github.com/Daviey/mario"
@@ -51,7 +52,11 @@ func (j *jsRGB) deliver(f *render.Frame) {
 }
 
 func main() {
-	app := mario.New(nil)
+	// ?cheats opts into cheat mode: unlimited fireballs, run unrecorded
+	// and therefore unsubmitable (see mario.Options.Cheats).
+	opts := &mario.Options{Cheats: strings.Contains(
+		js.Global().Get("location").Get("search").String(), "cheats")}
+	app := mario.New(opts)
 
 	js.Global().Set("marioFeed", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		app.Feed([]byte(args[0].String()))

@@ -195,6 +195,30 @@ func TestFireballThrowEdgeAndCap(t *testing.T) {
 	}
 }
 
+func TestCheatModeLiftsFireballCap(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	g.Player.Power = PowerFire
+	g.Player.Pos = Vec{30, 12}
+	g.Cheats = true
+	// Three rising edges with the two oldest still in flight: the cap
+	// must not clamp at MaxFireballs while cheats are on.
+	for range 3 {
+		g.Update(Input{})          // release
+		g.Update(Input{Run: true}) // rising edge throws
+	}
+	if n := g.aliveFireballs(); n != 3 {
+		t.Fatalf("cheat fireballs = %d, want 3 (cap lifted)", n)
+	}
+	// Cheats off again: the ordinary cap reasserts on the next throw
+	// (three are still in flight, so no fourth can leave).
+	g.Cheats = false
+	g.Update(Input{})
+	g.Update(Input{Run: true})
+	if n := g.aliveFireballs(); n != 3 {
+		t.Fatalf("cap must reapply with cheats off: %d fireballs", n)
+	}
+}
+
 func TestFireballKillsEnemy(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(26, 12, 'G') })
 	g := newGame(t, l)

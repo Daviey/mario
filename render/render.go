@@ -574,6 +574,9 @@ func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 	}
 	s.TextStyled(tx, 0, fmt.Sprintf("TIME %03d", g.Time), timeCol, p.HUDBG, true)
 	s.TextStyled(tx+10, 0, fmt.Sprintf("LIVES x%d", g.Lives), p.Text, p.HUDBG, true)
+	if g.Cheats && tx+10+9+len("CHEATS")+1 < s.W {
+		s.TextStyled(tx+10+10, 0, "CHEATS", p.FlagRed, p.HUDBG, true)
+	}
 }
 
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,

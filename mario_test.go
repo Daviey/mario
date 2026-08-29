@@ -207,3 +207,41 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+func TestCheatsDisableRecording(t *testing.T) {
+	// Cheat runs are deliberately unrecorded: the recorder must never
+	// arm, so Shippable stays false and the leaderboard UI can refuse
+	// submission on the existing UNRECORDED path.
+	a := New(&Options{Cheats: true})
+	if !a.Game.Cheats {
+		t.Fatal("Options.Cheats must reach the engine")
+	}
+	a.Feed([]byte("\r")) // title → world card
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("never reached playing: %v", a.Game.State)
+	}
+	for range 30 {
+		a.Step()
+	}
+	if a.rec.Live() || a.rec.Shippable() {
+		t.Fatal("cheat run must not be recorded")
+	}
+	// A normal run arms the recorder at its first world card.
+	b := New(nil)
+	b.Feed([]byte("\r"))
+	for range 600 {
+		b.Step()
+		if b.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if !b.rec.Live() {
+		t.Fatal("normal run should be recording")
+	}
+}

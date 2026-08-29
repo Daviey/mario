@@ -67,6 +67,7 @@ func main() {
 	moshBin := flag.String("mosh", "", "with -serve: enable the mosh handshake via mosh-server at `PATH` (\"\" = off, \"auto\" = look up in PATH)")
 	moshPorts := flag.String("mosh-ports", "60000:60100", "with -mosh: UDP `RANGE` for mosh sessions, \"lo:hi\"")
 	maxSessions := flag.Int("maxsessions", 0, "with -serve: concurrent session cap (0 = 16); excess connections are refused pre-handshake")
+	cheats := flag.Bool("cheats", false, "cheat mode: unlimited fireballs; the run is not recorded and cannot be submitted to the leaderboard")
 	flag.Parse()
 	trueColor := !*basic && trueColorSupported()
 
@@ -143,7 +144,7 @@ func main() {
 		return
 	}
 
-	if _, err := run(levels, *width, trueColor, *daily); err != nil {
+	if _, err := run(levels, *width, trueColor, *daily, *cheats); err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
@@ -227,7 +228,7 @@ func usage(w io.Writer) {
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) {
+func run(levels []*engine.Level, width int, trueColor, daily, cheats bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -277,7 +278,7 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 	}
 	viewH := (termHeight() - 2) * 2 / render.Pix
 
-	app := mario.New(&mario.Options{Levels: levels, ViewW: viewW, ViewH: viewH})
+	app := mario.New(&mario.Options{Levels: levels, ViewW: viewW, ViewH: viewH, Cheats: cheats})
 	if daily {
 		app.StartDaily()
 	}
