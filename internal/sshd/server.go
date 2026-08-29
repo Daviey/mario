@@ -499,6 +499,21 @@ func (c *conn) loop() error {
 			_ = r.u32()
 			data := r.str()
 			if c.ch != nil && r.ok() {
+				// The bytes are consumed the moment they are fed, so
+				// replenish the receive window we advertised at channel
+				// open: without adjusts a client tracking the window
+				// (ssh does) goes input-silent after ~2MB of cumulative
+				// keystrokes — an hour of held keys, or a few big pastes.
+				// One tiny adjust per keystroke packet keeps it exact.
+				if len(data) > 0 {
+					w := &buf{}
+					w.u8(msgWindowAdjust)
+					w.u32(0)
+					w.u32(uint32(len(data)))
+					if err := c.t.writePacket(w.b); err != nil {
+						return err
+					}
+				}
 				c.ch.mu.Lock()
 				feed := c.ch.feed
 				c.ch.mu.Unlock()

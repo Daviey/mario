@@ -74,11 +74,19 @@ func TestDiffTwoSpansSameRow(t *testing.T) {
 	b.Set(1, 0, 'A', testPal.Text)
 	b.Set(8, 0, 'B', testPal.Text)
 	d := Diff(a, b)
-	if got := strings.Count(d, "\x1b[1;"); got != 2 {
-		t.Errorf("row-1 cursor addresses = %d, want 2: %q", got, d)
+	// Both spans are addressed (the second via the cheaper relative
+	// forward move over the 6-cell gap), never a full repaint.
+	if !strings.Contains(d, "\x1b[1;2H") {
+		t.Errorf("first span not cursor-addressed: %q", d)
 	}
-	if !strings.Contains(d, "\x1b[1;2H") || !strings.Contains(d, "\x1b[1;9H") {
-		t.Errorf("span addresses wrong: %q", d)
+	if !strings.Contains(d, "\x1b[6C") {
+		t.Errorf("second span not reached by relative move: %q", d)
+	}
+	if strings.Contains(d, "\x1b[H") {
+		t.Error("diff must not full-repaint")
+	}
+	if n := strings.Count(d, "A") + strings.Count(d, "B"); n != 2 {
+		t.Errorf("span glyphs written %d times, want 2: %q", n, d)
 	}
 }
 
@@ -131,6 +139,49 @@ func TestDiffGameplayFramesAreSmall(t *testing.T) {
 	}
 	if d > full/2 {
 		t.Errorf("small-motion diff = %d bytes, full = %d; expected a fraction", d, full)
+	}
+}
+
+// Snapshot+Flush split Draw in two so a caller can render on the game
+// goroutine and write from another one (the SSH host drops frames, not
+// ticks, when the link backs up). The split must stay byte-identical to
+// the classic Draw path, and skipping frames between flushes must still
+// land the terminal on the newest screen.
+func TestStreamSnapshotFlushMatchesDraw(t *testing.T) {
+	g := newGame(t)
+	g.Update(engine.Input{})
+
+	var a, b strings.Builder
+	sa := NewStream(&a, testPal)
+	sb := NewStream(&b, testPal)
+	for range 30 {
+		g.Tick += 3
+		g.Update(engine.Input{})
+		sa.Draw(g)
+		sb.Flush(sb.Snapshot(g))
+	}
+	if a.String() != b.String() {
+		t.Fatalf("Snapshot+Flush diverged from Draw: %d vs %d bytes", a.Len(), b.Len())
+	}
+
+	// Frame skipping: render every tick, flush only every fourth frame
+	// plus the final one — the diff must jump the baseline straight to
+	// the newest screen (proved by the next identical flush going quiet).
+	var c strings.Builder
+	sc := NewStream(&c, testPal)
+	for i := range 12 {
+		g.Tick += 3
+		g.Update(engine.Input{})
+		cur := sc.Snapshot(g)
+		if i%4 == 0 {
+			sc.Flush(cur)
+		}
+	}
+	sc.Flush(sc.Snapshot(g))
+	before := c.Len()
+	sc.Flush(sc.Snapshot(g)) // unchanged state: must emit nothing
+	if c.Len() != before {
+		t.Errorf("flush after skipped frames left the baseline stale (%d extra bytes)", c.Len()-before)
 	}
 }
 
