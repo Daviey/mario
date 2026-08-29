@@ -179,14 +179,16 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 
 	// Terminal setup/teardown mirrors run()'s (kitty keyboard protocol,
 	// alt screen, hidden cursor, window title). Unsupported terminals
-	// ignore these. ORDER IS LOAD-BEARING: the kitty push comes AFTER
-	// the alt-screen enter and the pop AFTER the alt-screen exit — a
-	// terminal that snapshots keyboard state with the screen (1049's
-	// save/restore) would otherwise re-install our pushed level on
-	// exit and leave the player's shell emitting CSI-u garbage. The
-	// epilogue waits for the writer below so it lands after any
-	// in-flight frame diff — a trailing partial frame after the
-	// alt-screen exit would print garbage on the player's shell.
+	// ignore these. ORDER IS LOAD-BEARING (kitty spec, Quickstart): the
+	// keyboard stack is screen-scoped — push AFTER entering the alt
+	// screen, pop BEFORE leaving it. The old prologue pushed on the main
+	// screen's stack, so the epilogue's pop (on the alt screen) was a
+	// no-op and the pushed level survived the exit, leaving the player's
+	// shell emitting CSI-u garbage. Popping on the way out while still
+	// on the alt screen can only ever pop our own level. The epilogue
+	// waits for the writer below so it lands after any in-flight frame
+	// diff — a trailing partial frame after the alt-screen exit would
+	// print garbage on the player's shell.
 	s.Write([]byte("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
 
 	st := render.NewStream(out, render.NewPalette(trueColor))
@@ -224,10 +226,10 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		case <-drained:
 		case <-time.After(500 * time.Millisecond): // wedged writer: leave anyway
 		}
-		// Alt-screen exit first, kitty pop after: see the prologue note.
-		s.Write([]byte("\x1b[?2026l\x1b[?1049l\x1b[<u\x1b[?25h\x1b[?23t\x1b[0m\r\n"))
+		// Kitty pop first (still on the alt screen — see the prologue
+		// note), then the alt-screen exit.
+		s.Write([]byte("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l\x1b[0m\r\n"))
 	}()
-
 	tick := time.NewTicker(time.Second / engine.TicksPerSecond)
 	defer tick.Stop()
 	for {

@@ -111,12 +111,14 @@ func TestServeSSHClientE2E(t *testing.T) {
 			t.Errorf("session output missing %q (len=%d)", marker, len(got))
 		}
 	}
-	// ORDER: the kitty pop must follow the alt-screen exit. Terminals
-	// that snapshot keyboard state with the screen (1049 save/restore)
-	// resurrect the pushed level if we pop before leaving — the player's
-	// shell then emits CSI-u garbage (regression, reported live).
-	if !strings.Contains(got, "\x1b[?1049l\x1b[<u") {
-		t.Error("epilogue must leave the alt screen before popping kitty keyboard flags")
+	// ORDER (kitty spec, Quickstart): the keyboard stack is screen-
+	// scoped — the prologue pushes only after entering the alt screen,
+	// and the epilogue pops while still on it, before the exit. The old
+	// prologue pushed on the main screen's stack, so the pop (on the alt
+	// screen) was a no-op and kitty mode survived the session — the
+	// player's shell then emitted CSI-u garbage (regression, live).
+	if !strings.Contains(got, "\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l") {
+		t.Error("epilogue must pop kitty keyboard flags before leaving the alt screen")
 	}
 	if !strings.Contains(got, "\x1b[?1049h\x1b[>11u") {
 		t.Error("prologue must enter the alt screen before pushing kitty keyboard flags")
