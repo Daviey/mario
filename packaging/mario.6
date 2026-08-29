@@ -57,9 +57,37 @@ instead of playing locally: anyone can connect with
 .B "ssh \-t anyuser@host \-p 1985"
 and play. 1985 is the year Super Mario Bros. shipped. The server implements
 the SSH transport, curve25519 key exchange and session channels itself
-(stdlib only); there is no shell, exec or forwarding \[em] the game is the
-only service. Each connection gets its own player identity for the
+(stdlib only); there is no shell or forwarding \[em] the game is the
+only service (the one exec exception is the
+.B mosh
+handshake below). Each connection gets its own player identity for the
 leaderboard.
+.TP
+.BI \-mosh\ PATH
+With
+.BR \-serve :
+accept the mosh roaming handshake by spawning
+.I PATH
+(a real
+.B mosh\-server
+binary). Players connect with
+.B "mosh anyuser@host"
+and get the game over mosh's UDP protocol: roaming between networks,
+surviving sleep/resume and cellular IP changes. The exec request is
+strictly validated and rebuilt \[em] the client's command line is never
+trusted, the game binary is always the server's own, and the UDP port
+range is always the operator's. Sessions are capped (16 concurrent).
+.B auto
+looks up mosh-server in PATH.
+.TP
+.BI \-mosh\-ports\ RANGE
+With
+.BR \-mosh :
+the UDP port range for mosh sessions,
+.I lo:hi
+colon form (default
+.BR 60000:60100 ).
+Open the same range in the host firewall \[em] mosh's data path is UDP.
 .TP
 .BI \-hostkey\ PATH
 With
