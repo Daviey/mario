@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Daviey/mario/engine"
@@ -50,6 +51,37 @@ func TestResizeAppliesOnNextStep(t *testing.T) {
 	app.Step()
 	if app.Game.ViewW != 16 || app.Game.ViewH != 4 {
 		t.Fatalf("clamped viewport = %dx%d, want 16x4", app.Game.ViewW, app.Game.ViewH)
+	}
+}
+
+// The race-detector tripwire for Resize's cross-goroutine path: a
+// signal goroutine hammering Resize (as SIGWINCH would) while the tick
+// goroutine Steps. Run with -race; also passes sequentially.
+func TestResizeConcurrentWithStep(t *testing.T) {
+	app := New(nil)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			app.Resize(16+i%45, 4+i%10)
+		}
+	}()
+	for range 300 {
+		app.Step()
+	}
+	close(done)
+	wg.Wait()
+
+	app.Step() // apply anything requested in the final instants
+	if app.Game.ViewW < 16 || app.Game.ViewW > 60 || app.Game.ViewH < 4 {
+		t.Fatalf("viewport after concurrent resizes = %dx%d", app.Game.ViewW, app.Game.ViewH)
 	}
 }
 
