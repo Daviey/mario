@@ -67,5 +67,8 @@ jobs:
           # Visible freshness marker on the live site.
           echo "$GITHUB_SHA $(date -u +%FT%TZ)" > dist/web/deploy.txt
           tar -C dist/web -cf - . | mssh 'mkdir -p /var/lib/mario-web/.next && tar -C /var/lib/mario-web/.next -xf -'
+          # The runner builds under umask 077, so the tar carries 0600
+          # files — nginx would 403 the whole site. Normalize before swap.
+          mssh 'cd /var/lib/mario-web/.next && find . -type d -exec chmod 755 {} + && find . -type f -exec chmod 644 {} +'
           mssh 'cd /var/lib/mario-web && rm -rf .prev && if [ -d content ]; then mv content .prev; fi && mv .next content && rm -rf .prev && echo SWAPPED'
           mssh 'test -s /var/lib/mario-web/content/mario.wasm && test -s /var/lib/mario-web/content/index.html && echo CONTENT-OK'

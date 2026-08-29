@@ -278,6 +278,10 @@ iso-qemu: iso
 # the leaderboard works in the browser, which has no environment.
 SUPA_URL := $(or $(SUPABASE_URL),$(shell sed -n 's/^SUPABASE_URL=//p' .env web/supabase.env 2>/dev/null | head -n 1))
 SUPA_KEY := $(or $(SUPABASE_KEY),$(shell sed -n 's/^SUPABASE_KEY=//p' .env web/supabase.env 2>/dev/null | head -n 1))
+# Load-bearing: the wasm has no environment, so DefaultURL/DefaultKey
+# exist ONLY via this -X injection. An undefined WEBLDFLAGS silently
+# ships a leaderboard-less build (regression: a7e7a5f dropped the line).
+WEBLDFLAGS := $(LDFLAGS) -X github.com/Daviey/mario/board.DefaultURL=$(SUPA_URL) -X github.com/Daviey/mario/board.DefaultKey=$(SUPA_KEY)
 web:
 	@if [ -z "$(SUPA_URL)" ] || [ -z "$(SUPA_KEY)" ]; then \
 		echo "ERROR: SUPABASE_URL and SUPABASE_KEY must be set in env, .env, or web/supabase.env" >&2; exit 1; \
