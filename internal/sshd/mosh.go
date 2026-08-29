@@ -143,11 +143,15 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 
 	cmd := exec.Command(s.MoshBin, argv...)
 	// TERM travels with the pty request when the client sent one (the
-	// mosh client does); xterm-256color is the fallback.
+	// mosh client does); xterm-256color is the fallback. mosh-server
+	// hard-fails without a UTF-8 native locale — and the locale vars
+	// the client sends via -l flags are stripped with the rest of the
+	// untrusted argv — so force C.UTF-8 (always present with glibc;
+	// the client's rendering is UTF-8 regardless).
 	if t := c.ch.term; t != "" {
 		req.term = t
 	}
-	cmd.Env = append(os.Environ(), "TERM="+req.term)
+	cmd.Env = append(os.Environ(), "TERM="+req.term, "LC_ALL=C.UTF-8")
 	// Own process group: the SSH connection ending (or the server
 	// process being signalled) must not end the game session.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
