@@ -133,3 +133,36 @@ func TestDiffGameplayFramesAreSmall(t *testing.T) {
 		t.Errorf("small-motion diff = %d bytes, full = %d; expected a fraction", d, full)
 	}
 }
+
+func TestDiffSizeChangeClearsStaleCells(t *testing.T) {
+	// Shrinking the frame leaves painted cells outside the new bounds —
+	// no diff can reach them, so the size-change repaint must blank the
+	// screen before repainting.
+	d := Diff(mkScreen(10, 4, 'x'), mkScreen(6, 2, 'y'))
+	if i, j := strings.Index(d, "\x1b[2J"), strings.Index(d, "\x1b[H"); i < 0 || j < i {
+		t.Errorf("size change must clear before repainting: %q", d[:min(40, len(d))])
+	}
+	if !strings.HasPrefix(d, syncBegin) || !strings.HasSuffix(d, syncEnd) {
+		t.Error("size-change repaint not wrapped in sync mode")
+	}
+
+	// Through the real render path: a viewport change produces a
+	// different-sized frame, which must take the clearing branch.
+	g := newGame(t)
+	before := Render(g, testPal)
+	g.ViewW, g.ViewH = 20, 10
+	if d := Diff(before, Render(g, testPal)); !strings.Contains(d, "\x1b[2J") {
+		t.Error("viewport change must trigger a clearing repaint")
+	}
+
+	// A pure color-mode change keeps the same bounds: no clear wanted.
+	prev := mkScreen(8, 3, 'x')
+	prev.TrueColor = false
+	if d := Diff(prev, mkScreen(8, 3, 'x')); strings.Contains(d, "\x1b[2J") {
+		t.Error("mode-only change must not clear the screen")
+	}
+	// Neither does a nil-baseline first paint.
+	if d := Diff(nil, mkScreen(8, 3, 'x')); strings.Contains(d, "\x1b[2J") {
+		t.Error("first paint must not clear the screen")
+	}
+}

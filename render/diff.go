@@ -34,6 +34,12 @@ func Diff(prev, next *Screen) string {
 	if prev == nil || prev.W != next.W || prev.H != next.H || prev.TrueColor != next.TrueColor {
 		var b strings.Builder
 		b.WriteString(syncBegin)
+		// A size change means cells painted by the old frame may sit
+		// outside the new one (the window shrank) — no diff can reach
+		// them, so start from a blank screen.
+		if prev != nil && (prev.W != next.W || prev.H != next.H) {
+			b.WriteString("\x1b[2J")
+		}
 		b.WriteString(next.String())
 		b.WriteString(syncEnd)
 		return b.String()

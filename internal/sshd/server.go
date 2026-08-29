@@ -88,6 +88,14 @@ func (s *Session) OnFeed(f func([]byte)) {
 	s.ch.mu.Unlock()
 }
 
+// OnResize installs the pty-size handler (fired on every window-change
+// request, e.g. app.Resize).
+func (s *Session) OnResize(f func(cols, rows int)) {
+	s.ch.mu.Lock()
+	s.ch.onResize = f
+	s.ch.mu.Unlock()
+}
+
 // Done is closed when the client goes away (disconnect, channel close or
 // transport error).
 func (s *Session) Done() <-chan struct{} { return s.ch.done }
@@ -107,6 +115,7 @@ type channel struct {
 	window     int // client's receive window for our CHANNEL_DATA
 	maxPkt     int // client's max packet size
 	feed       func([]byte)
+	onResize   func(cols, rows int)
 	term       string
 	cols       int
 	rows       int
@@ -629,18 +638,26 @@ func (c *conn) channelRequest(p []byte) error {
 		rows := r.u32()
 		if r.ok() {
 			c.ch.mu.Lock()
-			// The game's viewport is fixed at launch (as on a native
-			// terminal, which also ignores SIGWINCH mid-run) — the size is
-			// only interesting before the shell starts.
-			if !c.ch.shelled {
-				if cols > 0 {
-					c.ch.cols = int(min(cols, 10000))
-				}
-				if rows > 0 {
-					c.ch.rows = int(min(rows, 10000))
-				}
+			// Zero fields mean "unknown" (RFC 4254) and are ignored;
+			// the host is notified only when the size really changed.
+			changed := false
+			if cols > 0 && int(min(cols, 10000)) != c.ch.cols {
+				c.ch.cols = int(min(cols, 10000))
+				changed = true
+			}
+			if rows > 0 && int(min(rows, 10000)) != c.ch.rows {
+				c.ch.rows = int(min(rows, 10000))
+				changed = true
+			}
+			var cb func(cols, rows int)
+			var cc, rr int
+			if changed {
+				cb, cc, rr = c.ch.onResize, c.ch.cols, c.ch.rows
 			}
 			c.ch.mu.Unlock()
+			if cb != nil {
+				cb(cc, rr)
+			}
 		}
 		return nil
 	case "shell":

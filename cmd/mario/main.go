@@ -290,6 +290,28 @@ func run(levels []*engine.Level, width int, trueColor, daily bool) (int, error) 
 		}
 	}()
 
+	// Follow window resizes with the same fit as launch (width in tiles,
+	// height minus the HUD rows): the viewport changes on the next tick
+	// and the next frame repaints in full at the new size. An explicit
+	// -width keeps its width; only the height re-fits.
+	stopResize := onResize(func() {
+		rows := termHeight()
+		if rows <= 0 {
+			return // size probe failed; keep the current viewport
+		}
+		w := width
+		if w <= 0 {
+			if cols := termWidth(); cols > 0 {
+				w = cols / render.Pix
+			}
+		}
+		if w <= 0 {
+			return
+		}
+		app.Resize(w, (rows-2)*2/render.Pix)
+	})
+	defer stopResize()
+
 	// Differential rendering: each frame only the changed cells are sent,
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.

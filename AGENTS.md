@@ -100,7 +100,7 @@ Go 1.22+ required (range-over-int used). On NixOS the host cannot exec dynamical
 
 ## Important Files
 
-- `mario.go` — library facade: `Options`/`App` (`New`, `Feed`, `Step`, `Run`, `UI`, `Quit`, `StartDaily`); package doc shows the embed-as-easter-egg pattern
+- `mario.go` — library facade: `Options`/`App` (`New`, `Feed`, `Step`, `Run`, `UI`, `Quit`, `StartDaily`, `Resize`); package doc shows the embed-as-easter-egg pattern. The viewport follows the terminal live: `Resize` (any goroutine) lands on the next `Step`, `render.Diff` clears + full-repaints on size change, the native runner hooks SIGWINCH (Windows: console-size poll), and `sshd.Session.OnResize` fires on mid-session window-change requests
 - `demo.go` — `LoadLevels`, `RunDemo` (the deterministic demo script lives in `internal/ui/script.go` and doubles as the attract-mode input)
 - `cmd/mario/main.go` — CLI entry, flag inventory (`-demo -demoticks -level -width -basic -scores -ui-preview -serve -hostkey`), terminal lifecycle (raw mode, kitty push/pop, cleanup on signal), stdin pump
 - `cmd/web/main.go` — WASM entry (`go build ./cmd/web` under GOOS=js)

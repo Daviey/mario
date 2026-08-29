@@ -130,6 +130,29 @@ func NewGame(levels []*Level, viewW, viewH int) *Game {
 	return g
 }
 
+// SetViewport changes the camera viewport mid-game (the terminal runner
+// does this when its window is resized). It is a view change only — the
+// viewport feeds the camera and the renderer, never the simulation, so a
+// recording replays identically at any viewport. Non-positive dimensions
+// keep their current values.
+func (g *Game) SetViewport(viewW, viewH int) {
+	for _, l := range g.Levels {
+		if l.Width < viewW {
+			viewW = l.Width
+		}
+	}
+	if viewH > g.Levels[0].Height {
+		viewH = g.Levels[0].Height
+	}
+	if viewW <= 0 {
+		viewW = g.ViewW
+	}
+	if viewH <= 0 {
+		viewH = g.ViewH
+	}
+	g.ViewW, g.ViewH = viewW, viewH
+}
+
 // LevelIndex returns the 0-based index of the current level.
 func (g *Game) LevelIndex() int { return g.levelIndex }
 

@@ -31,6 +31,28 @@ func TestRunDemo(t *testing.T) {
 	}
 }
 
+func TestResizeAppliesOnNextStep(t *testing.T) {
+	app := New(nil)
+	if app.Game.ViewW != 40 || app.Game.ViewH != engine.LevelHeight {
+		t.Fatalf("default viewport = %dx%d", app.Game.ViewW, app.Game.ViewH)
+	}
+	app.Resize(20, 8)
+	if app.Game.ViewW != 40 {
+		t.Fatal("resize must not land before the next Step")
+	}
+	app.Step()
+	if app.Game.ViewW != 20 || app.Game.ViewH != 8 {
+		t.Fatalf("viewport after Step = %dx%d, want 20x8", app.Game.ViewW, app.Game.ViewH)
+	}
+
+	// Same policy as New: clamped, never fatal.
+	app.Resize(5, 2)
+	app.Step()
+	if app.Game.ViewW != 16 || app.Game.ViewH != 4 {
+		t.Fatalf("clamped viewport = %dx%d, want 16x4", app.Game.ViewW, app.Game.ViewH)
+	}
+}
+
 func TestSuicideKeyEndToEnd(t *testing.T) {
 	// The full terminal path: raw stdin bytes → router → mapper →
 	// engine death. 'k' must kill a live run.
