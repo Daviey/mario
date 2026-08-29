@@ -178,6 +178,7 @@ type channel struct {
 	peerID      uint32
 	window      int // client's receive window for our CHANNEL_DATA
 	maxPkt      int // client's max packet size
+	owe         int // inbound bytes consumed but not yet window-adjusted
 	feed        func([]byte)
 	onResize    func(cols, rows int)
 	term        string
@@ -195,6 +196,41 @@ type channel struct {
 
 	closeOnce sync.Once
 	done      chan struct{}
+}
+
+// adjustFloor is the coalescing threshold for receive-window adjusts:
+// owed bytes are replenished once they reach half the 2MB window we
+// advertise at channel open (OpenSSH's own adjust-at-half policy). A
+// human typing never crosses it — zero adjust packets for ordinary
+// play — while a multi-megabyte paste still gets its window back long
+// before the client could stall (it always has ≥1MB to send).
+const adjustFloor = 1 << 20
+
+// addOwed records inbound bytes the handler consumed and reports
+// whether the receive window needs replenishing now.
+func (c *channel) addOwed(n int) bool {
+	c.mu.Lock()
+	c.owe += n
+	flush := c.owe >= adjustFloor
+	c.mu.Unlock()
+	return flush
+}
+
+// takeOwed claims every owed byte as one WINDOW_ADJUST payload (nil if
+// nothing is owed). Called only from the control pump.
+func (c *channel) takeOwed() []byte {
+	c.mu.Lock()
+	n := c.owe
+	c.owe = 0
+	c.mu.Unlock()
+	if n <= 0 {
+		return nil
+	}
+	w := &buf{}
+	w.u8(msgWindowAdjust)
+	w.u32(0)
+	w.u32(uint32(n))
+	return w.b
 }
 
 func (c *channel) shutdown() error {
@@ -272,6 +308,90 @@ type conn struct {
 	srv   *Server
 	ch    *channel // the single session channel, nil until opened
 	queue [][]byte // packets buffered across a rekey
+
+	// Control lane: the reader goroutine never writes to the socket
+	// once the session may be producing frames. A synchronous write
+	// there — a window adjust, a keepalive reply — would queue behind
+	// the wmu-held frame chunk stuck on a full kernel send buffer (up
+	// to writeTimeoutSec), stalling every later inbound packet too:
+	// keystrokes, the client's own window adjusts, disconnects.
+	// Replies go through ctl, owed adjusts through ch.owe (lossless —
+	// a dropped adjust would wedge the client after 2MB), both sent by
+	// pumpControl. Input handling stays pure: read → feed.
+	ctl       chan ctlMsg   // small reader-side replies + sync markers
+	adjustSig chan struct{} // "owed ≥ adjustFloor" edge
+	dead      chan struct{} // closed when serveConn returns
+}
+
+// ctlMsg is one control-lane item: a packet to write, or (pkt nil) a
+// sync marker — closed by the pump once every earlier item is written.
+type ctlMsg struct {
+	pkt  []byte
+	done chan struct{}
+}
+
+// writeControl hands a small reply packet to the control pump. Never
+// blocks, never fails: at capacity (only reachable under sustained
+// congestion, with the queue already holding a reply round) the packet
+// is dropped — at most a keepalive round-trip, and TCP itself is the
+// backpressure then. Window adjusts must NOT use this path; they ride
+// the lossless owed counter instead.
+func (c *conn) writeControl(pkt []byte) {
+	c.sendControl(ctlMsg{pkt: pkt})
+}
+
+// sendControl enqueues one item, never blocking or failing: at capacity
+// (only reachable under sustained congestion, with the queue already
+// holding a reply round) a packet is dropped — at most a keepalive
+// round-trip, and TCP itself is the backpressure then. Window adjusts
+// must NOT use this path; they ride the lossless owed counter instead.
+func (c *conn) sendControl(m ctlMsg) {
+	select {
+	case c.ctl <- m:
+	default:
+	}
+}
+
+// syncControl waits until the pump has written every item queued before
+// it. Used only at session start (shell/exec), where the wire is quiet:
+// it pins request replies ahead of the handler's first output without
+// ever putting the reader back on the socket. Post-session-start use
+// would be a bug — a congested pump would stall inbound processing.
+func (c *conn) syncControl() {
+	done := make(chan struct{})
+	c.sendControl(ctlMsg{done: done})
+	select {
+	case <-done:
+	case <-c.dead:
+	}
+}
+
+// pumpControl is the connection's control writer — with the session's
+// frame writer, the only goroutine that writes once play has started.
+// It dies with the connection: serveConn closes dead, and a failing
+// write (conn already closing elsewhere) also tears it down.
+func (c *conn) pumpControl() {
+	for {
+		var m ctlMsg
+		select {
+		case <-c.dead:
+			return
+		case m = <-c.ctl:
+		case <-c.adjustSig:
+			m = ctlMsg{pkt: c.ch.takeOwed()}
+		}
+		if m.done != nil {
+			close(m.done)
+			continue
+		}
+		if m.pkt == nil {
+			continue
+		}
+		if err := c.t.writePacket(m.pkt); err != nil {
+			c.t.conn.Close()
+			return
+		}
+	}
 }
 
 // ListenAndServe runs the server until the listener fails.
@@ -331,6 +451,11 @@ func (s *Server) Serve(ln net.Listener) error {
 		if tc := nc.(*net.TCPConn); tc != nil {
 			tc.SetKeepAlive(true)
 			tc.SetKeepAlivePeriod(15 * time.Second)
+			// Control packets (window adjusts, keepalive and request
+			// replies) interleave with 256KB frame chunks on the same
+			// stream; Nagle would hold the small packet until the big
+			// one is ACKed — exactly the wrong priority order.
+			tc.SetNoDelay(true)
 		}
 		if !s.adm.room(s.MaxSessions, s.MaxQueue) {
 			// No room to play or even to wait: refuse politely, in the
@@ -406,7 +531,14 @@ func splitLines(s string) []string {
 // serveConn runs one connection to completion.
 func (s *Server) serveConn(nc net.Conn) {
 	defer nc.Close()
-	c := &conn{t: newTransport(nc), srv: s}
+	c := &conn{
+		t:         newTransport(nc),
+		srv:       s,
+		ctl:       make(chan ctlMsg, 8),
+		adjustSig: make(chan struct{}, 1),
+		dead:      make(chan struct{}),
+	}
+	defer close(c.dead)
 
 	// Bound the pre-auth phase against slowloris-style stalls.
 	nc.SetDeadline(deadlineAfter(30))
@@ -423,8 +555,11 @@ func (s *Server) serveConn(nc net.Conn) {
 		return
 	}
 
-	// Authenticated (by not authenticating). Clear the handshake deadline.
+	// Authenticated (by not authenticating). Clear the handshake deadline
+	// and start the control lane — from here on the reader goroutine
+	// never writes to the socket (see conn's control-lane comment).
 	nc.SetDeadline(time.Time{})
+	go c.pumpControl()
 
 	if err := c.loop(); err != nil {
 		s.Log.Printf("session %s: %v", nc.RemoteAddr(), err)
@@ -547,9 +682,7 @@ func (c *conn) loop() error {
 				if name == "keepalive@openssh.com" {
 					code = msgRequestSuccess
 				}
-				if err := c.t.writePacket([]byte{code}); err != nil {
-					return err
-				}
+				c.writeControl([]byte{code})
 			}
 		case msgChannelOpen:
 			if err := c.openChannel(p); err != nil {
@@ -569,22 +702,12 @@ func (c *conn) loop() error {
 			r := &reader{b: p[1:]}
 			_ = r.u32()
 			data := r.str()
+			rawLen := len(data)
 			if c.ch != nil && r.ok() {
-				// The bytes are consumed the moment they are fed, so
-				// replenish the receive window we advertised at channel
-				// open: without adjusts a client tracking the window
-				// (ssh does) goes input-silent after ~2MB of cumulative
-				// keystrokes — an hour of held keys, or a few big pastes.
-				// One tiny adjust per keystroke packet keeps it exact.
-				if len(data) > 0 {
-					w := &buf{}
-					w.u8(msgWindowAdjust)
-					w.u32(0)
-					w.u32(uint32(len(data)))
-					if err := c.t.writePacket(w.b); err != nil {
-						return err
-					}
-				}
+				// Input is the real-time path: bytes reach the game the
+				// moment they are read, before any protocol bookkeeping.
+				// Nothing here may wait on a socket write — see the
+				// control-lane notes on conn.
 				c.ch.mu.Lock()
 				feed := c.ch.feed
 				probe := c.ch.probe
@@ -602,6 +725,20 @@ func (c *conn) loop() error {
 				}
 				if feed != nil && len(data) > 0 {
 					feed(data)
+				}
+				// Then replenish the receive window we advertised at
+				// channel open, off this goroutine: every consumed byte
+				// (probe-buffered and stripped ones included — the client
+				// spent window on them all) is owed back. Adjusts
+				// coalesce and ride the control pump once they reach
+				// half the window; without them a window-tracking client
+				// (ssh is) goes input-silent after 2MB of cumulative
+				// input — an hour of held keys, or a few big pastes.
+				if rawLen > 0 && c.ch.addOwed(rawLen) {
+					select {
+					case c.adjustSig <- struct{}{}:
+					default:
+					}
 				}
 			}
 		case msgChannelRequest:
@@ -687,9 +824,9 @@ func (c *conn) channelRequest(p []byte) error {
 	if !r.ok() || c.ch == nil {
 		return nil
 	}
-	reply := func(ok bool) error {
+	reply := func(ok bool) {
 		if !wantReply {
-			return nil
+			return
 		}
 		w := &buf{}
 		if ok {
@@ -698,7 +835,9 @@ func (c *conn) channelRequest(p []byte) error {
 			w.u8(msgChannelFailure)
 		}
 		w.u32(0) // recipient channel (our id, as sent in the confirmation)
-		return c.t.writePacket(w.b)
+		// Replies ride the control pump: writing here would put the
+		// reader behind a frame chunk stuck on a full kernel buffer.
+		c.writeControl(w.b)
 	}
 	switch kind {
 	case "pty-req":
@@ -722,7 +861,8 @@ func (c *conn) channelRequest(p []byte) error {
 			c.ch.rows = int(min(rows, 10000))
 		}
 		c.ch.mu.Unlock()
-		return reply(true)
+		reply(true)
+		return nil
 	case "env":
 		name := string(r.str())
 		val := string(r.str())
@@ -731,7 +871,8 @@ func (c *conn) channelRequest(p []byte) error {
 			c.ch.env[name] = val
 		}
 		c.ch.mu.Unlock()
-		return reply(true)
+		reply(true)
+		return nil
 	case "window-change":
 		cols := r.u32()
 		rows := r.u32()
@@ -765,11 +906,14 @@ func (c *conn) channelRequest(p []byte) error {
 		c.ch.shelled = true
 		c.ch.mu.Unlock()
 		if !start {
-			return reply(false)
+			reply(false)
+			return nil
 		}
-		if err := reply(true); err != nil {
-			return err
-		}
+		reply(true)
+		// Pin the queued success ahead of the handler's first output
+		// (the probe query below): the sync waits on the pump, never on
+		// the socket, and the wire is quiet this early.
+		c.syncControl()
 		// Ask the client's terminal to identify itself (DA2+DA3); the
 		// replies set the session's color depth (termprobe.go). Shell
 		// sessions only: the mosh wrapper runs its ssh with -n (stdin
@@ -778,20 +922,13 @@ func (c *conn) channelRequest(p []byte) error {
 		// Queries draw nothing on screen. The field write is locked to
 		// match every other access (the data loop on this same goroutine
 		// is sequential with it, and the handler goroutines only spawn
-		// after — but don't leave an unlocked accessor behind); the
-		// query write itself stays outside the lock: ch.write can block
-		// on the channel window and takes ch.mu itself.
+		// after — but don't leave an unlocked accessor behind).
 		c.ch.mu.Lock()
 		needProbe := c.ch.probe == nil && c.ch.term != ""
 		if needProbe {
 			c.ch.probe = newTermProbe()
 		}
 		c.ch.mu.Unlock()
-		if needProbe {
-			if _, err := c.ch.write([]byte(termQuery)); err != nil {
-				return err
-			}
-		}
 		sess := &Session{ch: c.ch}
 		go func() {
 			defer func() {
@@ -800,6 +937,16 @@ func (c *conn) channelRequest(p []byte) error {
 					c.ch.shutdown()
 				}
 			}()
+			// The query write rides the session channel from this
+			// goroutine, off the conn reader (which must never wait on
+			// a socket write once frames may be flowing); ch.write can
+			// block on the channel window and takes ch.mu itself.
+			if needProbe {
+				if _, err := c.ch.write([]byte(termQuery)); err != nil {
+					c.ch.shutdown()
+					return
+				}
+			}
 			admitted, err := c.srv.adm.enter(sess, c.srv.MaxSessions, c.srv.MaxQueue, c.srv.QueueTimeout, nil)
 			if err != nil {
 				// Refused, gave up or disconnected while waiting.
@@ -812,7 +959,8 @@ func (c *conn) channelRequest(p []byte) error {
 		}()
 		return nil
 	case "signal":
-		return reply(true)
+		reply(true)
+		return nil
 	case "exec":
 		// The one exec the server ever runs: the mosh handshake.
 		// "mosh-server new ..." is strictly validated and rebuilt with
@@ -828,11 +976,13 @@ func (c *conn) channelRequest(p []byte) error {
 				c.ch.execStarted = true
 				c.ch.mu.Unlock()
 				if started {
-					return reply(false)
+					reply(false)
+					return nil
 				}
-				if err := reply(true); err != nil {
-					return err
-				}
+				reply(true)
+				// Same ordering pin as shell: the CONNECT line
+				// startMosh writes must follow the exec success.
+				c.syncControl()
 				// Off the conn goroutine: startMosh waits for the
 				// color probe's reply, and this loop is what delivers
 				// inbound CHANNEL_DATA to the probe.
@@ -844,9 +994,11 @@ func (c *conn) channelRequest(p []byte) error {
 				return nil
 			}
 		}
-		return reply(false)
+		reply(false)
+		return nil
 	default:
 		// subsystem, x11, agent…: nothing here but the game.
-		return reply(false)
+		reply(false)
 	}
+	return nil
 }

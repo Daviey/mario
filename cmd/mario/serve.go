@@ -115,6 +115,44 @@ func (w sessWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// bellSink is the SSH bell's fire-and-forget writer. ring() fires on
+// the tick goroutine — the same goroutine that polls input and steps
+// the simulation — so it must never block there: under congestion the
+// SSH channel window closes and Session.Write waits for the client to
+// drain. Sound is the most droppable payload in the system (a missed
+// beep is inaudible; a stalled tick loop is mushy controls), so BELs
+// queue four deep and drop when the writer backs up.
+type bellSink struct {
+	q    chan []byte
+	done chan struct{}
+}
+
+func newBellSink(s *sshd.Session) *bellSink {
+	b := &bellSink{q: make(chan []byte, 4), done: make(chan struct{})}
+	go func() {
+		defer close(b.done)
+		for pkt := range b.q {
+			s.Write(pkt) // errors are the session teardown's business
+		}
+	}()
+	return b
+}
+
+func (b *bellSink) Write(p []byte) (int, error) {
+	select {
+	case b.q <- p:
+	default: // queue full: the pump is backed up, drop the beep
+	}
+	return len(p), nil
+}
+
+// stop drains and joins the pump so no BEL can land after the session
+// epilogue's terminal-restore bytes.
+func (b *bellSink) stop() {
+	close(b.q)
+	<-b.done
+}
+
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
@@ -136,7 +174,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	mapper, saveCal := sessionMapper(cals, s.RemoteAddr())
 	defer saveCal() // the session's learned repeat timing serves the next connect
 
-	out := sessWriter{s: s} // frame writer, and the bell sink below
+	out := sessWriter{s: s} // frame writer; the bell gets its own sink below
 	opts := &mario.Options{
 		Levels:    levels,
 		ViewW:     viewW,
@@ -147,12 +185,14 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		Term:      s.Term(),
 		ColorTerm: s.Env("COLORTERM"),
 	}
+	var bell *bellSink
 	if bellOn {
-		// Sound feedback as BEL bytes on the session channel. Written
-		// from the tick goroutine while frames flush on the writer
-		// goroutine — channel.write is mutex-guarded, and BEL is a C0
+		// Sound feedback as BEL bytes on the session channel — a C0
 		// control every terminal parser executes even mid-sequence.
-		opts.Sound = newBell(out).ring
+		// The sink decouples the tick goroutine from the write: it
+		// never waits on the channel window.
+		bell = newBellSink(s)
+		opts.Sound = newBell(bell).ring
 	}
 	app := mario.New(opts)
 	s.OnFeed(app.Feed) // also flushes keystrokes the color probe buffered
@@ -196,6 +236,13 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		}
 		s.Write([]byte("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l\x1b[0m\r\n"))
 	}()
+
+	// Registered after the epilogue defer, so it runs before it (LIFO):
+	// the bell pump joins here and cannot emit a BEL after the
+	// terminal-restore bytes below.
+	if bell != nil {
+		defer bell.stop()
+	}
 
 	tick := time.NewTicker(time.Second / engine.TicksPerSecond)
 	defer tick.Stop()
