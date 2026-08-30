@@ -3,16 +3,44 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, ... }@flake:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       # The store-friendly build identity: commit rev when built from a
       # clean checkout, "dirty<rev>" during development, "dev" outside git.
       version = self.shortRev or self.dirtyShortRev or "dev";
+
+      # mkMario builds the game server package. versionStamp replaces the
+      # default rev stamp in render.Version — deploy tooling that has the
+      # tagged git repo passes `git describe --tags` here so the title
+      # screen shows the release string instead of a bare hash (the flake
+      # sandbox has no history; tags cannot be resolved at eval time).
+      mkMario = { system, versionStamp ? version }: (nixpkgs.legacyPackages.${system}).buildGoModule {
+        pname = "mario";
+        version = if versionStamp == "" then version else versionStamp;
+        src = self;
+        subPackages = [ "cmd/mario" ];
+        # Stdlib-only module — no dependencies to vendor. buildGoModule
+        # sets CGO_ENABLED=0 in env by default (static, like the
+        # Makefile); do not shadow it with a derivation attribute.
+        vendorHash = null;
+        ldflags = [
+          "-s"
+          "-w"
+          "-X github.com/Daviey/mario/render.Version=${if versionStamp == "" then "v${version}" else versionStamp}"
+        ];
+        meta = with (nixpkgs.legacyPackages.${system}).lib; {
+          description = "Terminal Mario-style platformer with a replay-verified online leaderboard";
+          homepage = "https://daviey.github.io/mario/";
+          license = licenses.mit;
+          mainProgram = "mario";
+          platforms = platforms.unix;
+        };
+      };
     in
     {
-      packages = forAllSystems (pkgs:
+      packages = forAllSystems (pkgs@{ system, ... }:
         let
           # The single-file UEFI bootable and its pieces (x86_64 only).
           efi = nixpkgs.lib.optionalAttrs (pkgs.system == "x86_64-linux") (
@@ -86,28 +114,7 @@
           );
         in
         rec {
-          mario = pkgs.buildGoModule {
-            pname = "mario";
-            inherit version;
-            src = self;
-            subPackages = [ "cmd/mario" ];
-            # Stdlib-only module — no dependencies to vendor. buildGoModule
-            # sets CGO_ENABLED=0 in env by default (static, like the
-            # Makefile); do not shadow it with a derivation attribute.
-            vendorHash = null;
-            ldflags = [
-              "-s"
-              "-w"
-              "-X github.com/Daviey/mario/render.Version=v${version}"
-            ];
-            meta = with pkgs.lib; {
-              description = "Terminal Mario-style platformer with a replay-verified online leaderboard";
-              homepage = "https://daviey.github.io/mario/";
-              license = licenses.mit;
-              mainProgram = "mario";
-              platforms = platforms.unix;
-            };
-          };
+          mario = mkMario { inherit system; };
           default = mario;
         } // efi);
 
