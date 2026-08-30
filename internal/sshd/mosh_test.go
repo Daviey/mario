@@ -12,23 +12,32 @@ import (
 
 func TestParseMoshArgv(t *testing.T) {
 	cases := []struct {
-		name string
-		cmd  string
-		ok   bool
+		name   string
+		cmd    string
+		ok     bool
+		colors bool
 	}{
-		{"handshake", "mosh-server new -c -l dave -p 60000:61000", true},
-		{"bare", "mosh-server new", true},
-		{"with command", "mosh-server new -- mario", true},
-		{"verbose", "mosh-server new -v -l dave", true},
-		{"other binary", "sh -c mosh-server", false},
-		{"not new", "mosh-server kill 1234", false},
-		{"unknown flag", "mosh-server new -x", false},
-		{"shell metachar", "mosh-server new; rm -rf /", false}, // "new;" fails the exact match; argv is rebuilt anyway
-		{"empty", "", false},
+		{"handshake", "mosh-server new -c -l dave -p 60000:61000", true, true},
+		{"bare", "mosh-server new", true, false},
+		{"colors without value", "mosh-server new -c", true, true},
+		{"with command", "mosh-server new -- mario", true, false},
+		{"dashdash alone", "mosh-server new --", true, false},
+		{"flag-looking value", "mosh-server new -l -p 60000:61000", true, false},
+		{"verbose", "mosh-server new -v -l dave", true, false},
+		{"other binary", "sh -c mosh-server", false, false},
+		{"not new", "mosh-server kill 1234", false, false},
+		{"unknown flag", "mosh-server new -x", false, false},
+		{"shell metachar", "mosh-server new; rm -rf /", false, false}, // "new;" fails the exact match; argv is rebuilt anyway
+		{"empty", "", false, false},
 	}
 	for _, c := range cases {
-		if _, ok := parseMoshArgv(c.cmd); ok != c.ok {
+		req, ok := parseMoshArgv(c.cmd)
+		if ok != c.ok {
 			t.Errorf("%s: parseMoshArgv(%q) ok=%v, want %v", c.name, c.cmd, ok, c.ok)
+			continue
+		}
+		if ok && req.colors != c.colors {
+			t.Errorf("%s: colors=%v, want %v (a -c without its value word still counts)", c.name, req.colors, c.colors)
 		}
 	}
 }

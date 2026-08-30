@@ -14,6 +14,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -413,6 +414,17 @@ func TestServeWindowChangeMidSession(t *testing.T) {
 	// Zero fields are ignored per RFC 4254 — if the server wrongly fired
 	// for this one, the next read sees the stray report and fails.
 	tc.winch(0, 0)
+	// The unknown rule is per field: a zero col with a real row changes
+	// only the row…
+	tc.winch(0, 20)
+	if got := string(tc.readData()); got != "RESIZE=100x20" {
+		t.Fatalf("zero-cols resize report = %q, want cols kept", got)
+	}
+	// …and a zero row with a real col changes only the col.
+	tc.winch(70, 0)
+	if got := string(tc.readData()); got != "RESIZE=70x20" {
+		t.Fatalf("zero-rows resize report = %q, want rows kept", got)
+	}
 	tc.winch(80, 24)
 	if got := string(tc.readData()); got != "RESIZE=80x24" {
 		t.Fatalf("second resize report = %q", got)
@@ -557,7 +569,7 @@ func TestInputWindowReplenished(t *testing.T) {
 		}
 		return int64(add)
 	}
-	remaining, adjusted := int64(1<<21), int64(0)
+	remaining, adjusted := int64(rxWindow), int64(0)
 	payload := make([]byte, chunk)
 	for sent := 0; sent < total; sent += chunk {
 		if remaining < chunk {
@@ -918,5 +930,144 @@ func TestTruncatedProbeRecoversE2E(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("post-recovery input never reached the feed")
+	}
+}
+
+// A truncated WINDOW_ADJUST (payload cut inside the add field) must be
+// ignored without derailing the connection, while a well-formed adjust
+// still grows the window and unblocks a window-exhausted writer.
+func TestMalformedWindowAdjustIgnored(t *testing.T) {
+	const payload = 200
+	srv := startServer(t, func(s *Session) {
+		s.Write(make([]byte, payload)) // one big write; server must chunk
+		<-s.Done()
+	})
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	tc.openSession(64, 32) // tiny window, tiny packet cap
+	tc.shell()
+
+	// Drain exactly the 64-byte window.
+	got := 0
+	for got < 64 {
+		d := tc.readData()
+		if len(d) > 32 {
+			t.Fatalf("server sent %d bytes, exceeding our 32-byte packet cap", len(d))
+		}
+		got += len(d)
+	}
+	blocked := func() bool {
+		tc.nc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_, err := tc.tr.readPacket()
+		return err != nil
+	}
+	if !blocked() {
+		t.Fatal("server sent data beyond the advertised window")
+	}
+
+	// Truncated adjust — the 4-byte add field cut to 2 bytes: ignored,
+	// the writer stays blocked.
+	w := &buf{}
+	w.u8(msgWindowAdjust)
+	w.u32(0)
+	w.b = append(w.b, 0x00, 0x01)
+	tc.send(w.b)
+	if !blocked() {
+		t.Fatal("malformed window adjust grew the window")
+	}
+
+	// Well-formed adjust: the pending write completes.
+	w = &buf{}
+	w.u8(msgWindowAdjust)
+	w.u32(0)
+	w.u32(64)
+	tc.send(w.b)
+	for got < 128 {
+		got += len(tc.readData())
+	}
+}
+
+// Pre-NEWKEYS framing rules: an inbound length field beyond
+// maxPacketLen, or padding below the RFC 4253 minimum of 4 bytes, must
+// tear the connection down before any crypto exists to lean on.
+func TestPreNewkeysFramingRejects(t *testing.T) {
+	// dialRaw connects and completes the version exchange but no key
+	// exchange: the next packet the server reads is plaintext.
+	dialRaw := func(t *testing.T, addr string) *testClient {
+		t.Helper()
+		nc, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { nc.Close() })
+		tc := &testClient{t: t, nc: nc, tr: newTransport(nc)}
+		if err := tc.tr.exchangeVersion(clientVersion); err != nil {
+			t.Fatalf("version exchange: %v", err)
+		}
+		return tc
+	}
+	// expectClose fails the test unless the server ends the connection.
+	expectClose := func(t *testing.T, nc net.Conn) {
+		t.Helper()
+		nc.SetReadDeadline(time.Now().Add(3 * time.Second))
+		if _, err := nc.Read(make([]byte, 1)); err == nil {
+			t.Fatal("server kept the connection open after a malformed packet")
+		}
+	}
+	t.Run("oversize length", func(t *testing.T) {
+		tc := dialRaw(t, startServer(t, echoHandler).Addr)
+		hdr := make([]byte, 4)
+		binary.BigEndian.PutUint32(hdr, maxPacketLen+1)
+		tc.nc.Write(hdr)
+		expectClose(t, tc.nc)
+	})
+	t.Run("short padding", func(t *testing.T) {
+		tc := dialRaw(t, startServer(t, echoHandler).Addr)
+		var pkt []byte
+		pkt = binary.BigEndian.AppendUint32(pkt, 1+1+2) // padding+payload+padding
+		pkt = append(pkt, 2)                            // padLen < 4
+		pkt = append(pkt, msgKexinit)
+		pkt = append(pkt, 0, 0)
+		tc.nc.Write(pkt)
+		expectClose(t, tc.nc)
+	})
+}
+
+// A KEXDH_INIT with a client public key of the wrong length, or the
+// all-zero (low-order) point, must fail the handshake: no KEXDH_REPLY,
+// the connection is torn down.
+func TestMalformedKexDHInitRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		e    []byte
+	}{
+		{"wrong length", bytes.Repeat([]byte{1}, 16)},
+		{"all-zero point", make([]byte, 32)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := startServer(t, echoHandler)
+			nc, err := net.Dial("tcp", srv.Addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { nc.Close() })
+			client := &testClient{t: t, nc: nc, tr: newTransport(nc)}
+			if err := client.tr.exchangeVersion(clientVersion); err != nil {
+				t.Fatalf("version exchange: %v", err)
+			}
+			client.send(buildKexinit())
+			if p := client.read(); len(p) == 0 || p[0] != msgKexinit {
+				t.Fatalf("expected server KEXINIT, got %v", p)
+			}
+			w := &buf{}
+			w.u8(msgKexDHInit)
+			w.str(tc.e)
+			client.send(w.b)
+
+			nc.SetReadDeadline(time.Now().Add(3 * time.Second))
+			if _, err := nc.Read(make([]byte, 1)); err == nil {
+				t.Fatal("server answered a malformed KEXDH_INIT instead of closing")
+			}
+		})
 	}
 }

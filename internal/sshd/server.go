@@ -179,20 +179,6 @@ func (s *Session) ClientVersion() string {
 	return string(s.ch.t.vPeer)
 }
 
-// DrainProbe stops the color-depth probe and returns any player
-// keystrokes it buffered while waiting for the DA2/DA3 reply. Call
-// right after OnFeed so nothing typed during the probe window is
-// lost; later input flows to the feed directly.
-func (s *Session) DrainProbe() []byte {
-	s.ch.mu.Lock()
-	p := s.ch.probe
-	s.ch.mu.Unlock()
-	if p == nil {
-		return nil
-	}
-	return p.drain()
-}
-
 // OnResize installs the pty-size handler (fired on every window-change
 // request, e.g. app.Resize).
 func (s *Session) OnResize(f func(cols, rows int)) {
@@ -220,6 +206,13 @@ const maxAuthTries = 20
 
 var errChannelClosed = errors.New("sshd: channel closed")
 
+// channel is the server side of the single session channel. Locking:
+// mu guards every mutable field — window, owe, cols/rows, term, env,
+// feed, onResize and probe — plus the FIFO handoffs that hang off them
+// (cond wakes window-blocked writers; closeOnce+done make shutdown
+// idempotent and observable). Fields read before the session starts
+// (t, srv, conn, maxPkt, wait) are set once at open and never written
+// again, so they need no lock.
 type channel struct {
 	t    *transport
 	srv  *Server
@@ -227,7 +220,6 @@ type channel struct {
 
 	mu          sync.Mutex
 	cond        *sync.Cond
-	peerID      uint32
 	window      int // client's receive window for our CHANNEL_DATA
 	maxPkt      int // client's max packet size
 	owe         int // inbound bytes consumed but not yet window-adjusted
@@ -242,7 +234,9 @@ type channel struct {
 	remoteGone  bool
 	sendErr     bool
 
-	// Color-depth probe state (termprobe.go): created at pty-req.
+	// Color-depth probe state (termprobe.go): created at the shell
+	// request (not pty-req — see channelRequest), when the session may
+	// first talk to the terminal.
 	probe *termProbe
 	wait  time.Duration // per-session ProbeWait, copied at channel open
 
@@ -250,13 +244,17 @@ type channel struct {
 	done      chan struct{}
 }
 
-// adjustFloor is the coalescing threshold for receive-window adjusts:
-// owed bytes are replenished once they reach half the 2MB window we
-// advertise at channel open (OpenSSH's own adjust-at-half policy). A
-// human typing never crosses it — zero adjust packets for ordinary
-// play — while a multi-megabyte paste still gets its window back long
-// before the client could stall (it always has ≥1MB to send).
-const adjustFloor = 1 << 20
+// rxWindow is the 2MB receive window advertised at channel open —
+// generous for a keystrokes-only input path. adjustFloor is exactly
+// half of it: owed inbound bytes are replenished once they reach the
+// halfway mark (OpenSSH's own adjust-at-half policy), so the client
+// always retains ≥1MB of credit. A human typing never crosses the
+// floor — zero adjust packets for ordinary play — while a multi-
+// megabyte paste still gets its window back long before it could stall.
+const (
+	rxWindow    = 1 << 21
+	adjustFloor = rxWindow / 2
+)
 
 // addOwed records inbound bytes the handler consumed and reports
 // whether the receive window needs replenishing now.
@@ -562,7 +560,10 @@ func (s *Server) Serve(ln net.Listener) error {
 		if err != nil {
 			return err
 		}
-		if tc := nc.(*net.TCPConn); tc != nil {
+		if tc, ok := nc.(*net.TCPConn); ok {
+			// Best-effort socket tuning: the errors are ignored — a
+			// failed keepalive or nodelay only degrades, never breaks,
+			// the session.
 			tc.SetKeepAlive(true)
 			tc.SetKeepAlivePeriod(15 * time.Second)
 			// Control packets (window adjusts, keepalive and request
@@ -655,7 +656,7 @@ func (s *Server) serveConn(nc net.Conn) {
 	defer close(c.dead)
 
 	// Bound the pre-auth phase against slowloris-style stalls.
-	nc.SetDeadline(deadlineAfter(30))
+	nc.SetDeadline(time.Now().Add(30 * time.Second))
 	if err := c.t.exchangeVersion(serverVersion); err != nil {
 		return
 	}
@@ -693,32 +694,39 @@ func (s *Server) serveConn(nc net.Conn) {
 	}
 }
 
-// handshake performs the initial key exchange.
-func (c *conn) handshake(clientKexinit []byte) error {
+// serverKexStep validates the client's KEXINIT, answers with our own,
+// and runs one key exchange, returning the packets the client sent
+// mid-exchange (they were consumed off the wire under the old-key
+// rules and must be reprocessed by loop once the new keys are in).
+func (c *conn) serverKexStep(clientKexinit []byte) ([][]byte, error) {
 	if err := kexinitOffers(clientKexinit); err != nil {
-		return err
+		return nil, err
 	}
 	c.t.ic = clientKexinit
 	c.t.is = buildKexinit()
 	if err := c.t.writePacket(c.t.is); err != nil {
-		return err
+		return nil, err
 	}
-	q, err := c.t.serverKex(c.srv.hk)
+	return c.t.serverKex(c.srv.hk)
+}
+
+// handshake performs the initial key exchange. The overflow (if any)
+// lands after anything already buffered — at the initial exchange the
+// queue is empty, so this is simply append.
+func (c *conn) handshake(clientKexinit []byte) error {
+	q, err := c.serverKexStep(clientKexinit)
 	c.queue = append(c.queue, q...)
 	return err
 }
 
-// rekey responds to a mid-session KEXINIT.
+// rekey responds to a mid-session KEXINIT. The fresh overflow goes
+// ahead of any packets still buffered from an earlier exchange (the
+// order differs from handshake's append; both coincide in practice,
+// because loop drains the queue before it can read a fresh KEXINIT —
+// the order is only observable when a client pipelines a KEXINIT
+// into a previous exchange's tail).
 func (c *conn) rekey(clientKexinit []byte) error {
-	if err := kexinitOffers(clientKexinit); err != nil {
-		return err
-	}
-	c.t.ic = clientKexinit
-	c.t.is = buildKexinit()
-	if err := c.t.writePacket(c.t.is); err != nil {
-		return err
-	}
-	q, err := c.t.serverKex(c.srv.hk)
+	q, err := c.serverKexStep(clientKexinit)
 	c.queue = append(q, c.queue...)
 	return err
 }
@@ -902,6 +910,9 @@ func (c *conn) loop() error {
 	}
 }
 
+// sendBanner writes the flavor-text banner after auth. The write error
+// is swallowed on purpose: losing the banner is purely cosmetic, and
+// the auth SUCCESS that follows carries the real result.
 func (c *conn) sendBanner() {
 	w := &buf{}
 	w.u8(msgUserauthBanner)
@@ -940,7 +951,6 @@ func (c *conn) openChannel(p []byte) error {
 		t:      c.t,
 		srv:    c.srv,
 		conn:   c.t.conn,
-		peerID: peerID,
 		window: int(window),
 		maxPkt: int(maxPkt),
 		cols:   80,
@@ -959,7 +969,7 @@ func (c *conn) openChannel(p []byte) error {
 	w.u8(msgChannelOpenConf)
 	w.u32(peerID)
 	w.u32(0)             // our channel id
-	w.u32(1 << 21)       // our receive window (generous: keystrokes only)
+	w.u32(rxWindow)      // our receive window (generous: keystrokes only)
 	w.u32(maxPayloadLen) // our max packet size
 	return c.t.writePacket(w.b)
 }

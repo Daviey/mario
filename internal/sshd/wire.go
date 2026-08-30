@@ -88,17 +88,8 @@ func (r *reader) str() []byte {
 	return s
 }
 
-// rest returns whatever remains (for request-type-specific tails the
-// caller parses itself).
-func (r *reader) rest() []byte {
-	if r.err {
-		return nil
-	}
-	s := r.b
-	r.b = nil
-	return s
-}
-
+// ok reports whether every read so far succeeded; once false it stays
+// false (the err latch), so parsers check it once after a run of reads.
 func (r *reader) ok() bool { return !r.err }
 
 // SSH message numbers (RFC 4253 §11 / 4254 §5).
@@ -137,11 +128,9 @@ const (
 	msgChannelFailure  = 100
 )
 
-// Disconnect reason codes (RFC 4253 §11.1).
+// Disconnect reason codes (RFC 4253 §11.1) — only the ones sent.
 const (
-	discProtocolError     = 2
-	discKeyExchangeFailed = 3
-	discServiceNotAvail   = 7
-	discTooManyConns      = 12
-	discByApplication     = 11
+	discProtocolError = 2
+	discByApplication = 11
+	discTooManyConns  = 12
 )
