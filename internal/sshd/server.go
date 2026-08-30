@@ -168,7 +168,7 @@ func (s *Session) ColorTerm() string {
 // the pty TERM advertises 256 colors — every -256color terminal and
 // mosh's cell model honors it — and base-16 only for terminals that
 // claim neither.
-func (s *Session) ColorDepth() int {
+func (s *Session) ColorDepth() render.ColorMode {
 	return render.ColorDepthFor(s.Term(), s.ColorTerm())
 }
 

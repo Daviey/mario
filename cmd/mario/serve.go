@@ -209,7 +209,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calC
 			Runs:          app.Runs(),
 			Term:          s.Term(),
 			ColorTerm:     s.ColorTerm(),
-			Colors:        colors,
+			Colors:        int(colors), // telemetry stores the plain depth number
 			Client:        s.ClientVersion(),
 			InputRegime:   regime,
 			Viewport:      strconv.Itoa(app.Game.ViewW) + "x" + strconv.Itoa(app.Game.ViewH),

@@ -57,7 +57,7 @@ func baseName(path string) string {
 }
 
 // RunDemo plays a deterministic scripted session with no terminal needed.
-func RunDemo(w io.Writer, levels []*engine.Level, colors int, ticks int) {
+func RunDemo(w io.Writer, levels []*engine.Level, colors render.ColorMode, ticks int) {
 	if len(levels) == 0 {
 		levels = engine.DefaultLevels()
 	}

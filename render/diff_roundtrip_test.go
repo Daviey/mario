@@ -167,7 +167,7 @@ func rgbColor(r, g, b int) Color {
 // compared on non-space cells (the encoder leaves a space's foreground
 // unset: it is invisible), and colors are compared only in the component
 // the palette's mode actually encodes — a 16-color frame cannot carry RGB.
-func (tm *termModel) compare(t *testing.T, want *Screen, mode int) {
+func (tm *termModel) compare(t *testing.T, want *Screen, mode ColorMode) {
 	t.Helper()
 	sameColor := func(a, b Color) bool {
 		switch mode {

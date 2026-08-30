@@ -262,7 +262,7 @@ func usage(w io.Writer) {
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, colors int, daily, cheats, bellOn bool) (int, error) {
+func run(levels []*engine.Level, width int, colors render.ColorMode, daily, cheats, bellOn bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard

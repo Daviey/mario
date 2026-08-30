@@ -16,7 +16,7 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-func UIPreview(w io.Writer, mode string, colors int) error {
+func UIPreview(w io.Writer, mode string, colors render.ColorMode) error {
 	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 	for t := range 6000 {
 		g.Update(ui.ScriptInput(t))

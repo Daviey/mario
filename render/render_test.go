@@ -433,7 +433,7 @@ func TestColorModeSequences(t *testing.T) {
 func TestColorDepthFor(t *testing.T) {
 	for _, tc := range []struct {
 		term, colorterm string
-		want            int
+		want            ColorMode
 	}{
 		{"xterm-256color", "", Colors256},
 		{"tmux-256color", "", Colors256},

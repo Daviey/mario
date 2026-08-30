@@ -176,7 +176,7 @@ func TestSessionColorDepth(t *testing.T) {
 		name string
 		term string
 		env  [2]string
-		want int
+		want render.ColorMode
 	}{
 		{"silent 256color", "xterm-256color", [2]string{"", ""}, render.Colors256},
 		{"plain xterm", "xterm", [2]string{"", ""}, render.Colors16},
@@ -184,7 +184,7 @@ func TestSessionColorDepth(t *testing.T) {
 		{"ghostty family", "xterm-ghostty", [2]string{"", ""}, render.Colors24},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := make(chan int, 1)
+			got := make(chan render.ColorMode, 1)
 			srv := startServer(t, func(s *Session) {
 				got <- s.ColorDepth()
 				<-s.Done()
