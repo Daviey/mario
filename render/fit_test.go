@@ -132,7 +132,7 @@ func TestTitleCastStandsOnGroundLine(t *testing.T) {
 		// white ink is color-identical to goomba art. Bands come from the
 		// world frame: RenderPixels composites HUD above it, so its f.H
 		// would shift every band down by the status band.
-		textBands := titleTextBands(worldFrame(g, testPal), g)
+		textBands := titleTextBands(worldFrame(nil, g, testPal), g)
 		inBand := func(x, y int) bool {
 			for _, b := range textBands {
 				if x >= b[0] && x < b[2] && y >= b[1]+HudBandPx && y < b[3]+HudBandPx {

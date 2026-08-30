@@ -34,20 +34,28 @@ import (
 // jsRGB pushes frame pixels into a page-owned Uint8Array and hands it to
 // marioFrame, minimizing per-frame allocations.
 type jsRGB struct {
-	buf js.Value // Uint8Array of len w*h*3, resized when the frame size changes
-	w   int
-	h   int
+	buf  js.Value
+	w, h int
+
+	// recycled render scratch: the composite frame, its world raster
+	// and the RGB packing buffer (RenderPixelsInto/RGBBytesInto refill
+	// in place — deliver copies out to JS before the next tick).
+	frame, world *render.Frame
+	rgb          []byte
 }
 
 var jsFrameSink jsRGB
 
-func (j *jsRGB) deliver(f *render.Frame) {
+func (j *jsRGB) deliver(g *engine.Game, p *render.Palette) {
+	j.frame, j.world = render.RenderPixelsInto(j.frame, j.world, g, p)
+	f := j.frame
 	n := f.W * f.H * 3
 	if j.buf.IsUndefined() || j.w != f.W || j.h != f.H || j.buf.Length() != n {
 		j.buf = js.Global().Get("Uint8Array").New(n)
 		j.w, j.h = f.W, f.H
 	}
-	js.CopyBytesToJS(j.buf, f.RGBBytes())
+	j.rgb = f.RGBBytesInto(j.rgb)
+	js.CopyBytesToJS(j.buf, j.rgb)
 	js.Global().Call("marioFrame", f.W, f.H, j.buf)
 }
 
@@ -113,7 +121,7 @@ func main() {
 		titleFn.Invoke(true)
 	}
 
-	draw := func() { jsFrameSink.deliver(render.RenderPixels(g, pal)) }
+	draw := func() { jsFrameSink.deliver(g, pal) }
 	draw()
 	pushBoard(nil)
 

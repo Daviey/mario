@@ -66,11 +66,11 @@ func TestVersionDrawnOnTitle(t *testing.T) {
 	g.ViewH = engine.LevelHeight // tall frame: room for the version line
 
 	Version = ""
-	f0 := worldFrame(g, testPal)
+	f0 := worldFrame(nil, g, testPal)
 	nBands0 := len(titleTextBands(f0, g))
 
 	Version = "V9.9.9-TEST"
-	f1 := worldFrame(g, testPal)
+	f1 := worldFrame(nil, g, testPal)
 
 	found := false
 	for _, e := range titleTextEls(f1, g) {
@@ -101,7 +101,7 @@ func TestVersionDrawnOnTitle(t *testing.T) {
 	// Narrow frame: the full string cannot fit, so pickTextPx must have
 	// laddered to a shorter candidate rather than overflowing.
 	g.ViewW = 12 // 72px wide frame
-	f2 := worldFrame(g, testPal)
+	f2 := worldFrame(nil, g, testPal)
 	for _, e := range titleTextEls(f2, g) {
 		if w := textWidthPx(e.s, e.scale); e.s != "MARIO" && w > f2.W {
 			t.Fatalf("element %q overflows %dpx frame (%dpx)", e.s, f2.W, w)

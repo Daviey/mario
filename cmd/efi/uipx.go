@@ -25,7 +25,8 @@ type uiLine struct {
 
 // uiFrame paints the active leaderboard screen over the world rows of the
 // freshly rendered game frame (HUD and status bands are kept). The frame
-// is modified in place — RenderPixels returns a new frame every tick.
+// is modified in place — the caller's recycled frame from
+// RenderPixelsInto is fine because uiFrame repaints the whole world band.
 func uiFrame(base *render.Frame, p *render.Palette, u *render.ScoreUI, tick int) *render.Frame {
 	worldY := render.HudBandPx
 	worldH := base.H - render.HudBandPx - render.StatusBandPx

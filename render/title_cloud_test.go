@@ -75,7 +75,7 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 		for _, viewH := range []int{7, 9, 12, 15} {
 			for _, lv := range engine.DefaultLevels() {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH) // starts on title
-				f := worldFrame(g, pal)
+				f := worldFrame(nil, g, pal)
 				bands := titleBands(f)
 				if len(bands) == 0 {
 					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
@@ -166,7 +166,7 @@ func TestLeaderHintDrawnOnTitle(t *testing.T) {
 	for _, viewH := range []int{4, 9, engine.LevelHeight} {
 		for _, lv := range engine.DefaultLevels() {
 			g := engine.NewGame([]*engine.Level{lv}, 40, viewH) // starts on title
-			f := worldFrame(g, testPal)
+			f := worldFrame(nil, g, testPal)
 			var hint *titleText
 			for i, e := range titleTextEls(f, g) {
 				if strings.Contains(e.s, "DAILY") {
@@ -207,7 +207,7 @@ func TestDemoTitleCloudsNeverOverlapTitleText(t *testing.T) {
 			for _, lv := range engine.DefaultLevels() {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH)
 				g.BeginDemo() // StatePlaying + Demo: the attract mode
-				f := worldFrame(g, pal)
+				f := worldFrame(nil, g, pal)
 				bands := titleBands(f)
 				if len(bands) == 0 {
 					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
@@ -267,7 +267,7 @@ func TestDemoTitleCloudsNeverOverlapTitleText(t *testing.T) {
 func TestDemoDrawsLivePlayUnderTitle(t *testing.T) {
 	g := engine.NewGame([]*engine.Level{engine.DefaultLevels()[0]}, 40, 12)
 	g.BeginDemo()
-	f := worldFrame(g, testPal) // tick 0: the ? block body is in its bright phase
+	f := worldFrame(nil, g, testPal) // tick 0: the ? block body is in its bright phase
 	for y := range f.H {
 		for x := range f.W {
 			if f.At(x, y) == testPal.QuestionBG {

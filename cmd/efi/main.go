@@ -8,7 +8,7 @@ package main
 //
 //	mounts devtmpfs            (the kernel does not automount it into initramfs)
 //	opens /dev/ttyS0 for logs  (serial console; QEMU -serial captures it)
-//	blits render.RenderPixels into the firmware framebuffer (/dev/fb0)
+//	blits RenderPixelsInto output into the firmware framebuffer (/dev/fb0)
 //	feeds evdev keyboard events to the game as kitty-protocol pairs
 //	powers the machine off on quit (reboot(2) from PID 1)
 //
@@ -51,7 +51,11 @@ func main() {
 	fb.layout(g.ViewW*render.Pix, render.HudBandPx+g.ViewH*render.Pix+render.StatusBandPx)
 	logf("mario-efi: world %dx%d px, scale %d, origin (%d,%d)",
 		g.ViewW*render.Pix, g.ViewH*render.Pix, fb.scale, fb.ox, fb.oy)
-
+	// Recycled render scratch: RenderPixelsInto refills both frames in
+	// place every tick (uiFrame may still build a fresh one while a
+	// leaderboard screen is up — rare, and worth the simplicity).
+	var frame, world *render.Frame
+	var rgb []byte
 	ticker := time.NewTicker(time.Second / time.Duration(engine.TicksPerSecond))
 	defer ticker.Stop()
 	for range ticker.C {
@@ -59,11 +63,12 @@ func main() {
 			k.drain(app.Feed)
 		}
 		app.Step()
-		frame := render.RenderPixels(g, pal)
+		frame, world = render.RenderPixelsInto(frame, world, g, pal)
 		if u := app.UI(); u != nil {
 			frame = uiFrame(frame, pal, u, g.Tick)
 		}
-		fb.blit(frame.RGBBytes(), frame.W, frame.H)
+		rgb = frame.RGBBytesInto(rgb)
+		fb.blit(rgb, frame.W, frame.H)
 		if g.Tick%60 == 0 {
 			logf("mario-efi: tick %d rendered", g.Tick)
 		}

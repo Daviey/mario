@@ -17,7 +17,7 @@ func TestStarRender(t *testing.T) {
 		Pos:  engine.Vec{X: 74, Y: 11 - engine.MushroomH},
 		Kind: engine.MushStar,
 	})
-	f := worldFrame(g, testPal)
+	f := worldFrame(nil, g, testPal)
 	starGold := 0
 	x0 := int((74 - 70) * Pix)
 	for y := 5 * Pix; y < 12*Pix; y++ {
@@ -36,9 +36,9 @@ func TestStarRender(t *testing.T) {
 	g.Player.Pos = engine.Vec{X: 72, Y: 11}
 	g.Player.Vel = engine.Vec{}
 	g.Tick = 0
-	h0 := regionHash(worldFrame(g, testPal), 6, 42, 30, 66)
+	h0 := regionHash(worldFrame(nil, g, testPal), 6, 42, 30, 66)
 	g.Tick = 3
-	h1 := regionHash(worldFrame(g, testPal), 6, 42, 30, 66)
+	h1 := regionHash(worldFrame(nil, g, testPal), 6, 42, 30, 66)
 	if h0 == h1 {
 		t.Error("star flicker did not change player pixels between phases")
 	}
@@ -85,7 +85,7 @@ func TestHiddenBlocksInvisible(t *testing.T) {
 	g := engine.NewGame([]*engine.Level{lvl}, 14, 12)
 	g.State = engine.StatePlaying
 	g.CameraX = 0
-	f := worldFrame(g, testPal)
+	f := worldFrame(nil, g, testPal)
 	oy := int(CameraY(g) * Pix)
 	for _, ty := range []int{5, 10} {
 		for y := ty*Pix - oy; y < ty*Pix-oy+Pix; y++ {

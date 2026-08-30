@@ -132,7 +132,7 @@ func TestWalkCycleStampsDistinctPixels(t *testing.T) {
 	seen := map[string]bool{}
 	for _, d := range []float64{0, 1, 2} {
 		pl.WalkDist = float64(d) * engine.WalkFrameLen
-		f := worldFrame(g, testPal)
+		f := worldFrame(nil, g, testPal)
 		var sb strings.Builder
 		art := marioArt(pl)
 		bottom := int(math.Round((pl.Pos.Y + pl.H - CameraY(g)) * Pix))
@@ -185,7 +185,7 @@ func regionHash(f *Frame, x0, y0, x1, y1 int) string {
 }
 
 func playerRegionHash(g *engine.Game) string {
-	f := worldFrame(g, testPal)
+	f := worldFrame(nil, g, testPal)
 	pl := g.Player
 	art := marioArt(pl)
 	bottom := int(math.Round((pl.Pos.Y + pl.H - CameraY(g)) * Pix))
@@ -219,7 +219,7 @@ func TestEnemyWaddleDrawn(t *testing.T) {
 		t.Fatal("no goomba in helper level")
 	}
 	hash := func() string {
-		f := worldFrame(g, testPal)
+		f := worldFrame(nil, g, testPal)
 		cx := int((e.Pos.X + e.W/2) * Pix)
 		bottom := int((e.Pos.Y + e.H - CameraY(g)) * Pix)
 		return regionHash(f, cx-4, bottom-6, cx+5, bottom)
@@ -237,9 +237,9 @@ func TestEnemyWaddleDrawn(t *testing.T) {
 func TestTitleCastAnimates(t *testing.T) {
 	g := engine.NewGame(engine.DefaultLevels(), 30, 12)
 	g.Tick = 0
-	a := regionHash(worldFrame(g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
+	a := regionHash(worldFrame(nil, g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
 	g.Tick = 10
-	b := regionHash(worldFrame(g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
+	b := regionHash(worldFrame(nil, g, testPal), 0, 0, g.ViewW*Pix, g.ViewH*Pix)
 	if a == b {
 		t.Error("title frames identical 10 ticks apart (cast not animating)")
 	}

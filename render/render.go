@@ -289,7 +289,17 @@ type Screen struct {
 
 // NewScreen returns a screen with every cell blank black.
 func NewScreen(w, h int) *Screen {
-	s := &Screen{W: w, H: h, cells: make([]Cell, w*h)}
+	return refillScreen(nil, w, h)
+}
+
+// refillScreen returns a w×h screen with every cell blank, allocating
+// only when s is nil or the wrong size. The total blank matters as much
+// as the reuse: recycled screens must be indistinguishable from fresh
+// ones even when the next frame leaves cells unwritten.
+func refillScreen(s *Screen, w, h int) *Screen {
+	if s == nil || s.W != w || s.H != h {
+		s = &Screen{W: w, H: h, cells: make([]Cell, w*h)}
+	}
 	blank := Cell{Ch: ' '}
 	for i := range s.cells {
 		s.cells[i] = blank
@@ -626,11 +636,14 @@ func CameraY(g *engine.Game) float64 {
 }
 
 // worldFrame renders the world (sky, decorations, tiles, HUD
-// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels.
-func worldFrame(g *engine.Game, p *Palette) *Frame {
+// overlays) into a pixel frame of ViewW*Pix x ViewH*Pix pixels. dst is
+// refilled in place when already the right size (nil or a mismatched
+// size allocates), keeping the per-tick pipeline allocation-free; the
+// fill is total, so no state leaks between ticks.
+func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	p = paletteFor(g, p)
 	vh := viewTilesOf(g)
-	f := NewFrame(g.ViewW*Pix, vh*Pix, p.Sky)
+	f := refillFrame(dst, g.ViewW*Pix, vh*Pix, p.Sky)
 	rc := runeColors(p)
 	camX := g.CameraX
 	camY := CameraY(g)
@@ -669,23 +682,45 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	return f
 }
 
+// refillFrame returns a w×h frame filled with bg, allocating only when
+// f is nil or the wrong size.
+func refillFrame(f *Frame, w, h int, bg Color) *Frame {
+	if f == nil || f.W != w || f.H != h {
+		return NewFrame(w, h, bg)
+	}
+	f.Fill(0, 0, w, h, bg)
+	return f
+}
+
 // Render draws one complete frame: HUD row, world pixel grid through the
 // camera (with vertical follow), entities, particles and overlays. Screen
 // size is ViewW*Pix columns wide and (2+ViewH*Pix/2) rows tall: a fuller
 // window shows more world, never bigger sprites. An active ScoreUI
-// replaces the world with the leaderboard text screens.
+// replaces the world with the leaderboard text screens. One-shot callers
+// only: per-tick callers should go through a Stream (which recycles the
+// buffers) or renderInto directly.
 func Render(g *engine.Game, p *Palette, ui ...*ScoreUI) *Screen {
+	s, _ := renderInto(nil, nil, g, p, ui...)
+	return s
+}
+
+// renderInto is Render with destination reuse: screen and world raster
+// are refilled in place when already the right size, so steady-state
+// rendering allocates nothing. It returns the (possibly freshly
+// allocated) buffers so callers can pass them back on the next call.
+func renderInto(s *Screen, world *Frame, g *engine.Game, p *Palette, ui ...*ScoreUI) (*Screen, *Frame) {
 	vh := viewTilesOf(g)
-	s := NewScreen(g.ViewW*Pix, 2+vh*Pix/2)
+	s = refillScreen(s, g.ViewW*Pix, 2+vh*Pix/2)
 	s.Colors = p.Colors
 	drawHUD(s, g, p)
 	drawStatus(s, g, p)
 	if u := firstUI(ui); u != nil && u.Mode != UIOff {
 		drawScoreUIText(s, u, p, g.Tick)
 	} else {
-		blit(s, worldFrame(g, p))
+		world = worldFrame(world, g, p)
+		blit(s, world)
 	}
-	return s
+	return s, world
 }
 
 // FrameANSI renders and serializes in one call.

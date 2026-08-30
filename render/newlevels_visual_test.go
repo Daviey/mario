@@ -64,7 +64,7 @@ func TestVisualNewLevelsDump(t *testing.T) {
 		g.Tick = sc.tick
 		// Park the player somewhere harmless on screen.
 		g.Player.Pos = engine.Vec{X: sc.camX + 2, Y: 11}
-		f := worldFrame(g, testPal)
+		f := worldFrame(nil, g, testPal)
 		pal := paletteFor(g, testPal)
 		t.Logf("=== %s (camX=%v tick=%d) ===\n%s", sc.note, sc.camX, sc.tick, dumpFramePal(f, pal))
 	}

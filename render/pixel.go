@@ -17,13 +17,25 @@ const (
 // The leaderboard UI is NOT rasterized: the browser renders it as DOM
 // text (see wasm.go's marioBoard bridge).
 // Width is ViewW*Pix; height HudBandPx + ViewH*Pix + StatusBandPx.
+// One-shot callers only: per-tick callers should use RenderPixelsInto,
+// which recycles the scratch frames.
 func RenderPixels(g *engine.Game, p *Palette) *Frame {
-	world := worldFrame(g, p)
-	f := NewFrame(world.W, world.H+HudBandPx+StatusBandPx, p.Sky)
-	f.DrawFrame(world, 0, HudBandPx)
-	drawHudPx(f, g, p)
-	drawStatusPx(f, g, p)
+	f, _ := RenderPixelsInto(nil, nil, g, p)
 	return f
+}
+
+// RenderPixelsInto is RenderPixels with destination reuse: dst receives
+// the composite frame and world the intermediate world raster; either
+// may be nil or wrongly sized (a correctly sized one is returned). Both
+// are refilled in place, so steady-state rendering allocates nothing.
+// The returned frames are valid until the next call that reuses them.
+func RenderPixelsInto(dst, world *Frame, g *engine.Game, p *Palette) (*Frame, *Frame) {
+	world = worldFrame(world, g, p)
+	dst = refillFrame(dst, world.W, world.H+HudBandPx+StatusBandPx, p.Sky)
+	dst.DrawFrame(world, 0, HudBandPx)
+	drawHudPx(dst, g, p)
+	drawStatusPx(dst, g, p)
+	return dst, world
 }
 
 // DrawFrame stamps another frame's pixels at (dx, dy), copying whole
@@ -40,17 +52,30 @@ func (f *Frame) DrawFrame(src *Frame, dx, dy int) {
 	}
 }
 
-// RGBBytes packs the frame as tight RGB triplets (canvas ImageData input).
+// RGBBytes packs the frame as tight RGB triplets (canvas ImageData
+// input), allocating the output. Per-tick callers should keep a buffer
+// alive via RGBBytesInto.
 func (f *Frame) RGBBytes() []byte {
-	out := make([]byte, f.W*f.H*3)
+	return f.RGBBytesInto(nil)
+}
+
+// RGBBytesInto is RGBBytes writing into dst, reallocating only when it
+// is nil or too small (it may be larger than needed; only the first
+// W*H*3 bytes are written).
+func (f *Frame) RGBBytesInto(dst []byte) []byte {
+	n := f.W * f.H * 3
+	if cap(dst) < n {
+		dst = make([]byte, n)
+	}
+	dst = dst[:n]
 	i := 0
 	for _, c := range f.px {
-		out[i] = byte(c.RGB >> 16)
-		out[i+1] = byte(c.RGB >> 8)
-		out[i+2] = byte(c.RGB)
+		dst[i] = byte(c.RGB >> 16)
+		dst[i+1] = byte(c.RGB >> 8)
+		dst[i+2] = byte(c.RGB)
 		i += 3
 	}
-	return out
+	return dst
 }
 
 // drawHudPx rasterizes the HUD band from the same content ladder as the

@@ -21,7 +21,7 @@ func titleEl(f *Frame, g *engine.Game, s string) *titleText {
 // appears under the version tag, above the cast, in the arcade charset.
 func TestTitleAboutBannerPresent(t *testing.T) {
 	g := engine.NewGame(engine.DefaultLevels(), 30, 12)
-	f := worldFrame(g, testPal)
+	f := worldFrame(nil, g, testPal)
 	castY := titleCastY(f)
 
 	fan := titleEl(f, g, "UNOFFICIAL FAN GAME")
@@ -55,7 +55,7 @@ func TestTitleAboutBannerLadderWidth(t *testing.T) {
 		{10, "FAN GAME", "NOT NINTENDO"},                            // 60px
 	} {
 		g := engine.NewGame(engine.DefaultLevels(), tc.vw, 12)
-		f := worldFrame(g, testPal)
+		f := worldFrame(nil, g, testPal)
 		if e := titleEl(f, g, tc.want1); e == nil {
 			t.Errorf("vw=%d: banner line 1 %q missing", tc.vw, tc.want1)
 		}
@@ -84,7 +84,7 @@ func TestTitleAboutBannerCharset(t *testing.T) {
 func TestTitleAboutBannerAbsentOnShortViewports(t *testing.T) {
 	for _, vh := range []int{7, 8, 9, 10} {
 		g := engine.NewGame(engine.DefaultLevels(), 30, vh)
-		f := worldFrame(g, testPal)
+		f := worldFrame(nil, g, testPal)
 		for _, e := range titleTextEls(f, g) {
 			if strings.Contains(e.s, "FAN") || strings.Contains(e.s, "NINTENDO") {
 				t.Errorf("vh=%d: about banner %q drawn without room", vh, e.s)
