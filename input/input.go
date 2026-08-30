@@ -100,16 +100,16 @@ type keyEvent struct {
 //     re-derives it (apply) before lastSeen is stamped, and ReleaseAll
 //     clears both together.
 type keyState struct {
-	lastSeen   int  // tick of the key's most recent byte; 0 = never seen
-	pressedAt  int  // tick of the newest PRESS (repeats don't refresh it)
-	sticky     bool // kitty press held until its explicit release byte
-	latched    bool // press edges awaiting their first Poll
-	win        int  // per-key expiry window; 0 = holdWindow
-	sawRepeat  bool // this keypress received repeat bytes
-	heldHabit  bool // last keypress of this key was a hold (repeats seen)
-	demoted    bool // proven hold silenced by a newer key press (see demotedHeld)
-	wasLive    bool // live at the previous Poll; drives one-shot expiry
-	deadAt     int  // tick a demoted hold finally expired; 0 = none
+	lastSeen  int  // tick of the key's most recent byte; 0 = never seen
+	pressedAt int  // tick of the newest PRESS (repeats don't refresh it)
+	sticky    bool // kitty press held until its explicit release byte
+	latched   bool // press edges awaiting their first Poll
+	win       int  // per-key expiry window; 0 = holdWindow
+	sawRepeat bool // this keypress received repeat bytes
+	heldHabit bool // last keypress of this key was a hold (repeats seen)
+	demoted   bool // proven hold silenced by a newer key press (see demotedHeld)
+	wasLive   bool // live at the previous Poll; drives one-shot expiry
+	deadAt    int  // tick a demoted hold finally expired; 0 = none
 }
 
 // Mapper converts a byte stream into per-tick engine.Input values.
@@ -159,13 +159,14 @@ func (m *Mapper) Poll() engine.Input {
 	// the newest key and never resume it for older ones. Such a hold stays
 	// live (see demotedHeld) instead of expiring on its own cadence.
 	for k := key(0); k < keyCount; k++ {
-		if m.demoted[k] || m.sticky[k] || m.lastSeen[k] == 0 || !m.sawRepeat[k] {
+		ks := &m.ks[k]
+		if ks.demoted || ks.sticky || ks.lastSeen == 0 || !ks.sawRepeat {
 			continue
 		}
 		if m.liveOwn(k) || !m.anyOtherLiveOwn(k) {
 			continue
 		}
-		m.demoted[k] = true
+		ks.demoted = true
 	}
 	// Silent expiry closes a keypress exactly once (live → dead): whether
 	// it ends as "this key is usually held" is exactly whether repeats
@@ -174,21 +175,22 @@ func (m *Mapper) Poll() engine.Input {
 	// resurrection marker: its release was never confirmed, so a later
 	// press of another key can reopen the question (see apply).
 	for k := key(0); k < keyCount; k++ {
+		ks := &m.ks[k]
 		if m.live(k) {
-			m.wasLive[k] = true
+			ks.wasLive = true
 			continue
 		}
-		if !m.wasLive[k] {
+		if !ks.wasLive {
 			continue
 		}
-		m.wasLive[k] = false
-		m.heldHabit[k] = m.sawRepeat[k]
-		m.deadAt[k] = 0
-		if m.demoted[k] {
-			m.deadAt[k] = m.now
+		ks.wasLive = false
+		ks.heldHabit = ks.sawRepeat
+		ks.deadAt = 0
+		if ks.demoted {
+			ks.deadAt = m.now
 		}
-		m.sawRepeat[k] = false
-		m.demoted[k] = false
+		ks.sawRepeat = false
+		ks.demoted = false
 	}
 	// An escape sequence that never completed (bytes lost or split by a
 	// slow link) would otherwise swallow every following key, because any
@@ -207,7 +209,7 @@ func (m *Mapper) Poll() engine.Input {
 		// reverses instantly (SMB-style) instead of the two cancelling to
 		// a standstill — and neither a stale legacy phantom hold nor the
 		// repeat stream of a genuinely held key can outrank a newer press.
-		if m.pressedAt[kLeft] > m.pressedAt[kRight] {
+		if m.ks[kLeft].pressedAt > m.ks[kRight].pressedAt {
 			right = false
 		} else {
 			left = false
@@ -226,12 +228,14 @@ func (m *Mapper) Poll() engine.Input {
 		AnyKey:  m.pendAny,
 	}
 	m.pendQuit, m.pendPause, m.pendRestart, m.pendKill, m.pendAny = false, false, false, false, false
-	m.latched = [keyCount]bool{} // each press edge is visible to exactly one Poll
+	for k := range m.ks {
+		m.ks[k].latched = false // each press edge is visible to exactly one Poll
+	}
 	return in
 }
 
 func (m *Mapper) held(k key) bool {
-	return m.latched[k] || m.live(k)
+	return m.ks[k].latched || m.live(k)
 }
 
 // live reports the key held right now, ignoring the one-tick press latch:
@@ -245,18 +249,18 @@ func (m *Mapper) live(k key) bool {
 // press/repeat still sticky, or a legacy stream whose repeats keep
 // lastSeen inside its expiry window.
 func (m *Mapper) liveOwn(k key) bool {
-	if m.sticky[k] {
+	ks := &m.ks[k]
+	if ks.sticky {
 		return true
 	}
-	ls := m.lastSeen[k]
-	if ls == 0 {
+	if ks.lastSeen == 0 {
 		return false
 	}
-	w := m.win[k]
+	w := ks.win
 	if w == 0 {
 		w = holdWindow
 	}
-	return m.now-ls <= w
+	return m.now-ks.lastSeen <= w
 }
 
 // demotedHeld keeps a proven hold alive after the terminal silenced its
@@ -268,11 +272,12 @@ func (m *Mapper) liveOwn(k key) bool {
 // The jump key is capped at upExtendTicks so a demoted Up can never eat
 // the retap edge of the next jump.
 func (m *Mapper) demotedHeld(k key) bool {
-	if !m.demoted[k] {
+	ks := &m.ks[k]
+	if !ks.demoted {
 		return false
 	}
 	if k == kUp {
-		return m.now-m.lastSeen[k] <= upExtendTicks
+		return m.now-ks.lastSeen <= upExtendTicks
 	}
 	if m.anyOtherLiveOwn(k) {
 		return true
@@ -306,7 +311,10 @@ type Calibration struct {
 func (m *Mapper) Calibration() Calibration {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	habit := m.heldHabit
+	var habit [keyCount]bool
+	for k := range m.ks {
+		habit[k] = m.ks[k].heldHabit
+	}
 	return Calibration{
 		OSDelay:   m.osDelay,
 		HeldHabit: habit[:],
@@ -335,18 +343,17 @@ func (m *Mapper) ReleaseAll() {
 	// the NEXT press of it deserves the hold grace — the sweep never
 	// sees this live→dead transition, because ReleaseAll is exactly the
 	// case where input stops reaching the mapper mid-hold.
-	for k := key(0); k < keyCount; k++ {
-		if m.sawRepeat[k] {
-			m.heldHabit[k] = true
-		}
+	var habit [keyCount]bool
+	for k := range m.ks {
+		habit[k] = m.ks[k].heldHabit || m.ks[k].sawRepeat
 	}
-	m.sticky = [keyCount]bool{}
-	m.latched = [keyCount]bool{}
-	m.lastSeen = [keyCount]int{}
-	m.demoted = [keyCount]bool{}
-	m.deadAt = [keyCount]int{}
-	m.win = [keyCount]int{}
-	m.sawRepeat = [keyCount]bool{}
+	// Whole-struct zero of every per-key field (holds, edges, windows,
+	// markers) — then restore: the settled hold habits are the one
+	// thing that survives ReleaseAll.
+	m.ks = [keyCount]keyState{}
+	for k := range m.ks {
+		m.ks[k].heldHabit = habit[k]
+	}
 	m.sources = make(map[int]key)
 }
 
@@ -363,7 +370,9 @@ func (m *Mapper) ApplyCalibration(c Calibration) {
 	}
 	m.osDelay = c.OSDelay
 	if len(c.HeldHabit) == int(keyCount) {
-		m.heldHabit = [keyCount]bool(c.HeldHabit)
+		for k, h := range c.HeldHabit {
+			m.ks[k].heldHabit = h
+		}
 	}
 }
 
@@ -384,7 +393,7 @@ func (m *Mapper) graceFor(k key) int {
 	// taps must not overrun after release. An unmeasured delay falls
 	// back to the common default so a learned hold habit still covers
 	// the delay even if the machine never produced a measurable gap.
-	if !m.heldHabit[k] {
+	if !m.ks[k].heldHabit {
 		return holdWindow
 	}
 	d := m.osDelay
@@ -448,10 +457,11 @@ func (m *Mapper) apply(ev keyEvent) {
 				}
 			}
 		}
-		m.sticky[ev.k] = false
-		m.lastSeen[ev.k] = 0
-		m.demoted[ev.k] = false
-		m.deadAt[ev.k] = 0
+		ks := &m.ks[ev.k]
+		ks.sticky = false
+		ks.lastSeen = 0
+		ks.demoted = false
+		ks.deadAt = 0
 		return
 	}
 	if ev.hasKey && ev.k < keyCount {
@@ -463,37 +473,39 @@ func (m *Mapper) apply(ev keyEvent) {
 		// retap edges).
 		// (releases never reach this block: they return above)
 		for k := key(0); k < keyCount; k++ {
-			if k == ev.k || k == kUp || m.deadAt[k] == 0 {
+			dk := &m.ks[k]
+			if k == ev.k || k == kUp || dk.deadAt == 0 {
 				continue
 			}
-			if m.now+1-m.deadAt[k] <= resurrectWindow {
-				m.demoted[k] = true
-				m.deadAt[k] = 0
-				m.wasLive[k] = true
+			if m.now+1-dk.deadAt <= resurrectWindow {
+				dk.demoted = true
+				dk.deadAt = 0
+				dk.wasLive = true
 			}
 		}
+		ks := &m.ks[ev.k]
 		if ev.evType >= 1 {
-			m.sticky[ev.k] = true
+			ks.sticky = true
 			if ev.src != 0 {
 				m.sources[ev.src] = ev.k
 			}
 		}
 		if ev.evType != 2 { // repeats don't refresh press recency
-			m.pressedAt[ev.k] = m.now + 1
+			ks.pressedAt = m.now + 1
 		}
 		if m.liveOwn(ev.k) {
 			// Continuing byte of a live keypress (an OS repeat): the
 			// press is proven a hold, and silence should now expire it
 			// on the observed cadence.
-			if !m.sawRepeat[ev.k] {
-				m.sawRepeat[ev.k] = true
+			if !ks.sawRepeat {
+				ks.sawRepeat = true
 				// First repeat of a resumed press carries the measured
 				// keydown→repeat delay for the whole terminal.
 				if m.pendingDelay > holdWindow && m.pendingDelay > m.osDelay {
 					m.osDelay = m.pendingDelay
 				}
 			}
-			if prev := m.lastSeen[ev.k]; prev > 0 {
+			if prev := ks.lastSeen; prev > 0 {
 				if d := m.now - prev + 1; d > 0 {
 					w := 3 * d
 					if w < 3 {
@@ -502,40 +514,40 @@ func (m *Mapper) apply(ev keyEvent) {
 					if w > maxHoldWindow {
 						w = maxHoldWindow
 					}
-					m.win[ev.k] = w
+					ks.win = w
 				}
 			}
-		} else if m.demoted[ev.k] {
+		} else if ks.demoted {
 			// Own bytes resumed after demotion: either the terminal
 			// handed the repeat stream back or the player re-pressed.
 			// The hold was never disproven, so keep its repeat status,
 			// but don't measure a cadence across the demotion gap.
-			m.demoted[ev.k] = false
-			m.deadAt[ev.k] = 0
-			m.win[ev.k] = m.graceFor(ev.k)
+			ks.demoted = false
+			ks.deadAt = 0
+			ks.win = m.graceFor(ev.k)
 		} else {
 			// Fresh or resumed keypress. A resumed one (byte after the
 			// previous press expired) is either the first OS repeat of a
 			// hold or a quick retap — indistinguishable, so only stage
 			// the gap as a delay candidate; it is adopted when repeats
 			// actually follow.
-			if prev := m.lastSeen[ev.k]; prev > 0 {
+			if prev := ks.lastSeen; prev > 0 {
 				m.pendingDelay = m.now - prev + 1
 				// If the gap is short, this is just a jittery repeat that
 				// barely missed a collapsed cadence window. Keep the hold's
 				// repeat status intact so the habit saves correctly.
 				if m.pendingDelay > holdWindow {
-					m.sawRepeat[ev.k] = false
+					ks.sawRepeat = false
 				}
 			} else {
-				m.sawRepeat[ev.k] = false
+				ks.sawRepeat = false
 			}
-			m.win[ev.k] = m.graceFor(ev.k)
+			ks.win = m.graceFor(ev.k)
 		}
 		// Latch the press edge: if a frame hitch lets the release land
 		// before the next Poll, the press must still be visible once.
-		m.latched[ev.k] = true
-		m.lastSeen[ev.k] = m.now + 1
+		ks.latched = true
+		ks.lastSeen = m.now + 1
 	}
 	if ev.evType == 0 || ev.evType == 1 { // edges fire on press only
 		switch ev.special {

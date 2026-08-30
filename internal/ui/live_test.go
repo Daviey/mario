@@ -57,7 +57,7 @@ func TestLiveUISubmit(t *testing.T) {
 	}
 	ui.FeedKeys([]byte("yLIVEUI\r"))
 	snap = ui.Tick(g)
-	if snap.Mode != render.UIBoard || snap.Status != "SUBMITTING" {
+	if snap.Mode != render.UIBoard || snap.Status != statusSubmitting {
 		t.Fatalf("expected submitting board, got %+v", snap)
 	}
 
@@ -66,7 +66,7 @@ func TestLiveUISubmit(t *testing.T) {
 		ui.mu.Lock()
 		status := ui.status
 		ui.mu.Unlock()
-		if status == "SUBMITTED!" {
+		if status == statusSubmitted {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -74,7 +74,7 @@ func TestLiveUISubmit(t *testing.T) {
 	ui.mu.Lock()
 	status := ui.status
 	ui.mu.Unlock()
-	if status != "SUBMITTED!" {
+	if status != statusSubmitted {
 		t.Fatalf("submit did not land: %q", status)
 	}
 

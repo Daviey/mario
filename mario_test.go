@@ -57,6 +57,14 @@ func TestResizeAppliesOnNextStep(t *testing.T) {
 	if app.Game.ViewW != 16 || app.Game.ViewH != 4 {
 		t.Fatalf("clamped viewport = %dx%d, want 16x4", app.Game.ViewW, app.Game.ViewH)
 	}
+	// High-end clamps land too: width tops out at 60, height at the
+	// level's own height (SetViewport's ceiling — a viewport taller than
+	// the level has nothing to show).
+	app.Resize(61, 999)
+	app.Step()
+	if app.Game.ViewW != 60 || app.Game.ViewH != engine.LevelHeight {
+		t.Fatalf("oversize resize = %dx%d, want 60x%d", app.Game.ViewW, app.Game.ViewH, engine.LevelHeight)
+	}
 }
 
 // The race-detector tripwire for Resize's cross-goroutine path: a
@@ -219,24 +227,6 @@ func TestReadLevelRowsStripsCR(t *testing.T) {
 	if err != nil || len(rows) != 2 || rows[0] != "abc" {
 		t.Errorf("rows = %q err = %v", rows, err)
 	}
-}
-
-func TestBaseName(t *testing.T) {
-	for path, want := range map[string]string{
-		"/tmp/lv.txt": "lv.txt",
-		"lv.txt":      "lv.txt",
-	} {
-		if got := baseName(path); got != want {
-			t.Errorf("baseName(%q) = %q", path, got)
-		}
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func TestCheatsDisableRecording(t *testing.T) {

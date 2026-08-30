@@ -5,7 +5,6 @@ package ui
 
 import (
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -91,7 +90,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 
 	ui.FeedKeys([]byte("dave!2\r")) // lowercase up, '!' dropped by charset
 	snap = tickUntil(t, ui, g, 1)
-	if snap.Mode != render.UIBoard || snap.Status != "SUBMITTING" {
+	if snap.Mode != render.UIBoard || snap.Status != statusSubmitting {
 		t.Fatalf("enter should submit and show board, got %+v", snap)
 	}
 	select {
@@ -112,7 +111,7 @@ func TestGameOverAutoAsksAndSubmits(t *testing.T) {
 		ui.mu.Lock()
 		st, n := ui.status, len(ui.rows)
 		ui.mu.Unlock()
-		if st == "SUBMITTED!" && n == 2 {
+		if st == statusSubmitted && n == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -343,7 +342,7 @@ func TestFetchRetriesTransientError(t *testing.T) {
 	ui.mu.Lock()
 	status := ui.status
 	ui.mu.Unlock()
-	if status == "OFFLINE" {
+	if status == statusOffline {
 		t.Fatal("transient failure surfaced as OFFLINE")
 	}
 }
@@ -364,7 +363,7 @@ func TestFetchDoesNotRetryHTTPStatus(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool {
 		ui.mu.Lock()
 		defer ui.mu.Unlock()
-		return ui.status == "OFFLINE"
+		return ui.status == statusOffline
 	})
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("fetch called %d times, want 1 (4xx is not retried)", n)
@@ -400,12 +399,54 @@ func TestFetchDoesNotRetryAfterBoardClosed(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool {
 		ui.mu.Lock()
 		defer ui.mu.Unlock()
-		return ui.status == "OFFLINE"
+		return ui.status == statusOffline
 	})
 	time.Sleep(50 * time.Millisecond) // a wrongful retry would land here
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("fetch called %d times after close, want 1", n)
 	}
+}
+
+// fetchInto's recover contract: a panicking fetch (broken backend, nil
+// where nil can't be) must degrade to OFFLINE with the rows cleared and
+// the machine unwedged — the fetch runs on its own goroutine, where an
+// unrecovered panic would kill the whole process, 60Hz loop included.
+// A panic is not a transient error: no retry.
+func TestFetchIntoPanickingFetchDegradesToOffline(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var calls atomic.Int32
+	ui := NewUI(nil, func() ([]board.Row, error) {
+		calls.Add(1)
+		panic("broken backend")
+	})
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ui.ShowBoard()
+	waitFor(t, 2*time.Second, func() bool {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		return ui.status == statusOffline && !ui.loading
+	})
+	snap := ui.Tick(g) // the tick loop must still answer
+	if snap == nil || snap.Mode != render.UIBoard || snap.Status != statusOffline || snap.Loading {
+		t.Fatalf("after panicking fetch: %+v", snap)
+	}
+	ui.mu.Lock()
+	rows := ui.rows
+	ui.mu.Unlock()
+	if rows != nil {
+		t.Fatalf("rows after panic = %+v, want nil", rows)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fetch called %d times; a panic is not transient-retried", n)
+	}
+	// Unwedged for good: a later board open starts a fresh fetch.
+	ui.ShowBoard()
+	waitFor(t, 2*time.Second, func() bool {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		return calls.Load() == 2 && ui.status == statusOffline && !ui.loading
+	})
 }
 
 func TestSubmitCarriesPlayContext(t *testing.T) {
@@ -471,7 +512,7 @@ func TestSubmittedFlag(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool {
 		fail.mu.Lock()
 		defer fail.mu.Unlock()
-		return fail.status == "SUBMIT FAILED"
+		return fail.status == statusSubmitFail
 	})
 	if fail.Submitted() {
 		t.Fatal("failed submit must not set Submitted")
@@ -493,7 +534,7 @@ func TestOfflineStillShowsPrompt(t *testing.T) {
 	}
 	ui.FeedKeys([]byte("yX\r"))
 	snap = tickUntil(t, ui, g, 2)
-	if snap.Mode != render.UIBoard || snap.Status != "OFFLINE" {
+	if snap.Mode != render.UIBoard || snap.Status != statusOffline {
 		t.Fatalf("offline submit = %+v", snap)
 	}
 }
@@ -510,6 +551,29 @@ func TestBoardRowsForKeepsMineFlag(t *testing.T) {
 	}
 }
 
+func TestBoardRowsForTruncatesToTen(t *testing.T) {
+	// 11 rows come back; the board shows the top ten, ranks 1..10, and
+	// the mine flag must survive on whichever row makes the cut.
+	const names = "abcdefghijk"
+	rows := make([]board.Row, len(names))
+	for i, c := range names {
+		rows[i] = board.Row{Name: string(c), Score: 1000 - i}
+	}
+	rows[9].Mine = true // the last surviving row
+	out := boardRowsFor(rows)
+	if len(out) != 10 {
+		t.Fatalf("len = %d, want 10", len(out))
+	}
+	for i, r := range out {
+		if r.Rank != i+1 {
+			t.Fatalf("rank[%d] = %d, want %d", i, r.Rank, i+1)
+		}
+	}
+	if !out[9].Mine || out[9].Name != "j" {
+		t.Fatalf("rank-10 row = %+v, want j with mine flag", out[9])
+	}
+}
+
 func TestSnapshotFields(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -517,8 +581,8 @@ func TestSnapshotFields(t *testing.T) {
 	g := gameOverGame(t)
 	ui.FeedKeys([]byte("y"))
 	snap := tickUntil(t, ui, g, 1)
-	if !strings.Contains(snap.Name, "") && snap.Name != "" {
-		t.Fatal("fresh entry name should be empty")
+	if snap.Name != "" {
+		t.Fatalf("fresh entry name should be empty, got %q", snap.Name)
 	}
 	g.Tick = 15 // cursor blink window
 	snap = tickUntil(t, ui, g, 1)
@@ -528,10 +592,10 @@ func TestSnapshotFields(t *testing.T) {
 }
 
 func TestTitleLOpensBoardOffline(t *testing.T) {
-	// Integration through gameIO: 'l' on the title screen opens the board
-	// (OFFLINE without credentials) and never starts the game. Both cases
-	// must work: the pixel-font hint reads "L LEADERBOARD", so players
-	// using shift or caps-lock send uppercase.
+	// Integration through the Router: 'l' on the title screen opens the
+	// board (OFFLINE without credentials) and never starts the game.
+	// Both cases must work: the pixel-font hint reads "L LEADERBOARD",
+	// so players using shift or caps-lock send uppercase.
 	t.Setenv("SUPABASE_URL", "")
 	for _, key := range []byte{'l', 'L'} {
 		g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
@@ -549,7 +613,7 @@ func TestTitleLOpensBoardOffline(t *testing.T) {
 				if ui.Loading {
 					t.Error("offline board stuck LOADING")
 				}
-				if ui.Status != "OFFLINE" {
+				if ui.Status != statusOffline {
 					t.Errorf("status = %q, want OFFLINE", ui.Status)
 				}
 				opened = true
@@ -586,7 +650,7 @@ func TestBoardRClosesAndRestarts(t *testing.T) {
 		t.Fatalf("y should open entry, got %v", s.Mode)
 	}
 	io.Feed([]byte("\r"))
-	if s := step(1); s.Mode != render.UIBoard || s.Status != "OFFLINE" {
+	if s := step(1); s.Mode != render.UIBoard || s.Status != statusOffline {
 		t.Fatalf("submit should show board, got %+v", s)
 	}
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Daviey/mario/engine"
@@ -33,7 +34,7 @@ func LoadLevels(levelPath string) ([]*engine.Level, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", levelPath, err)
 	}
-	lvl, err := engine.ParseLevel(baseName(levelPath), rows)
+	lvl, err := engine.ParseLevel(filepath.Base(levelPath), rows)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", levelPath, err)
 	}
@@ -49,14 +50,9 @@ func readLevelRows(r io.Reader) ([]string, error) {
 	return rows, sc.Err()
 }
 
-func baseName(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		return path[i+1:]
-	}
-	return path
-}
-
-// RunDemo plays a deterministic scripted session with no terminal needed.
+// RunDemo plays a deterministic scripted session with no terminal
+// needed. A nil or empty levels slice falls back to the built-in set,
+// matching New's "nil means default levels" rule.
 func RunDemo(w io.Writer, levels []*engine.Level, colors render.ColorMode, ticks int) {
 	if len(levels) == 0 {
 		levels = engine.DefaultLevels()

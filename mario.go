@@ -85,7 +85,7 @@ type Options struct {
 type App struct {
 	Game   *engine.Game // the simulation; render reads its state each frame
 	mapper *input.Mapper
-	io     *ui.Router
+	router *ui.Router
 	ui     *render.ScoreUI // latest leaderboard snapshot (nil when off)
 	quit   bool
 
@@ -100,7 +100,7 @@ type App struct {
 	bestSaved    int             // score already persisted this session
 	rec          replay.Recorder // this run's input log (leaderboard proof)
 	prevState    engine.State    // state before the last Update
-	lbui         *ui.UI          // the leaderboard machine (Submitted funnel flag)
+	leaderboard  *ui.UI          // the leaderboard machine (Submitted funnel flag)
 	runs         int             // runs started (recording-arming rule); telemetry
 	levelsTrust  bool            // built-in level set: runs are verifiable
 	dailyTrusted bool            // default daily generator: daily runs verifiable
@@ -158,18 +158,18 @@ func New(opts *Options) *App {
 	} else if pc, err := persist.LoadPlayer(); err == nil {
 		g.Best = pc.Best
 	}
+	mach := ui.NewUI(nil, nil)
 	app := &App{
 		Game:         g,
 		mapper:       mapper,
-		io:           nil, // set below
+		router:       ui.NewRouter(mapper, mach),
+		leaderboard:  mach,
 		dailyLevel:   daily,
 		levelsTrust:  len(opts.Levels) == 0,
 		dailyTrusted: opts.DailyLevel == nil,
 		saveBest:     persist.SaveBest,
 		sound:        opts.Sound,
 	}
-	mach := ui.NewUI(nil, nil)
-	app.lbui = mach
 	if opts.Session != nil {
 		// One player identity per connection: submissions, name entry and
 		// best-score bookkeeping all read the session, never the process
@@ -197,14 +197,13 @@ func New(opts *Options) *App {
 		e.Viewport = strconv.Itoa(g.ViewW) + "x" + strconv.Itoa(g.ViewH)
 		return e
 	})
-	app.io = ui.NewRouter(mapper, mach)
 	return app
 }
 
 // Feed routes one chunk of raw input bytes: to the leaderboard UI while a
 // UI screen holds the keyboard, to the game mapper otherwise. Call this
 // from the reader side; the game never blocks on it.
-func (a *App) Feed(b []byte) { a.io.Feed(b) }
+func (a *App) Feed(b []byte) { a.router.Feed(b) }
 
 // Resize requests a new viewport in tiles, following the same policy as
 // New (16..60 wide, at least 4 tall). Safe to call from any goroutine
@@ -243,11 +242,11 @@ func (a *App) Step() {
 
 	// Title-screen 'd' starts the daily challenge (checked before the
 	// update so the same press cannot also dismiss the title).
-	if a.io.TakeDailyAtTitle(g) {
+	if a.router.TakeDailyAtTitle(g) {
 		a.StartDaily()
 	}
 
-	in := a.io.Poll()
+	in := a.router.Poll()
 
 	if g.Demo {
 		// Attract mode: any real key bails back to the title; otherwise
@@ -304,8 +303,8 @@ func (a *App) Step() {
 	if g.State == engine.StateGameOver || g.State == engine.StateWin {
 		a.rec.Finish()
 	}
-	a.ui = a.io.UITick(g)
-	a.quit = in.Quit || a.io.QuitRequested()
+	a.ui = a.router.UITick(g)
+	a.quit = in.Quit || a.router.QuitRequested()
 	if a.quit {
 		return
 	}
@@ -355,7 +354,7 @@ func (a *App) Runs() int { return a.runs }
 
 // Submitted reports whether this session landed a verified-path score
 // submission (the UI confirmed success).
-func (a *App) Submitted() bool { return a.lbui.Submitted() }
+func (a *App) Submitted() bool { return a.leaderboard.Submitted() }
 
 // Run plays the game at engine.TicksPerSecond, drawing differential
 // frames to st, until quit. This is the blocking entry the terminal

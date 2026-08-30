@@ -54,7 +54,7 @@ func TestHoldDirectionSurvivesJumpTaps(t *testing.T) {
 	// Model the persisted calibration a real session starts with: the
 	// direction key has a held habit and the repeat delay is measured.
 	m.ApplyCalibration(Calibration{OSDelay: 36, HeldHabit: make([]bool, keyCount)})
-	m.heldHabit[kRight] = true
+	m.ks[kRight].heldHabit = true
 
 	g := engine.NewGame(engine.DefaultLevels(), 30, 10)
 	m.Feed([]byte{'\r'})
@@ -143,7 +143,7 @@ func TestJumpRetapWhileHoldingDirectionFires(t *testing.T) {
 func TestDemotedHoldStillExpires(t *testing.T) {
 	m := NewMapper()
 	m.ApplyCalibration(Calibration{OSDelay: 36, HeldHabit: make([]bool, keyCount)})
-	m.heldHabit[kRight] = true
+	m.ks[kRight].heldHabit = true
 	holdDirThenSilence(t, m)
 	m.Feed([]byte{' '}) // demote right, then total silence
 	dead := 0
@@ -222,5 +222,86 @@ func TestDemotedJumpExpiresBeforeLanding(t *testing.T) {
 	}
 	if up > upExtendTicks+2 {
 		t.Errorf("demoted jump outlived its bound: Up %d/40 ticks, want <= %d", up, upExtendTicks+2)
+	}
+}
+
+// TestJumpNeverResurrects: a hold that died while demoted can be stood
+// back up by a later byte for another key — except the jump key, which
+// never resurrects (a phantom Up eats retap edges, the missed-jump bug).
+// Both Up and Right die demoted here, both well inside the window; one
+// later byte brings Right back and must leave Up dead.
+func TestJumpNeverResurrects(t *testing.T) {
+	m := NewMapper()
+	holdDirThenSilence(t, m) // Right: proven hold, stream silenced
+	// Prove a jump hold, then hand the repeat stream to Run: the silence
+	// demotes Right (jump live), then jump in turn (Run live) — and the
+	// demoted jump dies at its upExtendTicks cap while Right stands.
+	for i := range 20 {
+		if i%2 == 0 {
+			m.Feed([]byte{' '})
+		}
+		m.Poll()
+	}
+	for i := range upExtendTicks + 6 {
+		if i%2 == 0 {
+			m.Feed([]byte{'x'})
+		}
+		if in := m.Poll(); !in.Up && i > upExtendTicks+2 {
+			break // the demoted jump has expired at its cap
+		}
+	}
+	// Total silence: Run expires, then the demoted Right after its grace.
+	for range maxHoldWindow + 2 {
+		m.Poll()
+	}
+	if m.ks[kUp].deadAt == 0 || m.ks[kRight].deadAt == 0 {
+		t.Fatalf("setup: want both keys dead with a resurrection marker, got up=%d right=%d",
+			m.ks[kUp].deadAt, m.ks[kRight].deadAt)
+	}
+	// One byte for another key: Right's death is reopened, Up's never is.
+	m.Feed([]byte{'s'})
+	in := m.Poll()
+	if !in.Down {
+		t.Fatal("setup: the later byte never registered")
+	}
+	if !in.Right {
+		t.Error("fresh demoted death did not resurrect right")
+	}
+	if in.Up {
+		t.Error("jump key resurrected: a phantom Up eats retap edges")
+	}
+}
+
+// TestResurrectionWindowBoundary: the window is inclusive — a byte
+// arriving exactly resurrectWindow after the demoted death still stands
+// the hold back up; one tick later it counts as released.
+func TestResurrectionWindowBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ticks int
+		want  bool
+	}{
+		{"byte exactly resurrectWindow after death", resurrectWindow - 1, true},
+		{"byte one tick past the window", resurrectWindow, false},
+	} {
+		m := NewMapper()
+		holdDirThenSilence(t, m)
+		m.Feed([]byte{' '}) // demote right, then total silence
+		for range 8 * maxHoldWindow {
+			m.Poll()
+			if m.ks[kRight].deadAt != 0 {
+				break
+			}
+		}
+		if m.ks[kRight].deadAt == 0 {
+			t.Fatalf("%s: right never died demoted; test assumption broken", tc.name)
+		}
+		for range tc.ticks {
+			m.Poll()
+		}
+		m.Feed([]byte{'s'})
+		if in := m.Poll(); in.Right != tc.want {
+			t.Errorf("%s: right resurrected = %v, want %v", tc.name, in.Right, tc.want)
+		}
 	}
 }
