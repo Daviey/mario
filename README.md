@@ -116,6 +116,7 @@ or roam with `mosh mario.baby`.
 | `x` (hold) | run · fire when powered |
 | `p` / `q` / `k` | pause · quit · die on demand |
 | `l` | leaderboard (from the title screen) |
+| `i` | about screen (from the title screen) |
 | `d` | daily challenge (from the title screen) |
 | `r` | restart after game over |
 
