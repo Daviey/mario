@@ -132,7 +132,16 @@ func TestServeSSHClientE2E(t *testing.T) {
 	if !strings.Contains(got, "\x1b[?1049h\x1b[>11u") {
 		t.Error("prologue must enter the alt screen before pushing kitty keyboard flags")
 	}
-	if len(got) < 10_000 {
+	// Wedged-session tripwire, not a bandwidth contract: a healthy
+	// scripted session streams ~10 KB (9,982 B stable across 5 runs on
+	// biro 2026-08-30; ≥10 KB on the box the old 10_000 floor was
+	// calibrated on — the gap is a frame or two of diff, systematic,
+	// not noise), while a session that never renders or dies mid-
+	// handshake produces only banners + prologue (<1 KB). 8_000 keeps
+	// ~20% headroom below the slowest healthy floor and stays an order
+	// of magnitude above wedged. The marker assertions above are the
+	// real protocol contract.
+	if len(got) < 8_000 {
 		t.Fatalf("suspiciously little game output (%d bytes)", len(got))
 	}
 }
