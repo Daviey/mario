@@ -80,7 +80,7 @@ func firstUI(ui []*ScoreUI) *ScoreUI {
 }
 
 const (
-	nameFieldW   = 8  // max name chars, mirrors lbui maxNameLen
+	nameFieldW   = 8  // max name chars, mirrors the UI maxNameLen
 	boardMaxRows = 10 // the board shows the top ten
 )
 

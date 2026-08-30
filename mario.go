@@ -355,7 +355,7 @@ func (a *App) ResetToTitle() {
 	a.Game.Score, a.Game.CoinCount = 0, 0
 	a.Game.Daily = false
 	a.rec.Reset()
-	a.lbui.ResetForNewRun()
+	a.leaderboard.ResetForNewRun()
 	a.quit = false
 }
 
