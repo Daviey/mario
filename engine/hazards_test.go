@@ -54,6 +54,28 @@ func TestLavaKills(t *testing.T) {
 	}
 }
 
+func TestLavaIgnoresZeroOverlapBoundary(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'L') })
+	g := newGame(t, l)
+
+	// A sliver of real overlap still burns.
+	g.Player.Pos = Vec{19.21, 11.5}
+	if !g.touchingLava() {
+		t.Error("body overlapping lava by a sliver must burn")
+	}
+	// Edges that merely kiss a tile boundary have zero overlap with the
+	// lava itself and must not burn, horizontally...
+	g.Player.Pos = Vec{19.2, 11.5} // right edge exactly at x=20.0
+	if g.touchingLava() {
+		t.Error("zero-overlap boundary column must not burn")
+	}
+	// ...and vertically.
+	g.Player.Pos = Vec{19.5, 11.0} // feet exactly at y=12.0
+	if g.touchingLava() {
+		t.Error("zero-overlap boundary row must not burn")
+	}
+}
+
 func TestParaHops(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'W') })
 	g := newGame(t, l)

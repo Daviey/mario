@@ -19,9 +19,8 @@ import (
 // requestTimeout bounds every leaderboard HTTP call.
 const requestTimeout = 15 * time.Second
 
-// nameCharSet is the entry charset: exactly what the pixel font can draw.
-const nameCharSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-"
-
+// Entry accepts exactly persist.NameCharSet — the one Go-side charset
+// shared with SanitizeName/SanitizeDisplayName and the DB CHECK.
 const maxNameLen = 8
 
 type UI struct {
@@ -202,22 +201,30 @@ func (u *UI) takeRestart() bool {
 // ShowBoard switches to the board screen and starts a fetch.
 func (u *UI) ShowBoard() {
 	u.mu.Lock()
-	u.daily = false // title board is the classic one
+	defer u.mu.Unlock()
+	u.showBoardLocked()
+}
+
+// showBoardLocked is the one board-open path (caller holds the mutex):
+// the classic board, a reset day, a fresh identity snapshot, and the
+// fetch started — or the OFFLINE status when no fetch is wired. The
+// title-'l' path and ShowBoard must agree, or the board a daily run
+// leaves behind leaks into the next title-open.
+func (u *UI) showBoardLocked() {
+	u.daily = false // opened outside a run: the classic board
+	u.day = ""
+	u.mode = render.UIBoard
+	u.player = u.identityLocked()
 	if u.fetch == nil {
 		// Offline build (no credentials): still show the screen, with a
 		// status — never an eternal LOADING.
-		u.mode = render.UIBoard
 		u.loading = false
 		u.status = "OFFLINE"
-		u.mu.Unlock()
 		return
 	}
-	u.mode = render.UIBoard
 	u.loading = true
 	u.status = ""
-	u.player, _ = persist.LoadPlayer()
 	fetch := u.fetch
-	u.mu.Unlock()
 	go u.fetchInto(fetch)
 }
 
@@ -239,12 +246,20 @@ func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 		}
 	}()
 	rows, err := fetch()
-	if err != nil {
+	if err != nil && board.Transient(err) {
 		// Transient edge slowness must not read as OFFLINE: once in a
 		// blue moon a fetch hangs to the 15s timeout against the
 		// Supabase/Cloudflare edge (observed live on the SSH host);
-		// one immediate retry absorbs it.
-		rows, err = fetch()
+		// one immediate retry absorbs it. A status the server chose
+		// deliberately (PoW/RLS/4xx/429) would fail identically again,
+		// so it is not retried — and neither is anything once the
+		// board has closed under the fetch.
+		u.mu.Lock()
+		open := u.mode == render.UIBoard
+		u.mu.Unlock()
+		if open {
+			rows, err = fetch()
+		}
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -295,17 +310,7 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	if u.mode == render.UIOff && g.State == engine.StateTitle && len(u.noted) > 0 {
 		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
 			u.noted = nil
-			u.mode = render.UIBoard
-			u.player = u.identityLocked()
-			if u.fetch == nil {
-				u.loading = false
-				u.status = "OFFLINE"
-			} else {
-				u.loading = true
-				u.status = ""
-				fetch := u.fetch
-				go u.fetchInto(fetch)
-			}
+			u.showBoardLocked()
 			return u.snapshotLocked(g)
 		}
 		if bytesContain(u.noted, 'i') || bytesContain(u.noted, 'I') {
@@ -364,7 +369,7 @@ func (u *UI) keyLocked(b byte) {
 			u.mode = render.UIAsk // back to the prompt
 		default:
 			c := upperByte(b)
-			if len(u.name) < maxNameLen && byteIn(c, nameCharSet) {
+			if len(u.name) < maxNameLen && byteIn(c, persist.NameCharSet) {
 				u.name = append(u.name, c)
 			}
 		}

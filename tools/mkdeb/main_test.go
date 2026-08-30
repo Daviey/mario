@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 // fixture builds a fake payload directory + binary and returns their paths.
@@ -288,13 +290,13 @@ func TestVersionSanitize(t *testing.T) {
 		"0.3.0-14-g1a2b3c4-dirty": "0.3.0+14.g1a2b3c4+dirty",
 	}
 	for in, want := range ok {
-		got, err := sanitizeVersion(in)
+		got, err := pack.SanitizeVersion(in, "Debian")
 		if err != nil || got != want {
 			t.Errorf("sanitizeVersion(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	for _, bad := range []string{"", "abc", "v", "1 2", "1:2.0", "1.2-3"} {
-		if _, err := sanitizeVersion(bad); err == nil {
+		if _, err := pack.SanitizeVersion(bad, "Debian"); err == nil {
 			t.Errorf("sanitizeVersion(%q) accepted", bad)
 		}
 	}

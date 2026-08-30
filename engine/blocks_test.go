@@ -124,6 +124,31 @@ func TestMushroomWhileSuperOnlyScores(t *testing.T) {
 	}
 }
 
+func TestHiddenLifeBumpsSpawnSingleOneUp(t *testing.T) {
+	for _, power := range []PowerLevel{PowerSmall, PowerSuper, PowerFire} {
+		l := buildLevel(t, 60, func(b *Builder) { b.Set(10, 9, '1') })
+		g := newGame(t, l)
+		g.Player.Power = power
+		bumpUnder(t, g, 10, 9)
+
+		if got := g.Level.At(10, 9); got != Used {
+			t.Fatalf("power %v: tile = %v, want Used", power, got)
+		}
+		lives, plain := 0, 0
+		for _, m := range g.Mushrooms {
+			if m.Kind == MushLife {
+				lives++
+			} else {
+				plain++
+			}
+		}
+		if lives != 1 || plain != 0 || len(g.FireFlowers) != 0 {
+			t.Errorf("power %v: 1-UPs=%d plain mushrooms=%d flowers=%d, want exactly one 1-UP mushroom",
+				power, lives, plain, len(g.FireFlowers))
+		}
+	}
+}
+
 func TestSmallBumpsBrickWithoutBreaking(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(10, 9, 'B') })
 	g := newGame(t, l)

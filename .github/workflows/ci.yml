@@ -32,7 +32,14 @@ jobs:
       - name: Native build
         run: make build
 
+      # The 17-target release matrix + AppImage smoke run on main pushes
+      # only: PRs get fmt/vet/test + a native build + the GOOS=js
+      # compile check (the flakiest surface), which covers ordinary
+      # regressions in a fraction of the time on the single serial
+      # runner. Required-status checks key off the job id (check), which
+      # is unchanged.
       - name: Cross-compile all release targets
+        if: ${{ github.event_name != 'pull_request' }}
         run: make release
 
       # GOOS=js compile check (artifact discarded); skips if repo vars
@@ -46,9 +53,10 @@ jobs:
 
       # Regression guard for the flakiest build surface: the appimage job
       # needs CAP_SYS_ADMIN on the runner unit (see AGENTS.md) and `file`
-      # inside the appimage-run FHS env. Catches both classes on main/PRs
+      # inside the appimage-run FHS env. Catches both classes on main
       # instead of at tag time.
       - name: AppImage build + smoke
+        if: ${{ github.event_name != 'pull_request' }}
         run: |
           make appimage VERSION=ci
           nix shell nixpkgs#appimage-run -c appimage-run dist/mario_ci_amd64.AppImage -ui-preview board | grep -q LEADERBOARD

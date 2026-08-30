@@ -1,9 +1,6 @@
 package render
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/Daviey/mario/engine"
 )
 
@@ -25,16 +22,21 @@ func RenderPixels(g *engine.Game, p *Palette) *Frame {
 	f := NewFrame(world.W, world.H+HudBandPx+StatusBandPx, p.Sky)
 	f.DrawFrame(world, 0, HudBandPx)
 	drawHudPx(f, g, p)
-	drawStatusPx(f, p)
+	drawStatusPx(f, g, p)
 	return f
 }
 
-// DrawFrame stamps another frame's pixels at (dx, dy).
+// DrawFrame stamps another frame's pixels at (dx, dy), copying whole
+// rows at a time (the composite paths move full frames; a per-pixel
+// loop would walk every pixel twice).
 func (f *Frame) DrawFrame(src *Frame, dx, dy int) {
-	for y := 0; y < src.H; y++ {
-		for x := 0; x < src.W; x++ {
-			f.Set(dx+x, dy+y, src.At(x, y))
+	for y := range src.H {
+		ty := dy + y
+		if ty < 0 || ty >= f.H {
+			continue
 		}
+		w := min(src.W, f.W-dx)
+		copy(f.px[ty*f.W+dx:ty*f.W+dx+w], src.px[y*src.W:y*src.W+w])
 	}
 }
 
@@ -51,30 +53,25 @@ func (f *Frame) RGBBytes() []byte {
 	return out
 }
 
+// drawHudPx rasterizes the HUD band from the same content ladder as the
+// terminal HUD (hudLadder): segments are stamped individually so the
+// HURRY flash and the CHEATS tag keep their ink on this surface too.
 func drawHudPx(f *Frame, g *engine.Game, p *Palette) {
 	f.Fill(0, 0, f.W, HudBandPx, p.HUDBG)
-	world := strings.ToUpper(g.LevelName())
-	full := fmt.Sprintf("SCORE %06d  COINS x%02d  %s  TIME %03d  LIVES x%d",
-		g.Score, g.CoinCount, world, g.Time, g.Lives)
-	mid := fmt.Sprintf("SCORE %06d  COINS x%02d  TIME %03d  LIVES x%d",
-		g.Score, g.CoinCount, g.Time, g.Lives)
-	compact := fmt.Sprintf("%06d  x%02d  %03d  x%d",
-		g.Score, g.CoinCount, g.Time, g.Lives)
-	hud := pickTextPx([]string{full, mid, compact, fmt.Sprintf("%06d", g.Score)}, f.W-4)
-	drawTextPx(f, 2, 1, hud, p.Text, 1)
+	x := 2
+	for _, seg := range hudPickPx(g, f.W-4) {
+		drawTextPx(f, x, 1, seg.s, hudSegColor(seg, g, p), 1)
+		x += textWidthPx(seg.s, 1) + 8
+	}
 }
 
-func drawStatusPx(f *Frame, p *Palette) {
+// drawStatusPx rasterizes the status band from the same content ladder
+// as the terminal status line (statusLadder). The 3×5 font upper-cases
+// the shared lowercase text.
+func drawStatusPx(f *Frame, g *engine.Game, p *Palette) {
 	y := f.H - StatusBandPx
 	f.Fill(0, y, f.W, StatusBandPx, p.StatusBG)
-	text := pickTextPx([]string{
-		"A/D MOVE  W JUMP  S DUCK  X RUN  P PAUSE  K DIE  R RESTART  Q QUIT",
-		"A/D MOVE  W JUMP  X RUN  P PAUSE  K DIE  Q QUIT",
-		"A/D MOVE  W JUMP  X RUN",
-		"Q QUIT",
-		"",
-	}, f.W-2)
-	if text != "" {
+	if text := pickTextPx(statusLadder(g), f.W-2); text != "" {
 		drawCenterPx(f, y+1, text, p.TextDim, 1)
 	}
 }

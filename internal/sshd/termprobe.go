@@ -41,19 +41,37 @@ const termQuery = "\x1b[>c\x1b[=c\r\n"
 
 const defaultProbeWait = 250 * time.Millisecond
 
+// probeBufMax caps how much input the probe will hold while waiting
+// for the session's feed: a reply that never terminates (a truncated
+// "\x1b[>", a cut DCS) must not keep buffering every later keystroke
+// without limit. Past the cap — or once the probe's wait window is
+// over and no reply can complete the decision — probing is abandoned
+// and everything held flows back: there is no path where input is
+// swallowed indefinitely.
+const probeBufMax = 4096
+
 type termProbe struct {
-	mu      sync.Mutex
-	decided bool // a reply yielded a family decision
-	trueClr bool // … and its verdict
-	da2     string
-	da3     string
-	active  bool   // buffering mode (until OnFeed drains it)
-	buf     []byte // scratch: partial replies + buffered passthrough
-	known   chan struct{}
+	mu       sync.Mutex
+	decided  bool // a reply yielded a family decision
+	trueClr  bool // … and its verdict
+	da2      string
+	da3      string
+	active   bool   // buffering mode (until OnFeed drains it)
+	buf      []byte // scratch: partial replies + buffered passthrough
+	known    chan struct{}
+	deadline time.Time // buffering-mode expiry (creation + ProbeWait)
+	gaveUp   bool      // probe abandoned: pure passthrough, nothing held
 }
 
-func newTermProbe() *termProbe {
-	return &termProbe{active: true, known: make(chan struct{})}
+func newTermProbe(maxWait time.Duration) *termProbe {
+	if maxWait <= 0 {
+		maxWait = defaultProbeWait
+	}
+	return &termProbe{
+		active:   true,
+		known:    make(chan struct{}),
+		deadline: time.Now().Add(maxWait),
+	}
 }
 
 // offer hands one inbound chunk to the probe. In buffering mode
@@ -62,10 +80,26 @@ func newTermProbe() *termProbe {
 // filtering: any reply arriving late is stripped and the remaining
 // bytes are returned for the feed, so a stray DA2/DA3 never reaches
 // the game as keystrokes.
+//
+// The hold is bounded twice over (probeBufMax bytes, and the probe's
+// own wait window): whichever runs out first abandons probing and
+// flushes everything back, so a terminal that answers with an
+// unterminated escape cannot wedge input forever.
 func (p *termProbe) offer(b []byte) (rest []byte, buffered bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.gaveUp {
+		// Abandoned: pure passthrough, nothing is ever held again.
+		return b, false
+	}
 	p.buf = append(p.buf, b...)
+	if p.active && (len(p.buf) > probeBufMax || time.Now().After(p.deadline)) {
+		p.gaveUp = true
+		p.active = false
+		out := p.buf
+		p.buf = nil
+		return out, false
+	}
 	p.parseLocked()
 	if p.active {
 		return nil, true

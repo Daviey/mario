@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,11 +19,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/Daviey/mario/internal/persist"
 )
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.08.29a"
+const EngineVersion = "2026.08.30a"
 
 // Client is a configured PostgREST endpoint.
 type Client struct {
@@ -340,18 +344,47 @@ func clampLevel(n int) int {
 	return n
 }
 
+// HTTPError is a non-2xx HTTP response, kept typed so callers can
+// branch on the status (retry policy) instead of parsing the message.
+// It renders exactly as the old fmt.Errorf did.
+type HTTPError struct {
+	Method     string
+	Path       string
+	Status     int
+	StatusText string // e.g. "400 Bad Request"
+	Body       string // first 300 bytes, for the operator log
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s %s: %s: %s", e.Method, e.Path, e.StatusText, e.Body)
+}
+
+// Transient reports whether err is worth one retry: transport-level
+// failures (timeouts, resets, DNS — anything without an HTTP status)
+// and 5xx server errors. A status the server chose deliberately (4xx:
+// PoW/RLS rejections, 429 rate limits, bad requests) fails identically
+// again; retrying it only doubles the latency.
+func Transient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var he *HTTPError
+	if errors.As(err, &he) {
+		return he.Status >= 500
+	}
+	return true
+}
+
 // SanitizeDisplayName clamps a peer-supplied name to the documented safe
 // charset and length before it reaches the terminal, DOM or operator log.
+// The accepted runes are persist.NameCharSet — the one Go-side charset.
 func SanitizeDisplayName(s string) string {
 	var b []rune
 	for _, r := range s {
 		if r >= 'a' && r <= 'z' {
 			r -= 'a' - 'A'
 		}
-		switch {
-		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b = append(b, r)
-		case r == ' ' || r == '-' || r == '.':
+		if r < utf8.RuneSelf && strings.ContainsRune(persist.NameCharSet, r) {
 			b = append(b, r)
 		}
 		if len(b) == 8 {
@@ -413,7 +446,7 @@ func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, b
 		if len(msg) > 300 {
 			msg = msg[:300]
 		}
-		return nil, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, msg)
+		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, StatusText: resp.Status, Body: msg}
 	}
 	return out, nil
 }

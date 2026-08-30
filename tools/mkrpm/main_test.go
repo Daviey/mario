@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/Daviey/mario/internal/art"
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 // fixture builds a fake payload directory + binary and returns their paths.
@@ -272,7 +273,7 @@ func gunzip(t *testing.T, b []byte) []byte {
 func wantManifest() []payloadEntry {
 	return manifest([]file{
 		{"usr/bin/mario", 0o755, false, []byte("FAKE-ELF-BODY")},
-		{"usr/share/man/man6/mario.6.gz", 0o644, true, gz([]byte(".TH MARIO 6 fixture\n"))},
+		{"usr/share/man/man6/mario.6.gz", 0o644, true, pack.Gzip([]byte(".TH MARIO 6 fixture\n"), gzip.DefaultCompression)},
 		{"usr/share/doc/mario/copyright", 0o644, true, []byte("Copyright: 2026 fixture\n")},
 		{"usr/share/applications/mario.desktop", 0o644, false, []byte("[Desktop Entry]\nType=Application\nTerminal=true\n")},
 		{"usr/share/icons/hicolor/48x48/apps/mario.png", 0o644, false, art.IconPNG(48, 8)},
@@ -555,13 +556,13 @@ func TestVersionSanitize(t *testing.T) {
 		"0.3.0-14-g1a2b3c4-dirty": "0.3.0+14.g1a2b3c4+dirty",
 	}
 	for in, want := range ok {
-		got, err := sanitizeVersion(in)
+		got, err := pack.SanitizeVersion(in, "RPM")
 		if err != nil || got != want {
 			t.Errorf("sanitizeVersion(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
 	for _, bad := range []string{"", "abc", "v", "1 2", "1:2.0", "1.2-3"} {
-		if _, err := sanitizeVersion(bad); err == nil {
+		if _, err := pack.SanitizeVersion(bad, "RPM"); err == nil {
 			t.Errorf("sanitizeVersion(%q) accepted", bad)
 		}
 	}

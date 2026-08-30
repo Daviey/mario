@@ -49,6 +49,9 @@ func (r *Router) Feed(b []byte) {
 // board screen is injected as the same edge a mapped 'r' press would
 // produce — the native and wasm loops both go through here.
 func (r *Router) Poll() engine.Input {
+	// A truncated escape wedged in the plain decoder would swallow
+	// every later UI trigger byte; age it out with the tick clock.
+	r.plain.FlushStale()
 	in := r.mapper.Poll()
 	if r.ui.takeRestart() {
 		in.Restart = true

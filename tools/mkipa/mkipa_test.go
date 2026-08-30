@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 func TestShortVersion(t *testing.T) {
@@ -20,7 +22,7 @@ func TestShortVersion(t *testing.T) {
 		{"", "0.0.0"},
 	}
 	for _, c := range cases {
-		if got := shortVersion(c.in); got != c.want {
+		if got := pack.ShortVersion(c.in); got != c.want {
 			t.Errorf("shortVersion(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -106,7 +108,7 @@ func TestZipDeterministicAndContained(t *testing.T) {
 	buildZip := func() []byte {
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
-		if err := zipDir(staging, zw); err != nil {
+		if err := pack.ZipDir(staging, zw, uniformZipMode); err != nil {
 			t.Fatal(err)
 		}
 		if err := zw.Close(); err != nil {
@@ -142,7 +144,7 @@ func TestZipDeterministicAndContained(t *testing.T) {
 		if strings.Contains(f.Name, "..") || filepath.IsAbs(f.Name) {
 			t.Errorf("entry path is not zip-relative: %q", f.Name)
 		}
-		if !f.Modified.Equal(zipEpoch) {
+		if !f.Modified.Equal(pack.ZipEpoch) {
 			t.Errorf("entry %q has non-epoch mtime %v", f.Name, f.Modified)
 		}
 		rc, err := f.Open()

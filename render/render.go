@@ -12,6 +12,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/Daviey/mario/engine"
@@ -207,31 +208,60 @@ func castleTheme(p *Palette) *Palette {
 	return &q
 }
 
-// paletteFor returns the palette for the current level's theme.
+// themedCache memoizes themed palettes per (base palette, theme): the
+// theme used to be rebuilt — a full Palette copy — every frame. Values
+// are deterministic; a process draws with a handful of palettes.
+var themedCache sync.Map // themeKey -> *Palette
+
+type themeKey struct {
+	p     *Palette
+	theme engine.Theme
+}
+
+// paletteFor returns the palette for the current level's theme, built
+// once per (base palette, theme).
 func paletteFor(g *engine.Game, p *Palette) *Palette {
 	if g.Level == nil {
 		return p
 	}
+	var build func(*Palette) *Palette
 	switch g.Level.Theme {
 	case engine.ThemeUnderground:
-		return underground(p)
+		build = underground
 	case engine.ThemeSky:
-		return skyTheme(p)
+		build = skyTheme
 	case engine.ThemeCastle:
-		return castleTheme(p)
+		build = castleTheme
+	default:
+		return p
 	}
-	return p
+	k := themeKey{p, g.Level.Theme}
+	if v, ok := themedCache.Load(k); ok {
+		return v.(*Palette)
+	}
+	q := build(p)
+	themedCache.Store(k, q)
+	return q
 }
 
-// runeColors maps sprite-art runes to palette swatches.
+// runeColors maps sprite-art runes to palette swatches. Cached per
+// palette — callers must treat the map as read-only (fire/star variants
+// are separately cached, never built by mutating this one).
+var runeColorsCache sync.Map // *Palette -> map[rune]Color
+
 func runeColors(p *Palette) map[rune]Color {
-	return map[rune]Color{
+	if v, ok := runeColorsCache.Load(p); ok {
+		return v.(map[rune]Color)
+	}
+	rc := map[rune]Color{
 		'R': p.Player, 'S': p.Skin, 'D': p.Dark, 'B': p.Overall,
 		'W': p.White, 'C': p.Cloud, 'Y': p.Coin, 'L': p.GoldLight,
 		'O': p.GroundMid, 'o': p.GroundLight,
 		'G': p.Green, 'E': p.GreenLight, 'g': p.GreenDark,
 		'K': p.KoopaSkin, 'n': p.Goomba,
 	}
+	runeColorsCache.Store(p, rc)
+	return rc
 }
 
 // Cell is one character position with styling.
@@ -280,10 +310,14 @@ func (s *Screen) At(x, y int) Cell {
 	return s.cells[y*s.W+x]
 }
 
-// Text writes a string in one color on black.
+// Text writes a string in one color on black. Columns advance one per
+// rune: a multibyte rune must not shift every later glyph one column
+// per byte.
 func (s *Screen) Text(x, y int, text string, fg Color) {
-	for i, r := range text {
-		s.SetStyled(x+i, y, r, fg, Color{}, false)
+	cx := x
+	for _, r := range text {
+		s.SetStyled(cx, y, r, fg, Color{}, false)
+		cx++
 	}
 }
 
@@ -356,23 +390,65 @@ type sgrState struct {
 func isDefaultColor(c Color) bool { return c.RGB == 0 && c.ANSI == 0 }
 
 // colorParams returns the SGR parameters that set c as foreground
-// (bg=false) or background in the given color mode.
+// (bg=false) or background in the given color mode. Every mode is
+// table-driven so the per-changed-cell wire path never formats a string:
+// basic mode reads basicSGR (every ANSI-16 code, computed once at init),
+// 24-bit and 256-cube modes read sgrMem (memoized per Color the first
+// time it is emitted — in practice at palette construction, once per
+// process).
 func colorParams(mode int, c Color, bg bool) string {
 	switch mode {
-	case Colors24:
+	case Colors24, Colors256:
+		if s, ok := sgrMem.Load(sgrKey{c: c, mode: mode, bg: bg}); ok {
+			return s.(string)
+		}
 		base := 38
 		if bg {
 			base = 48
 		}
-		return fmt.Sprintf("%d;2;%d;%d;%d", base, c.RGB>>16, (c.RGB>>8)&0xFF, c.RGB&0xFF)
-	case Colors256:
-		base := 38
-		if bg {
-			base = 48
+		var str string
+		if mode == Colors24 {
+			str = fmt.Sprintf("%d;2;%d;%d;%d", base, c.RGB>>16, (c.RGB>>8)&0xFF, c.RGB&0xFF)
+		} else {
+			str = fmt.Sprintf("%d;5;%d", base, c.Idx256)
 		}
-		return fmt.Sprintf("%d;5;%d", base, c.Idx256)
+		sgrMem.Store(sgrKey{c: c, mode: mode, bg: bg}, str)
+		return str
 	}
-	return ansiCode(c.ANSI, bg)
+	i := c.ANSI
+	if i < 0 || i > 15 {
+		i = 0
+	}
+	return basicSGR[i][b2i(bg)]
+}
+
+// basicSGR holds every ANSI-16 SGR parameter string (fg and bg) so basic
+// mode is a plain array read.
+var basicSGR [16][2]string
+
+func init() {
+	for i := range 16 {
+		basicSGR[i][0] = ansiCode(i, false)
+		basicSGR[i][1] = ansiCode(i, true)
+	}
+}
+
+// sgrMem memoizes 24-bit and 256-cube SGR parameter strings per
+// (Color, mode, role) — deterministic values, written once per unique
+// combination.
+var sgrMem sync.Map // sgrKey -> string
+
+type sgrKey struct {
+	c    Color
+	mode int
+	bg   bool
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // transition appends the minimal SGR sequence that renders cell c and
@@ -383,7 +459,7 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 	if c.Ch == ' ' {
 		dFg = st.fg // invisible on a space: keep whatever is already set
 	}
-	if st.have && dFg == st.fg && dBg == st.bg && dBold == st.bold {
+	if st.have && st.sameColor(dFg, st.fg) && st.sameColor(dBg, st.bg) && dBold == st.bold {
 		return
 	}
 	// Attributes that must be cleared (bold off, a color returning to the
@@ -410,10 +486,10 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 		}
 	} else {
 		var parts []string
-		if dFg != st.fg {
+		if !st.sameColor(dFg, st.fg) {
 			parts = append(parts, colorParams(st.mode, dFg, false))
 		}
-		if dBg != st.bg {
+		if !st.sameColor(dBg, st.bg) {
 			parts = append(parts, colorParams(st.mode, dBg, true))
 		}
 		if dBold && !st.bold {
@@ -422,6 +498,28 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 		b.WriteString("\x1b[" + strings.Join(parts, ";") + "m")
 	}
 	st.fg, st.bg, st.bold, st.have = dFg, dBg, dBold, true
+}
+
+// sameColor reports whether two colors are indistinguishable on the wire
+// in this color mode — the comparison must match what is actually
+// emitted. Basic mode sends only the ANSI index, so same-index colors
+// (GroundMid/GroundDark both 1, PipeDark/GreenDark both 2) are the same
+// terminal color and must not re-emit SGR every frame; 256-cube mode
+// sends only the cube index; truecolor compares the full pair. The
+// terminal default is its own wire state (no SGR at all), so a default
+// color never compares equal to a real one even when their indices match.
+func (st *sgrState) sameColor(a, b Color) bool {
+	da, db := isDefaultColor(a), isDefaultColor(b)
+	if da || db {
+		return da == db
+	}
+	switch st.mode {
+	case Colors24:
+		return a == b
+	case Colors256:
+		return a.Idx256 == b.Idx256
+	}
+	return a.ANSI == b.ANSI
 }
 
 func ansiCode(idx int, bg bool) string {
@@ -455,6 +553,14 @@ func CloudAt(tx int) (row, width int, ok bool) {
 	return 4 + int(h>>8)%7, 2 + int(h>>12)%2, true
 }
 
+// castleRect is the goal castle's tile footprint: anchored 3 tiles right
+// of the flag pole, 5 wide, on rows 9..12. Cloud avoidance and the
+// castle painter both derive from this one geometry so they can never
+// drift apart.
+func castleRect(g *engine.Game) (x0, y0, w, h int) {
+	return g.Level.FlagX + 3, 9, 5, 4
+}
+
 // cloudBlocked reports whether a cloud anchored at tx on sky row row would
 // touch solid tiles or the goal castle. Blocked clouds are skipped so they
 // never slice behind level geometry — clouds only ever draw on open sky.
@@ -464,9 +570,8 @@ func cloudBlocked(g *engine.Game, tx, row int) bool {
 			return true
 		}
 	}
-	// The goal castle occupies tiles FlagX+3..+7 on rows 9..12.
-	c0 := g.Level.FlagX + 3
-	if row >= 9 && tx+3 > c0 && tx < c0+5 {
+	cx, cy, cw, ch := castleRect(g)
+	if row >= cy && row < cy+ch && tx+3 > cx && tx < cx+cw {
 		return true
 	}
 	return false
@@ -475,13 +580,12 @@ func cloudBlocked(g *engine.Game, tx, row int) bool {
 // HillAt reports whether a hill sits at world column tx (every ~13).
 func HillAt(tx int) bool { return hashX(tx)%13 == 5 }
 
-// BushAt reports a bush anchored at tx: its width. Bushes ~ every 7 columns.
-func BushAt(tx int) (width int, ok bool) {
+// BushAt reports whether a bush is anchored at tx (~ every 7 columns,
+// never on a hill column). All bushes draw the same 9×2 sprite, so there
+// is no width to report.
+func BushAt(tx int) bool {
 	h := hashX(tx)
-	if h%7 != 3 || HillAt(tx) {
-		return 0, false
-	}
-	return 2 + int(h>>10)%2, true
+	return h%7 == 3 && !HillAt(tx)
 }
 
 // viewTilesOf is the vertical viewport in tiles, derived from the game's
@@ -527,15 +631,21 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	txOf := func(px int) int { return px - ox }
 	tyOf := func(py int) int { return py - oy }
 
-	if g.State == engine.StateTitle && !g.Demo {
+	// Title text is laid out once per frame: the cloud keep-clear bands
+	// and the title painter consume the same elements.
+	var titleEls []titleText
+	title := g.State == engine.StateTitle && !g.Demo
+	if title {
+		titleEls = titleTextEls(f, g)
+	}
+	drawDecorations(f, g, p, rc, txOf, tyOf, bandsFromEls(f, titleEls))
+	if title {
 		// Title screen: clean sky, decorations and the ground strip only,
 		// so the logo and cast stay unobstructed.
-		drawDecorations(f, g, p, rc, txOf, tyOf)
 		drawGroundOnly(f, g, p, camX, camY, ox, oy)
-		drawOverlayPx(f, g, p)
+		drawOverlayPx(f, g, p, titleEls)
 		return f
 	}
-	drawDecorations(f, g, p, rc, txOf, tyOf)
 	drawPlants(f, g, p, rc, camX, camY) // under the pipes: the pipe occludes
 	drawCastleAt(f, g, p, txOf, tyOf)
 	drawMushrooms(f, g, p, rc, camX, camY)
@@ -547,7 +657,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
 	drawPlayerPx(f, g, p, rc, camX, camY)
-	drawOverlayPx(f, g, p)
+	drawOverlayPx(f, g, p, nil)
 	return f
 }
 
@@ -587,28 +697,49 @@ func drawStatus(s *Screen, g *engine.Game, p *Palette) {
 	s.Center(y, statusText(s.W-2, g), p.TextDim, p.StatusBG, false)
 }
 
+// statusLadder is the single source of status-line content: the
+// fan-game about banner while the title screen is up (the one surface
+// every viewport height shows — the in-frame arcade banner needs ~12
+// visible tiles), the controls everywhere else. Candidates run richest
+// → shortest; the empty tail lets narrow surfaces drop the line.
+//
+// Both surfaces draw this ladder — the terminal status line (drawStatus,
+// picked by terminal columns) and the canvas status band (drawStatusPx,
+// picked by pixels) — so their content can never drift apart. The 3×5
+// font cuts only uppercase glyphs, so the pixel path rides
+// drawTextPx's upper-case fallback; separators are '-' because the font
+// has no '·' glyph.
+func statusLadder(g *engine.Game) []string {
+	if g.State == engine.StateTitle {
+		return []string{
+			"unofficial fan game - not affiliated with nintendo - runs in your terminal",
+			"unofficial fan game - not affiliated with nintendo",
+			"unofficial fan game - not nintendo",
+			"fan game",
+		}
+	}
+	return []string{
+		"a/d move - w/space jump - s duck - x run - p pause - k die - r restart - q quit",
+		"a/d move - w/space jump - x run - p pause - k die - q quit",
+		"a/d move - w/space jump - x run - p pause - q quit",
+		"a/d move - w/space jump - x run",
+		"a/d move - w jump - x run",
+		"q quit",
+		"",
+	}
+}
+
 // statusText picks the status line for a screen maxCols wide: about
-// banner at the title (laddered like the arcade text), controls in play.
+// banner at the title (never dropped — "fan game" always fits the
+// narrowest viewport), controls in play.
 func statusText(maxCols int, g *engine.Game) string {
 	if g.State == engine.StateTitle {
-		t := pickText([]string{
-			"unofficial fan game · not affiliated with nintendo · runs in your terminal",
-			"unofficial fan game · not affiliated with nintendo",
-			"unofficial fan game · not nintendo",
-			"fan game",
-		}, maxCols)
-		if t != "" {
+		if t := pickText(statusLadder(g), maxCols); t != "" {
 			return t
 		}
 		return "fan game"
 	}
-	return pickText([]string{
-		"a/d move · w/space jump · s duck · x run · p pause · k die · r restart · q quit",
-		"a/d move · w/space jump · x run · p pause · q quit",
-		"a/d move · w/space jump · x run",
-		"q quit",
-		"",
-	}, maxCols)
+	return pickText(statusLadder(g), maxCols)
 }
 
 // pickText returns the first candidate that fits maxCols terminal columns,
@@ -641,28 +772,158 @@ func blit(s *Screen, f *Frame) {
 	}
 }
 
+// hudInk selects a HUD segment's color on either surface.
+type hudInk uint8
+
+const (
+	hudPlain hudInk = iota // the HUD text color
+	hudRed                 // the CHEATS tag
+	hudFlash               // TIME: steady text until HURRY, then flashing red
+)
+
+// hudSeg is one segment of the HUD line.
+type hudSeg struct {
+	s   string
+	ink hudInk
+}
+
+// hudLadder builds every HUD content variant, richest first — the test
+// and parity surface. The hot paths use hudPick/hudPickPx, which build
+// only the variant they land on.
+func hudLadder(g *engine.Game) [][]hudSeg {
+	return [][]hudSeg{hudSegs(g, 0), hudSegs(g, 1), hudSegs(g, 2), hudSegs(g, 3)}
+}
+
+// hudSegs builds one HUD content variant: 0 richest (SCORE, COINS,
+// WORLD, TIME, LIVES, CHEATS), 1 drops WORLD, 2 drops the labels, 3 is
+// the bare score (always drawn). The terminal HUD (drawHUD, widths in
+// columns) and the canvas HUD band (drawHudPx, widths in pixels) render
+// the same variants, so the two surfaces cannot drift apart.
+func hudSegs(g *engine.Game, variant int) []hudSeg {
+	seg := func(s string, ink hudInk) hudSeg { return hudSeg{s: s, ink: ink} }
+	switch variant {
+	case 1:
+		segs := []hudSeg{
+			seg(fmt.Sprintf("SCORE %06d", g.Score), hudPlain),
+			seg(fmt.Sprintf("COINS x%02d", g.CoinCount), hudPlain),
+			seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash),
+			seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain),
+		}
+		if g.Cheats {
+			segs = append(segs, seg("CHEATS", hudRed))
+		}
+		return segs
+	case 2:
+		return []hudSeg{
+			seg(fmt.Sprintf("%06d", g.Score), hudPlain),
+			seg(fmt.Sprintf("x%02d", g.CoinCount), hudPlain),
+			seg(fmt.Sprintf("%03d", g.Time), hudFlash),
+			seg(fmt.Sprintf("x%d", g.Lives), hudPlain),
+		}
+	case 3:
+		return []hudSeg{seg(fmt.Sprintf("%06d", g.Score), hudPlain)}
+	}
+	segs := []hudSeg{
+		seg(fmt.Sprintf("SCORE %06d", g.Score), hudPlain),
+		seg(fmt.Sprintf("COINS x%02d", g.CoinCount), hudPlain),
+		seg(fmt.Sprintf("WORLD %s", g.LevelName()), hudPlain),
+		seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash),
+		seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain),
+	}
+	if g.Cheats {
+		segs = append(segs, seg("CHEATS", hudRed))
+	}
+	return segs
+}
+
+// hurryFlash reports whether the TIME readout is in its red phase this
+// tick: flashing while the HURRY! banner cycles, steady red once it has
+// come and gone.
+func hurryFlash(g *engine.Game) bool {
+	return g.Hurry && (g.HurryT <= 0 || g.Tick%30 < 18)
+}
+
+// hudSegColor resolves a segment's ink for the current tick.
+func hudSegColor(seg hudSeg, g *engine.Game, p *Palette) Color {
+	switch seg.ink {
+	case hudRed:
+		return p.FlagRed
+	case hudFlash:
+		if hurryFlash(g) {
+			return p.FlagRed
+		}
+	}
+	return p.Text
+}
+
+// hudWidth is a variant's width in terminal columns (segments joined by
+// two spaces).
+func hudWidth(segs []hudSeg) int {
+	w := 0
+	for i, seg := range segs {
+		w += utf8.RuneCountInString(seg.s)
+		if i < len(segs)-1 {
+			w += 2
+		}
+	}
+	return w
+}
+
+// hudWidthPx is a variant's width in 3×5-font pixels at scale 1.
+func hudWidthPx(segs []hudSeg) int {
+	w := 0
+	for i, seg := range segs {
+		w += textWidthPx(seg.s, 1)
+		if i < len(segs)-1 {
+			w += 8 // the two-space gap
+		}
+	}
+	return w
+}
+
+// hudPick returns the richest variant that fits maxCols terminal
+// columns, falling back to the bare score. It builds only the variant
+// it lands on — the HUD runs every frame.
+func hudPick(g *engine.Game, maxCols int) []hudSeg {
+	var last []hudSeg
+	for i := range 4 {
+		last = hudSegs(g, i)
+		if hudWidth(last) <= maxCols {
+			return last
+		}
+	}
+	return last
+}
+
+// hudPickPx is hudPick for the pixel font, measuring in pixels.
+func hudPickPx(g *engine.Game, maxPx int) []hudSeg {
+	var last []hudSeg
+	for i := range 4 {
+		last = hudSegs(g, i)
+		if hudWidthPx(last) <= maxPx {
+			return last
+		}
+	}
+	return last
+}
+
 func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 	for x := range s.W {
 		s.SetStyled(x, 0, ' ', p.Text, p.HUDBG, false)
 	}
-	left := fmt.Sprintf("SCORE %06d  COINS x%02d  WORLD %s", g.Score, g.CoinCount, g.LevelName())
-	s.TextStyled(1, 0, left, p.Text, p.HUDBG, true)
-	// TIME gets its own run so it can flash red when time runs low
-	// (steady red once the HURRY! banner has come and gone).
-	tx := 1 + len(left) + 2
-	timeCol := p.Text
-	if g.Hurry && (g.HurryT <= 0 || g.Tick%30 < 18) {
-		timeCol = p.FlagRed
-	}
-	s.TextStyled(tx, 0, fmt.Sprintf("TIME %03d", g.Time), timeCol, p.HUDBG, true)
-	s.TextStyled(tx+10, 0, fmt.Sprintf("LIVES x%d", g.Lives), p.Text, p.HUDBG, true)
-	if g.Cheats && tx+10+9+len("CHEATS")+1 < s.W {
-		s.TextStyled(tx+10+10, 0, "CHEATS", p.FlagRed, p.HUDBG, true)
+	x := 1
+	for _, seg := range hudPick(g, s.W-2) {
+		s.TextStyled(x, 0, seg.s, hudSegColor(seg, g, p), p.HUDBG, true)
+		x += utf8.RuneCountInString(seg.s) + 2
 	}
 }
 
+// drawDecorations paints the sky dressing. bands are the title text's
+// keep-clear rects (nil outside the title screen) — the caller computes
+// them once per frame from the same title elements the title painter
+// stamps.
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
-	txOf, tyOf func(int) int) {
+	txOf, tyOf func(int) int, bands [][4]int) {
 	switch g.Level.Theme {
 	case engine.ThemeUnderground, engine.ThemeCastle:
 		return // no sky dressing underground or inside the castle
@@ -670,12 +931,6 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	// Only the overworld grows hills and bushes; the sky world keeps its
 	// clouds but floats over open air.
 	overworld := g.Level.Theme == engine.ThemeOverworld
-	// On the title screen clouds also keep clear of the stacked text —
-	// white cloud art would dissolve the white SUPER CLI subtitle.
-	var bands [][4]int
-	if g.State == engine.StateTitle {
-		bands = titleTextBands(f, g)
-	}
 	for tx := range g.Level.Width {
 		if row, _, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
 			x, y := txOf(tx*Pix), tyOf(row*Pix)
@@ -686,18 +941,15 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 		if overworld && HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
 			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprHill)), false, 1)
 		}
-		if overworld {
-			if w, ok := BushAt(tx); ok && g.Level.At(tx, engine.GroundTop).Solid() {
-				_ = w
-				f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
-			}
+		if overworld && BushAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
+			f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
 		}
 	}
 }
 
 func drawCastleAt(f *Frame, g *engine.Game, p *Palette, txOf, tyOf func(int) int) {
-	c0 := g.Level.FlagX + 3
-	x, y := txOf(c0*Pix), tyOf(9*Pix)
+	c0, cy, _, _ := castleRect(g)
+	x, y := txOf(c0*Pix), tyOf(cy*Pix)
 	drawCastle(f, p, x, y)
 	drawCastleFlag(f, p, x, y-2, g.CastleFlag)
 }
@@ -961,34 +1213,64 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	} else if g.State != engine.StateDying {
 		art = marioArt(pl)
 	}
-	if pl.Power == engine.PowerFire {
-		rc = fireRuneColors(p)
-	}
-	if pl.Star > 0 {
-		rc = starRuneColors(p, rc, g.Tick)
-	}
+	rc = playerRuneColors(p, pl.Power == engine.PowerFire, pl.Star > 0, g.Tick)
 	cx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
 	bottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
 // fireRuneColors re-skins mario art as fire mario: white cap and shirt,
-// red overalls.
+// red overalls. Cached per palette.
+var fireRuneCache sync.Map // *Palette -> map[rune]Color
+
 func fireRuneColors(p *Palette) map[rune]Color {
-	rc := runeColors(p)
+	if v, ok := fireRuneCache.Load(p); ok {
+		return v.(map[rune]Color)
+	}
+	rc := map[rune]Color{}
+	for k, v := range runeColors(p) {
+		rc[k] = v
+	}
 	rc['R'] = p.White
 	rc['B'] = p.FlagRed
+	fireRuneCache.Store(p, rc)
 	return rc
 }
 
-// starRuneColors flickers mario's colors while star power runs: four
-// phases cycled off the world tick — deterministic, no RNG.
-func starRuneColors(p *Palette, base map[rune]Color, tick int) map[rune]Color {
-	rc := make(map[rune]Color, len(base)+2)
+// starPhaseKey identifies one flicker phase of the star re-skin.
+type starPhaseKey struct {
+	p     *Palette
+	fire  bool
+	phase int // 1..3 (0 is the un-flickered base itself)
+}
+
+var starPhaseCache sync.Map // starPhaseKey -> map[rune]Color
+
+// playerRuneColors resolves the sprite-color map for the player this
+// tick — fire mario's re-skin, then the star-power flicker — entirely
+// from caches, so the render hot path never builds a map. Four phases
+// cycle off the world tick, deterministic, no RNG.
+func playerRuneColors(p *Palette, fire, star bool, tick int) map[rune]Color {
+	base := runeColors(p)
+	if fire {
+		base = fireRuneColors(p)
+	}
+	if !star {
+		return base
+	}
+	phase := (tick / 3) % 4
+	if phase == 0 {
+		return base
+	}
+	k := starPhaseKey{p, fire, phase}
+	if v, ok := starPhaseCache.Load(k); ok {
+		return v.(map[rune]Color)
+	}
+	rc := map[rune]Color{}
 	for k, v := range base {
 		rc[k] = v
 	}
-	switch (tick / 3) % 4 {
+	switch phase {
 	case 1:
 		rc['R'], rc['B'] = p.White, p.GoldLight
 	case 2:
@@ -996,6 +1278,7 @@ func starRuneColors(p *Palette, base map[rune]Color, tick int) map[rune]Color {
 	case 3:
 		rc['R'], rc['B'] = p.Green, p.Coin
 	}
+	starPhaseCache.Store(k, rc)
 	return rc
 }
 
@@ -1039,7 +1322,10 @@ func marioArt(pl *engine.Player) []string {
 	}
 }
 
-func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
+// drawOverlayPx paints state overlays; titleEls carries the frame's
+// title text elements when the caller already computed them (nil: the
+// overlay computes them itself).
+func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, titleEls []titleText) {
 	mid := f.H / 2
 	switch {
 	case g.Paused:
@@ -1051,7 +1337,7 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 	case g.State == engine.StateWorldCard:
 		drawWorldCard(f, g, p)
 	case g.State == engine.StateTitle, g.Demo:
-		drawTitlePx(f, g, p, true)
+		drawTitlePx(f, g, p, true, titleEls)
 	case g.State == engine.StateGameOver:
 		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
 		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
@@ -1065,14 +1351,17 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette) {
 // and in full mode the logo, subtitle, "press any key" blink and the
 // leaderboard hint above/below the cast. With full=false only the cast is
 // drawn — the leaderboard board takes the rest of the screen.
-func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool) {
+func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool, els []titleText) {
 	rc2 := runeColors(p)
 	// Bottom-anchored cascade: the cast stands ON the ground line and
 	// every text element stacks above it, so no viewport height can
 	// overlap or bury anything. Ground occupies the last 2 tile rows.
 	castY := titleCastY(f) // mario sprite top; feet on the last sky row
 	if full {
-		for _, e := range titleTextEls(f, g) {
+		if els == nil {
+			els = titleTextEls(f, g)
+		}
+		for _, e := range els {
 			if e.blink && g.Tick%40 >= 28 {
 				continue
 			}
@@ -1180,8 +1469,8 @@ func titleTextEls(f *Frame, g *engine.Game) []titleText {
 	return els
 }
 
-// titleCastY is the top of the ×2-scaled title cast; its feet stand on the
-// ground line (last 2 tile rows are ground).
+// titleCastY is the top of the ×2-scaled title cast; its feet stand on
+// the ground line (last 2 tile rows are ground).
 func titleCastY(f *Frame) int {
 	return f.H - 2*Pix - 2*sprH(sprMarioSmall)
 }
@@ -1190,8 +1479,15 @@ func titleCastY(f *Frame) int {
 // Blinking lines are always included so the cloud layout stays steady
 // instead of strobing with the blink cycle.
 func titleTextBands(f *Frame, g *engine.Game) [][4]int {
+	return bandsFromEls(f, titleTextEls(f, g))
+}
+
+// bandsFromEls is the pixel rects covered by the given title elements —
+// the hot path passes the same elements the painter stamps so the layout
+// is computed once per frame.
+func bandsFromEls(f *Frame, els []titleText) [][4]int {
 	var bands [][4]int
-	for _, e := range titleTextEls(f, g) {
+	for _, e := range els {
 		w := textWidthPx(e.s, e.scale)
 		x := (f.W - w) / 2
 		if x < 0 {

@@ -3,6 +3,7 @@ package input
 import (
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // PlainDecoder re-encodes a kitty-protocol byte stream as the plain legacy
@@ -16,7 +17,9 @@ import (
 // Terminals without the protocol send plain bytes already; those pass
 // through untouched.
 type PlainDecoder struct {
+	mu  sync.Mutex
 	buf []byte
+	age int // ticks the buffer has sat incomplete (see FlushStale)
 }
 
 // NewPlainDecoder returns a decoder with no partial sequence buffered.
@@ -26,6 +29,9 @@ func NewPlainDecoder() *PlainDecoder { return &PlainDecoder{} }
 // complete event they contained. A sequence split across reads is held back
 // until its final byte arrives.
 func (d *PlainDecoder) Feed(b []byte) []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.age = 0 // fresh bytes restart the incomplete window
 	d.buf = append(d.buf, b...)
 	var out []byte
 	for len(d.buf) > 0 {
@@ -40,8 +46,31 @@ func (d *PlainDecoder) Feed(b []byte) []byte {
 	}
 	if len(d.buf) > 16 { // garbage guard: never wedged on noise
 		d.buf = nil
+		d.age = 0
 	}
 	return out
+}
+
+// FlushStale ages out an incomplete escape sequence. A truncated escape
+// (rest of the bytes lost on a slow link) would otherwise swallow every
+// later plain key — any letter parses as the sequence's final byte —
+// until the 16-byte garbage guard trips, which on a quiet link never
+// happens: the board's 'q'/'r' and the title's 'l'/'d' go dead. The
+// router calls this once per tick; after staleSeqPolls ticks with no
+// completing bytes the buffer is dropped silently, mirroring the aging
+// the mapper runs on its own buffer (which additionally turns a lone
+// held ESC into a quit).
+func (d *PlainDecoder) FlushStale() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.buf) == 0 {
+		return
+	}
+	d.age++
+	if d.age >= staleSeqPolls {
+		d.buf = nil
+		d.age = 0
+	}
 }
 
 // plainSeq decodes one event from the head of b into the plain byte it

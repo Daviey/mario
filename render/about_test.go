@@ -107,9 +107,9 @@ func TestStatusAboutBannerOnTitle(t *testing.T) {
 		w    int
 		want string
 	}{
-		{999, "unofficial fan game · not affiliated with nintendo · runs in your terminal"},
-		{50, "unofficial fan game · not affiliated with nintendo"},
-		{34, "unofficial fan game · not nintendo"},
+		{999, "unofficial fan game - not affiliated with nintendo - runs in your terminal"},
+		{50, "unofficial fan game - not affiliated with nintendo"},
+		{34, "unofficial fan game - not nintendo"},
 		{8, "fan game"},
 		{1, "fan game"},
 	} {
@@ -127,7 +127,7 @@ func TestStatusAboutBannerOnTitle(t *testing.T) {
 	}
 	g.Update(engine.Input{AnyKey: true}) // start a run
 	g.Update(engine.Input{})
-	if s := statusText(999, g); s != "a/d move · w/space jump · s duck · x run · p pause · k die · r restart · q quit" {
+	if s := statusText(999, g); s != "a/d move - w/space jump - s duck - x run - p pause - k die - r restart - q quit" {
 		t.Errorf("in-play status = %q; want controls", s)
 	}
 }

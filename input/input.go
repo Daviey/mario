@@ -297,6 +297,16 @@ func (m *Mapper) SawKitty() bool {
 func (m *Mapper) ReleaseAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Settle the in-flight hold learning first, mirroring the silent-
+	// expiry sweep: a key whose keypress showed repeats was held, so
+	// the NEXT press of it deserves the hold grace — the sweep never
+	// sees this live→dead transition, because ReleaseAll is exactly the
+	// case where input stops reaching the mapper mid-hold.
+	for k := key(0); k < keyCount; k++ {
+		if m.sawRepeat[k] {
+			m.heldHabit[k] = true
+		}
+	}
 	m.sticky = [keyCount]bool{}
 	m.latched = [keyCount]bool{}
 	m.lastSeen = [keyCount]int{}

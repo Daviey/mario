@@ -30,28 +30,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/Daviey/mario/internal/art"
+	"github.com/Daviey/mario/tools/internal/pack"
 )
-
-// Fixed zip timestamp (1980 = zip epoch) so identical inputs give
-// byte-identical .app zips — same contract as tools/mkdeb.
-var zipEpoch = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
-
-var semverRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
-
-// shortVersion maps git describe output (v0.3.3-6-g84d833b-dirty) to the
-// X.Y.Z CFBundleShortVersionString wants; anything unparsable is 0.0.0.
-func shortVersion(v string) string {
-	if m := semverRe.FindStringSubmatch(strings.TrimSpace(v)); m != nil {
-		return m[1]
-	}
-	return "0.0.0"
-}
 
 // One fat-binary slice. Constants from <mach/machine.h>: CPU_ARCH_ABI64
 // (0x01000000) | CPU_TYPE_X86 (7) / CPU_TYPE_ARM (12); subtypes
@@ -188,7 +171,7 @@ func infoPlist(version string) []byte {
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>` + shortVersion(version) + `</string>
+	<string>` + pack.ShortVersion(version) + `</string>
 	<key>CFBundleVersion</key>
 	<string>` + strings.TrimPrefix(version, "v") + `</string>
 	<key>LSApplicationCategoryType</key>
@@ -238,53 +221,14 @@ func assemble(appDir string, fat []byte, version string) error {
 	return nil
 }
 
-// zipDir walks dir deterministically (sorted, filepath separators → /)
-// and writes every regular file with the fixed epoch timestamp and a
-// normalized mode — 0755 for executables, 0644 for everything else —
-// so the archive never mirrors the build host's umask.
-func zipDir(dir string, zw *zip.Writer) error {
-	var files []struct {
-		path string
-		mode fs.FileMode
+// normalizeZipMode keeps the .app zip umask-independent: executables
+// 0755, everything else 0644 — whatever the staged tree carries (the
+// CI runner builds under umask 077).
+func normalizeZipMode(perms fs.FileMode) fs.FileMode {
+	if perms&0o111 != 0 {
+		return 0o755
 	}
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		files = append(files, struct {
-			path string
-			mode fs.FileMode
-		}{path, info.Mode().Perm()})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
-	for _, f := range files {
-		rel, err := filepath.Rel(dir, f.path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(f.path)
-		if err != nil {
-			return err
-		}
-		hdr := &zip.FileHeader{Name: filepath.ToSlash(rel), Modified: zipEpoch}
-		mode := fs.FileMode(0o644)
-		if f.mode&0o111 != 0 {
-			mode = 0o755
-		}
-		hdr.SetMode(mode)
-		w, err := zw.CreateHeader(hdr)
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-	}
-	return nil
+	return 0o644
 }
 
 func alignUp(n, a int) int {
@@ -346,7 +290,7 @@ func main() {
 	}
 	defer f.Close()
 	zw := zip.NewWriter(f)
-	if err := zipDir(staging, zw); err != nil {
+	if err := pack.ZipDir(staging, zw, normalizeZipMode); err != nil {
 		fatal(err)
 	}
 	if err := zw.Close(); err != nil {

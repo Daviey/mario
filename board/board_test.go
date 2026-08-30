@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Daviey/mario/internal/persist"
 )
 
 // fakePostgREST records requests and answers with canned JSON bodies.
@@ -261,6 +264,51 @@ func TestSanitizeDisplayName(t *testing.T) {
 	for _, c := range cases {
 		if got := SanitizeDisplayName(c.in); got != c.want {
 			t.Errorf("SanitizeDisplayName(%q) = %q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// persist.NameCharSet is the single Go-side source of truth for player
+// names: both Go sanitizers must accept exactly it and reject the same
+// outsiders ('_' has no pixel-font glyph anywhere).
+func TestNameCharSetSingleSource(t *testing.T) {
+	for _, r := range persist.NameCharSet {
+		// Wrapped: SanitizeName's length floor is 1 char, and a lone
+		// space also trips its trim — the rune set is what must agree.
+		s := "X" + string(r) + "Y"
+		if got := SanitizeDisplayName(s); got != s {
+			t.Errorf("SanitizeDisplayName(%q) = %q: charset rune not accepted", s, got)
+		}
+		if got, ok := persist.SanitizeName(s); !ok || got != s {
+			t.Errorf("SanitizeName(%q) = %q,%v: charset rune not accepted", s, got, ok)
+		}
+	}
+	if _, ok := persist.SanitizeName("x_y"); ok {
+		t.Error(`SanitizeName("x_y") accepted '_'`)
+	}
+	if got := SanitizeDisplayName("x_y"); got != "XY" {
+		t.Errorf(`SanitizeDisplayName("x_y") = %q, want XY ('_' dropped)`, got)
+	}
+}
+
+func TestTransientClassification(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{&HTTPError{Status: 500, StatusText: "500 Internal Server Error"}, true},
+		{&HTTPError{Status: 502, StatusText: "502 Bad Gateway"}, true},
+		{&HTTPError{Status: 503, StatusText: "503 Service Unavailable"}, true},
+		{&HTTPError{Status: 400, StatusText: "400 Bad Request"}, false},  // bad request
+		{&HTTPError{Status: 401, StatusText: "401 Unauthorized"}, false}, // RLS
+		{&HTTPError{Status: 429, StatusText: "429 Too Many Requests"}, false},
+		{errors.New("connection reset by peer"), true},          // transport-level
+		{fmt.Errorf("top: %w", &HTTPError{Status: 429}), false}, // wrapped
+		{nil, false},
+	}
+	for _, c := range cases {
+		if got := Transient(c.err); got != c.want {
+			t.Errorf("Transient(%v) = %v, want %v", c.err, got, c.want)
 		}
 	}
 }

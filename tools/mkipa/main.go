@@ -23,31 +23,14 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/Daviey/mario/internal/art"
+	"github.com/Daviey/mario/tools/internal/pack"
 )
-
-// Fixed zip timestamp (1980 = zip epoch) so identical inputs give
-// byte-identical .ipas — same contract as tools/mkdeb.
-var zipEpoch = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
-
-var semverRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
-
-// shortVersion maps git describe output (v0.3.3-6-g84d833b-dirty) to the
-// X.Y.Z CFBundleShortVersionString wants; anything unparsable is 0.0.0.
-func shortVersion(v string) string {
-	if m := semverRe.FindStringSubmatch(strings.TrimSpace(v)); m != nil {
-		return m[1]
-	}
-	return "0.0.0"
-}
 
 // appIcons are the home-screen sizes iOS looks up via CFBundleIconFiles.
 // Name → px; art pixels are ~83% of the canvas, matching tools/genicon.
@@ -130,7 +113,7 @@ func main() {
 	}
 	defer f.Close()
 	zw := zip.NewWriter(f)
-	if err := zipDir(staging, zw); err != nil {
+	if err := pack.ZipDir(staging, zw, uniformZipMode); err != nil {
 		fatal(err)
 	}
 	if err := zw.Close(); err != nil {
@@ -149,7 +132,7 @@ func assemble(appDir string, b build) error {
 	if err != nil {
 		return err
 	}
-	plist = bytes.ReplaceAll(plist, []byte("{{SHORT_VERSION}}"), []byte(shortVersion(b.Version)))
+	plist = bytes.ReplaceAll(plist, []byte("{{SHORT_VERSION}}"), []byte(pack.ShortVersion(b.Version)))
 	plist = bytes.ReplaceAll(plist, []byte("{{VERSION}}"), []byte(b.Version))
 	if err := os.WriteFile(filepath.Join(appDir, "Info.plist"), plist, 0o644); err != nil {
 		return err
@@ -182,41 +165,10 @@ func run(name string, args ...string) (string, error) {
 	return buf.String(), err
 }
 
-// zipDir walks dir deterministically (sorted, filepath separators → /)
-// and writes every regular file with the fixed epoch timestamp.
-func zipDir(dir string, zw *zip.Writer) error {
-	var files []string
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	sort.Strings(files)
-	for _, path := range files {
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		hdr := &zip.FileHeader{Name: filepath.ToSlash(rel), Modified: zipEpoch}
-		hdr.SetMode(0o755) // uniform: iOS ignores unix modes in the zip
-		w, err := zw.CreateHeader(hdr)
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-	}
-	return nil
+// uniformZipMode gives every .ipa entry 0755: iOS ignores unix modes in
+// the zip, so one uniform mode keeps the archive umask-independent.
+func uniformZipMode(fs.FileMode) fs.FileMode {
+	return 0o755
 }
 
 func copyTree(dst, src string) error {

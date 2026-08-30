@@ -1,6 +1,8 @@
 package sshd
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/Daviey/mario/render"
@@ -40,7 +42,7 @@ func TestDADecision(t *testing.T) {
 // replies split across packets, and stop buffering once drained —
 // late replies must not leak into the game's input stream.
 func TestTermProbeOfferDrainFilter(t *testing.T) {
-	p := newTermProbe()
+	p := newTermProbe(time.Minute)
 
 	// Keystrokes before any reply: buffered.
 	if _, buffered := p.offer([]byte("ab")); !buffered {
@@ -204,5 +206,45 @@ func TestSessionColorDepth(t *testing.T) {
 				t.Fatal("no ColorDepth decision")
 			}
 		})
+	}
+}
+
+// A reply that never terminates ("\x1b[>" with no "c") used to keep
+// the probe buffering every later byte forever — unbounded memory and
+// swallowed input. The hold is now bounded by probeBufMax and by the
+// probe's wait window: whichever trips first abandons probing and
+// flushes everything back.
+func TestTermProbeTruncatedEscapeRecovers(t *testing.T) {
+	// Overflow: past probeBufMax buffered bytes the probe gives up.
+	p := newTermProbe(time.Minute)
+	if _, buffered := p.offer([]byte("\x1b[>")); !buffered {
+		t.Fatal("truncated DA2 not buffered")
+	}
+	rest, buffered := p.offer(bytes.Repeat([]byte("x"), probeBufMax))
+	if buffered {
+		t.Fatal("overflow must abandon buffering")
+	}
+	if got := string(rest); !strings.HasPrefix(got, "\x1b[>") || len(got) != probeBufMax+3 {
+		t.Fatalf("overflow flush = %d bytes starting %q, want the held bytes back", len(got), got[:min(6, len(got))])
+	}
+	// Abandoned: later input passes straight through, nothing held.
+	rest, buffered = p.offer([]byte("LEFT"))
+	if buffered || string(rest) != "LEFT" {
+		t.Fatalf("post-abandon offer = %q buffered=%v, want passthrough", rest, buffered)
+	}
+	if got := p.drain(); len(got) != 0 {
+		t.Fatalf("post-abandon drain = %q, want nothing held", got)
+	}
+
+	// Expiry: once the probe's wait window is over, the next offer
+	// abandons and flushes rather than holding for a terminator.
+	p = newTermProbe(30 * time.Millisecond)
+	if _, buffered := p.offer([]byte("\x1b[>q")); !buffered {
+		t.Fatal("truncated DA2 not buffered before expiry")
+	}
+	time.Sleep(80 * time.Millisecond)
+	rest, buffered = p.offer([]byte("LATE"))
+	if buffered || string(rest) != "\x1b[>qLATE" {
+		t.Fatalf("expired offer = %q buffered=%v, want the hold flushed through", rest, buffered)
 	}
 }

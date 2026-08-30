@@ -680,7 +680,7 @@ func TestControlQueueDropPolicy(t *testing.T) {
 		t:         newTransport(c1),
 		srv:       &Server{Log: log.New(io.Discard, "", 0)},
 		ctlWake:   make(chan struct{}, 1),
-		adjustSig: make(chan struct{}, 1),
+		adjustSig: make(chan *channel, 1),
 		dead:      make(chan struct{}),
 	}
 	qLen := func() int {
@@ -703,14 +703,16 @@ func TestControlQueueDropPolicy(t *testing.T) {
 		t.Fatalf("queued %d replies, want exactly %d (lossless to the cap)", n, ctlMax)
 	}
 
-	// One lossless item over the cap: the connection closes and the
-	// item is rejected, not queued.
+	// One lossless item over the cap: the connection closes, the item
+	// is rejected, and the backlog is trimmed on the spot — the dying
+	// connection must not sit on ctlMax queued packets (plus their
+	// buffers) while the handlers wind down.
 	c.writeControl([]byte{msgChannelSuccess})
 	if _, err := c2.Read(make([]byte, 1)); err == nil {
 		t.Fatal("control-queue overflow must close the connection")
 	}
-	if n := qLen(); n != ctlMax {
-		t.Fatalf("overflow item queued (len %d), want rejection at %d", n, ctlMax)
+	if n := qLen(); n != 0 {
+		t.Fatalf("overflow left %d items queued, want the queue trimmed", n)
 	}
 }
 
@@ -806,5 +808,115 @@ func TestSessionRemoteAddr(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler never ran")
+	}
+}
+
+// A connection that completes the key exchange but never opens a
+// session channel holds a goroutine and a transport while being
+// invisible to the session cap (admission counts playing sessions
+// only) — an idling fleet of them bypasses the cap entirely.
+// PostAuthWait bounds the squat: the client sees a DISCONNECT and the
+// server side is torn down.
+func TestPostAuthNoChannelDeadline(t *testing.T) {
+	srv := startServer(t, echoHandler, func(s *Server) {
+		s.PostAuthWait = 250 * time.Millisecond
+	})
+	tc := dial(t, srv.Addr)
+	tc.authNone() // KEX done, authenticated, no channel — now we squat
+	start := time.Now()
+	p := tc.expect(msgDisconnect)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("idle drop took %v, PostAuthWait not honored", d)
+	}
+	r := &reader{b: p[1:]}
+	if code := r.u32(); code != discByApplication {
+		t.Fatalf("idle disconnect reason = %d, want %d (by application)", code, discByApplication)
+	}
+	// And the transport really ends, releasing the goroutine.
+	tc.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := tc.nc.Read(make([]byte, 1)); err == nil {
+		t.Fatal("connection still open after the idle disconnect")
+	}
+}
+
+// Failed userauth attempts are capped: auth here is a formality
+// ("none" for everyone), so grinding failures is pure abuse and gets
+// a DISCONNECT after maxAuthTries instead of an infinite reply loop.
+func TestAuthRetryCapDisconnects(t *testing.T) {
+	srv := startServer(t, echoHandler)
+	tc := dial(t, srv.Addr)
+	w := &buf{}
+	w.u8(msgServiceRequest)
+	w.cstr("ssh-userauth")
+	tc.send(w.b)
+	tc.expect(msgServiceAccept)
+
+	authFail := func() {
+		w := &buf{}
+		w.u8(msgUserauthRequest)
+		w.cstr("player")
+		w.cstr("ssh-connection")
+		w.cstr("password")
+		w.boolean(false)
+		w.cstr("x")
+		tc.send(w.b)
+	}
+	for range maxAuthTries {
+		authFail()
+		tc.expect(msgUserauthFailure)
+	}
+	// One failure too many: the reply is a DISCONNECT, not another
+	// failure.
+	authFail()
+	p := tc.expect(msgDisconnect)
+	r := &reader{b: p[1:]}
+	if code := r.u32(); code != discProtocolError {
+		t.Fatalf("auth-cap disconnect reason = %d, want %d (protocol error)", code, discProtocolError)
+	}
+}
+
+// End-to-end for the truncated-reply hold: a client that emits a DA2
+// escape with no terminator must not wedge input — once the probe's
+// wait window expires, probing is abandoned and later keystrokes
+// reach the handler.
+func TestTruncatedProbeRecoversE2E(t *testing.T) {
+	fed := make(chan string, 8)
+	gate := make(chan struct{})
+	srv := startServer(t, func(s *Session) {
+		<-gate // hold the feed back: the probe stays in buffering mode
+		s.OnFeed(func(b []byte) { fed <- string(b) })
+		<-s.Done()
+	}, func(s *Server) { s.ProbeWait = 50 * time.Millisecond })
+	tc := dial(t, srv.Addr)
+	tc.authNone()
+	tc.openSession(1<<20, 32768)
+	tc.ptyReq(80, 24)
+	tc.shell()
+	// An escape that never terminates would historically keep the
+	// probe buffering every later byte forever.
+	tc.sendData([]byte("\x1b[>"))
+	time.Sleep(150 * time.Millisecond) // past the probe's wait window
+	close(gate)
+	tc.sendData([]byte("AFTER"))
+
+	gotAfter := ""
+	deadline := time.After(5 * time.Second)
+	for !strings.Contains(gotAfter, "AFTER") {
+		select {
+		case got := <-fed:
+			gotAfter += got
+		case <-deadline:
+			t.Fatalf("input stayed swallowed after the probe gave up (got %q)", gotAfter)
+		}
+	}
+	// Fully recovered: subsequent input passes through untouched.
+	tc.sendData([]byte("NEXT"))
+	select {
+	case got := <-fed:
+		if got != "NEXT" {
+			t.Fatalf("post-recovery passthrough = %q, want NEXT", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-recovery input never reached the feed")
 	}
 }
