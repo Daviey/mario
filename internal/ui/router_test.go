@@ -4,6 +4,7 @@ package ui
 // captures input, keystrokes must never reach the game mapper.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Daviey/mario/input"
@@ -133,5 +134,45 @@ func TestRouterReleaseAllOnRestart(t *testing.T) {
 		if in := mapper.Poll(); in.Left || in.Right || in.Up || in.Down || in.Run {
 			t.Fatal("restart must clear mapper holds")
 		}
+	}
+}
+
+// A truncated escape wedged in the plain decoder (rest lost on a quiet
+// link) used to eat every later UI trigger byte until 16+ bytes piled
+// up. The router's per-tick FlushStale must free both capture-mode keys
+// and the title 'l' trigger.
+func TestRouterFlushStaleFreesUIKeys(t *testing.T) {
+	m := input.NewMapper()
+	ui := NewUI(nil, nil)
+	r := NewRouter(m, ui)
+
+	// Title regime: 'l' must still reach the note buffer.
+	r.Feed([]byte("\x1b["))
+	for range 5 {
+		r.Poll()
+	}
+	r.Feed([]byte("\x1b[108;1:1u")) // kitty 'l'
+	ui.mu.Lock()
+	noted := string(ui.noted)
+	ui.mu.Unlock()
+	if !strings.Contains(noted, "l") {
+		t.Fatalf("title 'l' eaten by stale escape: noted %q", noted)
+	}
+
+	// Capture regime (board screen): 'q' must still close it.
+	ui.mu.Lock()
+	ui.mode = render.UIBoard
+	ui.noted = nil
+	ui.mu.Unlock()
+	r.Feed([]byte("\x1b["))
+	for range 5 {
+		r.Poll()
+	}
+	r.Feed([]byte("\x1b[113;1:1u")) // kitty 'q'
+	ui.mu.Lock()
+	keys := string(ui.keys)
+	ui.mu.Unlock()
+	if !strings.Contains(keys, "q") {
+		t.Fatalf("board 'q' eaten by stale escape: keys %q", keys)
 	}
 }

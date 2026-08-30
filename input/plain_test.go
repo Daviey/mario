@@ -51,6 +51,43 @@ func TestPlainDecoderNeverWedgesOnGarbage(t *testing.T) {
 	}
 }
 
+// The regression: a truncated escape (rest lost on a quiet link) used to
+// wedge the decoder — every later trigger byte was eaten as the missing
+// CSI final until >16 bytes accumulated, so 'l'/'d'/'q'/Enter went dead.
+// Per-tick FlushStale (the router hook) must free the buffer silently.
+func TestPlainDecoderFlushStaleFreesKeys(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		key  string
+	}{
+		{"plain l", "l"},
+		{"kitty-encoded l", "\x1b[108;1:1u"},
+	} {
+		d := NewPlainDecoder()
+		if got := d.Feed([]byte("\x1b[")); got != nil {
+			t.Fatalf("%s: truncated escape emitted %q", c.name, got)
+		}
+		for range staleSeqPolls {
+			d.FlushStale()
+		}
+		if got := string(d.Feed([]byte(c.key))); got != "l" {
+			t.Fatalf("%s: after stale flush got %q, want l", c.name, got)
+		}
+	}
+}
+
+// FlushStale must not eat a sequence that is merely split across reads:
+// within the grace window the completing bytes still land.
+func TestPlainDecoderFlushStaleKeepsSplitSequences(t *testing.T) {
+	d := NewPlainDecoder()
+	d.Feed([]byte("\x1b[10"))
+	d.FlushStale()
+	d.FlushStale() // staleSeqPolls-1 ticks: still waiting
+	if got := string(d.Feed([]byte("0;1:1u"))); got != "d" {
+		t.Fatalf("split sequence dropped by FlushStale: got %q, want d", got)
+	}
+}
+
 // The regression this package exists for: on a kitty terminal with flags
 // 1|2|8 pushed, a held key must stay held through the OS repeat delay with
 // NO repeat bytes at all — press events are sticky until the release.
