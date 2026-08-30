@@ -58,15 +58,16 @@ func (g *Game) moveY(pos *Vec, w, h, dy float64) (landed bool, ceilTy int, ceilC
 		}
 		return false, -1, nil
 	}
+	g.ceilBuf = g.ceilBuf[:0]
 	ty := int(math.Floor(pos.Y + skin))
 	for tx := x0; tx <= x1; tx++ {
 		if g.solidAt(tx, ty) {
-			ceilCols = append(ceilCols, tx)
+			g.ceilBuf = append(g.ceilBuf, tx)
 		}
 	}
-	if len(ceilCols) > 0 {
+	if len(g.ceilBuf) > 0 {
 		pos.Y = float64(ty) + 1
-		return false, ty, ceilCols
+		return false, ty, g.ceilBuf
 	}
 	return false, -1, nil
 }
