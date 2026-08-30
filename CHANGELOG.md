@@ -1,5 +1,83 @@
 # Changelog
 
+## v0.5.0 — 2026-08-30
+
+Big SSH-server release: mosh roaming, auto truecolor detection, an admission queue for full servers, plus a 256-color tier, a bell, cheats, and several live input/recording bugfixes.
+
+## Highlights
+- **Mosh roaming for anonymous SSH players** (`-mosh`): survive roaming and flaky links, with truecolor preserved via COLORTERM forwarding.
+- **Automatic truecolor detection**: the server probes terminals (DA2/DA3) to tell VTE/kitty/iTerm2-class terminals apart and picks the right palette.
+- **Admission queue with ETA**: joining a full server now shows your position instead of failing.
+- **256-color tier**: terminals that aren't truecolor get the fixed xterm cube instead of washed-out base-16 colors.
+
+## Added
+- Mosh handshake support with port-range and process-group handling (`-mosh`, `-mosh-ports`).
+- Server capacity harness and FIFO admission queue with Little's-law ETA.
+- Truecolor detection via DA2/DA3 terminal probe at shell start; iTerm2 and kitty/alacritty recognized.
+- Per-client-host input-calibration warm-start on reconnect.
+- Terminal bell sound feedback for CLI, SSH and mosh.
+- Cheats mode (`-cheats`): unlimited fireballs; runs are unrecorded and can't reach the leaderboard.
+- Play-context logging with scores (surface, user agent, term, input regime) and write-only play-session telemetry.
+- About screen (`i` on title) noting this is an unofficial fan game; title banner.
+- Status line now shows the full key set: s duck, k die, r restart.
+- 256-color cube rendering tier with OKLab-nearest quantization.
+- Direct-Postgres fallback for `-verify-pending`; `-version` flag.
+- Social preview banner image.
+
+## Changed
+- Web service worker is network-first — a release goes live on the next page load.
+- Board fetch retries transient failures; one board-open path in the UI.
+- Verifier alerts on systematic replay drops; release CI slimmed for PRs; atomic web deploy swap.
+- Hot-path render caches, shared HUD/status content builder, 16-color SGR dedupe.
+- README rewritten: mario.baby link, trademark disclaimer, `-scores`/`-daily` docs.
+
+## Fixed
+- SSH terminal damage: kitty keyboard flags now pop before leaving the alt screen (no more CSI-u garbage in your shell).
+- SSH input lag/run-on: reader never writes, window adjusts coalesce, bell never blocks ticks.
+- Recorder now survives death respawns — death-containing runs replay correctly and no longer get deleted from the leaderboard.
+- Hidden 1-up block no longer double-spawns; flag tiers scaled to the drawn pole; lava boundary probes fixed.
+- BrickDark restored in the base palette.
+- Truncated escape sequences age out per tick; release-all settles in-flight hold habits.
+
+## Packaging
+- Engine version bumped: leaderboard recordings from before this release may fail re-verification.
+
+## Note for players
+- Older leaderboard replays recorded with a previous engine version may be re-verified or dropped after this update.
+
+
+## v0.4.1 — 2026-08-29
+
+This release adds a from-scratch SSH game server and live terminal resizing, while cutting terminal render bandwidth by more than half. Packaging and CI also grew an AppImage target and auto-deployed web hosting.
+
+## Highlights
+- `mario -serve ADDR` runs an unauthenticated SSH server that presents the game — from-scratch SSH2 stack (transport, KEX, session channels), one game per connection.
+- Terminal output reworked with a differential SGR encoder, solid spaces and gap bridging, cutting bandwidth ~56% per tick.
+- The viewport now follows terminal resizes live while playing.
+
+## Added
+- SSH game server (`mario -serve`), stdlib-only SSH2 implementation with E2E and unit tests.
+- Live terminal resize support (`App.Resize`), with race tests for concurrent resize vs step and viewport sweeps.
+- AppImage packaging for linux/amd64, built via nix with a CI smoke guard.
+- Auto-deploy of the web build to mario.baby on every push to main (connection config in repo secrets).
+- Changelog backfill for v0.1.0..v0.3.4; release notes now written into the release body and committed to CHANGELOG.md (no separate asset).
+- Touch web control additions: restart pill and wrapped control row on narrow phones.
+
+## Changed
+- Wire-encoding contract documented for the differential renderer; round-trip and bandwidth tests added.
+- Slow SSH links no longer stall gameplay: ticks and input flow independently of rendering backpressure.
+
+## Fixed
+- AppImage CI job failure root-caused (bwrap needs CAP_SYS_ADMIN under root) and fixed; documented.
+- Restored Snapshot+Flush vs Draw equivalence assertion and the WEBLDFLAGS credential injection for the web build.
+
+## Packaging
+- New linux/amd64 AppImage artifact.
+- Web build continuously deployed at mario.baby.
+- Manpage and README updated for the new serve mode and features.
+
+
+
 ## v0.4.1 — 2026-08-29
 
 This release adds an SSH arcade mode, cuts terminal bandwidth roughly in half, makes the viewport follow terminal resizes live, and auto-deploys the web build to mario.baby.
