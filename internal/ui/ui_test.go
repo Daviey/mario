@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -271,6 +272,49 @@ func TestTitleLOpensBoard(t *testing.T) {
 	}
 }
 
+// The regression: after a daily run's game over, u.daily stays true; the
+// title-'l' path inlined the board-open logic without resetting it, so
+// the board shown at the title was the DAILY one (and the day stale).
+func TestTitleLAfterDailyRunShowsClassicBoard(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var mu sync.Mutex
+	var modes []bool
+	var ui *UI
+	ui = NewUI(nil, func() ([]board.Row, error) {
+		// Capture the mode the real default fetch would branch on.
+		mu.Lock()
+		modes = append(modes, ui.dailyMode())
+		mu.Unlock()
+		return []board.Row{{Name: "KIM", Score: 900}}, nil
+	})
+
+	g := gameOverGame(t)
+	g.Daily = true // the run was a daily challenge
+	if s := tickUntil(t, ui, g, 2); s == nil || s.Mode != render.UIAsk {
+		t.Fatalf("daily game over should ask, got %+v", s)
+	}
+	ui.FeedKeys([]byte("n")) // decline: done, back to UIOff
+	tickUntil(t, ui, g, 1)
+
+	// Restart: the player is back at the title and opens the board.
+	title := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ui.note([]byte("l"))
+	if s := tickUntil(t, ui, title, 1); s == nil || s.Mode != render.UIBoard || !s.Loading {
+		t.Fatalf("title l should open the classic board, got %+v", s)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(modes) > 0
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if modes[0] {
+		t.Fatalf("title board after a daily run fetched the daily board (modes=%v)", modes)
+	}
+}
+
 func TestFetchRetriesTransientError(t *testing.T) {
 	// One transient fetch failure must not read as OFFLINE: the board
 	// retries once (observed live — a fetch in a blue moon hangs to the
@@ -301,6 +345,66 @@ func TestFetchRetriesTransientError(t *testing.T) {
 	ui.mu.Unlock()
 	if status == "OFFLINE" {
 		t.Fatal("transient failure surfaced as OFFLINE")
+	}
+}
+
+// A status the server chose deliberately (400/429/PoW/RLS) fails
+// identically again: one call, no retry.
+func TestFetchDoesNotRetryHTTPStatus(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var calls atomic.Int32
+	ui := NewUI(nil, func() ([]board.Row, error) {
+		calls.Add(1)
+		return nil, &board.HTTPError{Method: "GET", Path: "/rest/v1/board_rows", Status: 400, StatusText: "400 Bad Request", Body: "nope"}
+	})
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ui.note([]byte("l"))
+	tickUntil(t, ui, g, 1)
+	waitFor(t, 2*time.Second, func() bool {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		return ui.status == "OFFLINE"
+	})
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fetch called %d times, want 1 (4xx is not retried)", n)
+	}
+}
+
+// If the board closed under the fetch (player hit q during the retry
+// window), the second attempt is pointless: it would land on a screen
+// that no longer exists. No second call.
+func TestFetchDoesNotRetryAfterBoardClosed(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var calls atomic.Int32
+	first := make(chan struct{})
+	release := make(chan struct{})
+	ui := NewUI(nil, func() ([]board.Row, error) {
+		if calls.Add(1) == 1 {
+			close(first)
+			<-release // hold the first call while the board closes
+			return nil, errors.New("edge hiccup")
+		}
+		return []board.Row{{Name: "KIM", Score: 900}}, nil
+	})
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ui.note([]byte("l"))
+	tickUntil(t, ui, g, 1) // board open, first fetch in flight
+	<-first
+	ui.FeedKeys([]byte("q"))
+	if s := tickUntil(t, ui, g, 1); s != nil {
+		t.Fatalf("board should be closed: %+v", s)
+	}
+	close(release) // first call fails transiently — now
+	waitFor(t, 2*time.Second, func() bool {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		return ui.status == "OFFLINE"
+	})
+	time.Sleep(50 * time.Millisecond) // a wrongful retry would land here
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fetch called %d times after close, want 1", n)
 	}
 }
 
