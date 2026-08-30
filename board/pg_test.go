@@ -112,3 +112,28 @@ func TestLiveDBPending(t *testing.T) {
 		t.Logf("pending row %s %s %d", r.ID, r.Name, r.Score)
 	}
 }
+
+// TestLiveDBLatest exercises the dump path behind `mario -dump-replays`
+// against the real database (read-only). LIVE=1 go test -run TestLiveDBLatest -v ./board
+func TestLiveDBLatest(t *testing.T) {
+	if os.Getenv("LIVE") == "" {
+		t.Skip("set LIVE=1 for live database tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c, err := DBFromEnv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	rows, err := c.Latest(ctx, 3)
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	for _, r := range rows {
+		if r.Replay == "" {
+			t.Errorf("row %s lacks replay data", r.ID)
+		}
+		t.Logf("latest row %s %s %d eng=%s surface=%s", r.ID, r.Name, r.Score, r.EngineVersion, r.Surface)
+	}
+}

@@ -126,6 +126,30 @@ func (c *DBClient) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 	return out, nil
 }
 
+// Latest returns the n most recent replay-backed rows, newest first,
+// verified or not — the operator dump behind `mario -dump-replays`.
+func (c *DBClient) Latest(ctx context.Context, n int) ([]PendingRow, error) {
+	rows, err := c.conn.Query(ctx, `SELECT id,name,score,level,mode,day,engine_version,replay,
+		surface,user_agent,term,colorterm,input_regime,viewport
+		FROM scores WHERE replay IS NOT NULL
+		ORDER BY created_at DESC LIMIT `+strconv.Itoa(n))
+	if err != nil {
+		return nil, fmt.Errorf("db latest: %w", err)
+	}
+	out := make([]PendingRow, 0, len(rows))
+	for _, r := range rows {
+		if len(r) != 14 {
+			return nil, fmt.Errorf("db latest: got %d columns, want 14", len(r))
+		}
+		p, err := pendingRowFromValues(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 // pendingRowFromValues converts one 14-column query result into a
 // PendingRow. NULL text columns become "" exactly like the PostgREST JSON
 // path (its nulls decode to the zero value).
