@@ -5,3 +5,4 @@ web/supabase.env
 /dist/
 .worktrees/
 result
+efi
