@@ -7,8 +7,7 @@ import "math"
 // (fg = upper pixel, bg = lower pixel), which is the finest full-color
 // grid a terminal can express.
 const (
-	Pix       = 6 // pixels per tile, both axes
-	ViewTiles = 9 // visible world height in tiles
+	Pix = 6 // pixels per tile, both axes
 )
 
 // Frame is a W×H grid of square pixels.
@@ -619,8 +618,9 @@ func drawCastleFlag(f *Frame, p *Palette, x0, y0 int, rise float64) {
 	f.Fill(mx+1, fy, 3, 3, p.FlagRed)
 }
 
-// drawCastle paints the goal castle: a 30×24 px keep (5×4 tiles) with
-// tower, crenellations, windows and an arched door.
+// drawCastle paints the goal castle: a 30×24 px keep (5×4 tiles — the
+// castleRect footprint) with tower, crenellations, windows and an
+// arched door.
 func drawCastle(f *Frame, p *Palette, x0, y0 int) {
 	half := Pix / 2
 	wall := func(x, y, w, h int) {

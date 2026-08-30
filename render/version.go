@@ -37,15 +37,15 @@ func versionCandidates(v string) []string {
 }
 
 // sanitizeArcade upper-cases s and strips every rune outside the pixel
-// font's charset (A-Z 0-9 space . - + / ! ?), so arbitrary tag names can
-// never reach a missing glyph.
+// font's charset (A-Z 0-9 space . - + / : ! ?), so arbitrary tag names
+// can never reach a missing glyph.
 func sanitizeArcade(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range strings.ToUpper(s) {
 		switch {
 		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
-			r == ' ', r == '.', r == '-', r == '+', r == '/', r == '!', r == '?':
+			r == ' ', r == '.', r == '-', r == '+', r == '/', r == ':', r == '!', r == '?':
 			b.WriteRune(r)
 		}
 	}

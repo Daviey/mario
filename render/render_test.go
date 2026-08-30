@@ -482,6 +482,26 @@ func TestScreenHelpers(t *testing.T) {
 	}
 }
 
+// TestTextMultibyteColumns: Text and TextStyled advance one column per
+// rune — a multibyte rune must not shift every later glyph one column
+// per byte (the status line once drew U+00B7, 2 bytes on the wire).
+func TestTextMultibyteColumns(t *testing.T) {
+	s := NewScreen(8, 2)
+	s.Text(0, 0, "a·b", testPal.White) // '·' encodes to 2 bytes
+	for i, want := range []rune{'a', '·', 'b'} {
+		if c := s.At(i, 0); c.Ch != want || c.Fg != testPal.White {
+			t.Errorf("Text cell %d = %q, want %q", i, c.Ch, want)
+		}
+	}
+	if c := s.At(3, 0); c.Ch != ' ' {
+		t.Errorf("cell past the 3 runes = %q, want blank", c.Ch)
+	}
+	s.TextStyled(0, 1, "a·b", testPal.White, testPal.HUDBG, true)
+	if s.At(2, 1).Ch != 'b' || s.At(3, 1).Ch != ' ' {
+		t.Errorf("TextStyled columns wrong: %q %q", s.At(2, 1).Ch, s.At(3, 1).Ch)
+	}
+}
+
 func TestFrameANSIHelper(t *testing.T) {
 	f := FrameANSI(newGame(t), testPal)
 	if !strings.HasPrefix(f, "\x1b[H") || !strings.Contains(f, "SCORE") {
@@ -588,5 +608,149 @@ func TestTrueColorTerm(t *testing.T) {
 		if got := TrueColorTerm(tc.term); got != tc.want {
 			t.Errorf("TrueColorTerm(%q) = %v, want %v", tc.term, got, tc.want)
 		}
+	}
+}
+
+// arcadeGlyph reports whether the 3×5 font can draw r (the px surfaces
+// rasterize the shared HUD/status content through it).
+func arcadeGlyph(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+		r == ' ', r == '.', r == '-', r == '+', r == '/', r == ':', r == '!', r == '?':
+		return true
+	}
+	return false
+}
+
+// TestHudStatusContentParity: the terminal HUD/status lines and the px
+// HUD/status bands must render the same builders — hudLadder and
+// statusLadder. The px path once lacked the CHEATS tag and the HURRY
+// flash and the native status once used '·', which the font cannot
+// draw; this pins one content source behind both surfaces.
+func TestHudStatusContentParity(t *testing.T) {
+	cheats, hurry, title := newGame(t), newGame(t), newGame(t)
+	cheats.Cheats = true
+	hurry.Hurry, hurry.HurryT, hurry.Tick = true, 100, 5 // flash phase
+	title.State = engine.StateTitle
+
+	for name, g := range map[string]*engine.Game{
+		"plain": newGame(t), "cheats": cheats, "hurry": hurry, "title": title,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Every HUD and status string must be drawable by the pixel
+			// font (case aside) — no '·', no underscore, no lowercase-only
+			// punctuation.
+			for _, variant := range hudLadder(g) {
+				for _, seg := range variant {
+					for _, r := range strings.ToUpper(seg.s) {
+						if !arcadeGlyph(r) {
+							t.Errorf("HUD segment %q: rune %q not in the font", seg.s, r)
+						}
+					}
+				}
+			}
+			for _, cand := range statusLadder(g) {
+				for _, r := range strings.ToUpper(cand) {
+					if !arcadeGlyph(r) {
+						t.Errorf("status rung %q: rune %q not in the font", cand, r)
+					}
+				}
+			}
+
+			// The rich HUD variant carries every field; cheats adds the
+			// red tag; TIME is the only flashing segment.
+			ladder := hudLadder(g)
+			if len(ladder) != 4 {
+				t.Fatalf("hudLadder has %d variants, want 4", len(ladder))
+			}
+			joined := func(segs []hudSeg) string {
+				parts := make([]string, len(segs))
+				for i, seg := range segs {
+					parts[i] = seg.s
+				}
+				return strings.Join(parts, "  ")
+			}
+			for _, want := range []string{"SCORE", "COINS", "WORLD", "TIME", "LIVES"} {
+				if !strings.Contains(joined(ladder[0]), want) {
+					t.Errorf("rich HUD %q missing %q", joined(ladder[0]), want)
+				}
+			}
+			var flashSegs, redSegs int
+			for _, seg := range ladder[0] {
+				switch seg.ink {
+				case hudFlash:
+					flashSegs++
+				case hudRed:
+					redSegs++
+				}
+			}
+			if flashSegs != 1 || !strings.Contains(joined(ladder[0]), "TIME") {
+				t.Error("exactly one flashing segment (TIME) expected")
+			}
+			if want := b2i(g.Cheats); redSegs != want {
+				t.Errorf("red CHEATS segments = %d, want %d", redSegs, want)
+			}
+			if g.State == engine.StatePlaying {
+				kdie := 0
+				for _, rung := range statusLadder(g)[:2] {
+					if strings.Contains(rung, "k die") {
+						kdie++
+					}
+				}
+				if kdie != 2 {
+					t.Error("first two control rungs must both carry 'k die'")
+				}
+			}
+
+			// Native surface: the HUD row is exactly the chosen variant,
+			// the status row exactly the chosen rung.
+			s := Render(g, testPal)
+			if want := " " + joined(hudPick(ladder, s.W-2)); !strings.HasPrefix(rowText(s, 0), want) {
+				t.Errorf("native HUD row %q does not match builder output %q", rowText(s, 0), want)
+			}
+			if want := statusText(s.W-2, g); want != "" {
+				if !strings.Contains(rowText(s, s.H-1), want) {
+					t.Errorf("native status row %q missing chosen rung %q", rowText(s, s.H-1), want)
+				}
+			}
+			// HURRY flash reaches the native TIME run.
+			if g == hurry {
+				i := strings.Index(rowText(s, 0), "TIME")
+				if i < 0 || s.At(i, 0).Fg != testPal.FlagRed {
+					t.Error("TIME not red during the hurry flash")
+				}
+			}
+
+			// Pixel surface: re-stamp the builders' chosen variants into a
+			// clean band and require the rendered bands to match exactly.
+			f := RenderPixels(g, testPal)
+			expHud := NewFrame(f.W, HudBandPx, testPal.HUDBG)
+			x := 2
+			for _, seg := range hudPickPx(ladder, f.W-4) {
+				drawTextPx(expHud, x, 1, seg.s, hudSegColor(seg, g, testPal), 1)
+				x += textWidthPx(seg.s, 1) + 8
+			}
+			for y := range HudBandPx {
+				for px := range f.W {
+					if f.At(px, y) != expHud.At(px, y) {
+						t.Fatalf("px HUD band at (%d,%d) = %+v, want %+v (builder mismatch)",
+							px, y, f.At(px, y), expHud.At(px, y))
+					}
+				}
+			}
+			expStatus := NewFrame(f.W, StatusBandPx, testPal.StatusBG)
+			if text := pickTextPx(statusLadder(g), f.W-2); text != "" {
+				drawCenterPx(expStatus, 1, text, testPal.TextDim, 1)
+			}
+			y0 := f.H - StatusBandPx
+			for y := range StatusBandPx {
+				for px := range f.W {
+					if f.At(px, y0+y) != expStatus.At(px, y) {
+						t.Fatalf("px status band at (%d,%d) = %+v, want %+v (builder mismatch)",
+							px, y0+y, f.At(px, y0+y), expStatus.At(px, y))
+					}
+				}
+			}
+		})
 	}
 }

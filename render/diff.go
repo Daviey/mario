@@ -1,8 +1,8 @@
 package render
 
 import (
-	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/Daviey/mario/engine"
@@ -91,7 +91,8 @@ func Diff(prev, next *Screen) string {
 // style state into the run. st is advanced to the state after the run in
 // every path — the terminal and the tracker must agree.
 func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from, to int) {
-	cursor := fmt.Sprintf("\x1b[%d;%dH", y+1, from+1)
+	var buf [16]byte
+	cursor := csiCursor(buf[:0], y+1, from+1)
 	tryBridge := false
 	lead := "" // positions the cursor at the bridge start (next-row case)
 	switch {
@@ -101,7 +102,7 @@ func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from,
 		return
 	case y == lastY && from > lastX:
 		gap := from - lastX
-		if cuf := fmt.Sprintf("\x1b[%dC", gap); len(cuf) < len(cursor) {
+		if cuf := "\x1b[" + strconv.Itoa(gap) + "C"; len(cuf) < len(cursor) {
 			cursor = cuf
 		}
 		tryBridge = gap <= bridgeMax
@@ -139,6 +140,18 @@ func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from,
 		b.WriteString(direct)
 		*st = dAfter
 	}
+}
+
+// csiCursor builds "\x1b[<row>;<col>H" into buf with hand-rolled itoa —
+// run addressing runs per dirty span, so Sprintf's reflection cost adds
+// up on busy frames.
+func csiCursor(buf []byte, row, col int) string {
+	buf = append(buf, "\x1b["...)
+	buf = strconv.AppendInt(buf, int64(row), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(col), 10)
+	buf = append(buf, 'H')
+	return string(buf)
 }
 
 // bridgeRun serializes the clean cells [from,to) on row y from a copy of

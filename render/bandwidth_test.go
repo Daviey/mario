@@ -39,6 +39,9 @@ func driveBandwidth(t *testing.T, viewW, viewH, ticks int, pal *Palette) int {
 // 60 Hz on a full-screen terminal viewport. The caps are generous guards
 // against encoding regressions (a change that doubles per-frame bytes fails
 // here long before anyone notices a laggy SSH link), not tight budgets.
+// Basic mode measures ~437 B/tick (cap tightened from 700 after sgrState
+// began comparing the emitted ANSI-index form — same-index color changes
+// no longer emit redundant SGR every frame).
 func TestStreamBandwidth(t *testing.T) {
 	const (
 		viewW = 33 // 198 columns on a ~200-col terminal
@@ -51,7 +54,7 @@ func TestStreamBandwidth(t *testing.T) {
 		cap  int // bytes per tick ceiling
 	}{
 		{"truecolor", NewPalette(true), 1500},
-		{"basic", NewPalette(false), 700},
+		{"basic", NewPalette(false), 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bytes := driveBandwidth(t, viewW, viewH, ticks, tc.pal)

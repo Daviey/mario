@@ -13,6 +13,7 @@ func TestSanitizeArcade(t *testing.T) {
 		{"DEV", "DEV"},
 		{"v2_beta", "V2BETA"},     // underscore has no glyph: dropped
 		{"v1 ~beta!", "V1 BETA!"}, // space kept, tilde dropped
+		{"v1:2", "V1:2"},          // colon has a glyph: kept
 		{"", ""},
 	}
 	for _, c := range cases {
