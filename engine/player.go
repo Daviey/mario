@@ -213,21 +213,6 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 			Kind:   MushLife,
 		})
 		g.emit("bump")
-		g.bumps[idx] = 8
-		// SMB rule: a small player gets a mushroom, a powered one the flower.
-		if p.Power == PowerSmall {
-			g.Mushrooms = append(g.Mushrooms, &Mushroom{
-				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-				Dir:    1,
-				Emerge: MushroomEmergeTicks,
-			})
-		} else {
-			g.FireFlowers = append(g.FireFlowers, &FireFlower{
-				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-				Emerge: FlowerEmergeTicks,
-			})
-		}
-		g.emit("bump")
 	case Brick:
 		if p.Power >= PowerSuper {
 			g.Level.Set(tx, ty, Empty)
