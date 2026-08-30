@@ -101,6 +101,71 @@ func TestCheckpointRespawn(t *testing.T) {
 	}
 }
 
+// TestRespawnNotLethalAtCheckpoint reproduces the 2026-08-30 live bug: an
+// enemy spawning exactly on the checkpoint column killed the player one
+// tick after the world card, draining every remaining life (1-1's guard
+// goomba sat on the auto-computed column). computeCheckpoint now avoids
+// threatened columns; clearSpawnThreats is the invariant for levels that
+// bypass the picker, so this test plants the goomba after parsing.
+func TestRespawnNotLethalAtCheckpoint(t *testing.T) {
+	l := buildLevel(t, 60)
+	cp := l.CheckpointX
+	l.GoombaSpawns = append(l.GoombaSpawns, Vec{cp, l.PlayerStart.Y + 1 - GoombaH})
+	g := newGame(t, l)
+	g.Player.Pos.X = cp + 1
+	g.Update(Input{})
+	if g.checkpoint < 0 {
+		t.Fatal("crossing the checkpoint did not arm it")
+	}
+	g.Update(Input{Suicide: true})
+	if g.State != StateDying {
+		t.Fatalf("state = %v, want dying", g.State)
+	}
+	lives := g.Lives
+	run(g, DyingTicks, Input{})
+	g.Update(Input{AnyKey: true}) // skip the card
+	if g.State != StatePlaying {
+		t.Fatalf("state = %v, want playing after respawn", g.State)
+	}
+	run(g, 30, Input{})
+	if g.State != StatePlaying || g.Lives != lives {
+		t.Fatalf("respawn is lethal: state = %v lives = %d, want playing with %d",
+			g.State, g.Lives, lives)
+	}
+	for _, e := range g.Enemies {
+		if e.Pos.X < cp+SmallW && e.Pos.X+e.W > cp {
+			t.Fatalf("enemy at %.2f overlaps the respawn column %.0f", e.Pos.X, cp)
+		}
+	}
+}
+
+// TestLevelStartClearsSpawnOverlap: the same invariant at the level start —
+// a spawn marker on the player's start cell must not be a first-tick kill.
+func TestLevelStartClearsSpawnOverlap(t *testing.T) {
+	l := buildLevel(t, 60)
+	l.GoombaSpawns = append(l.GoombaSpawns, Vec{l.PlayerStart.X, l.PlayerStart.Y + 1 - GoombaH})
+	g := newGame(t, l)
+	run(g, 10, Input{Right: true})
+	if g.State != StatePlaying {
+		t.Fatalf("state = %v, want playing: level start is lethal", g.State)
+	}
+}
+
+// TestCheckpointAvoidsSpawnThreats: no shipped or generated level may
+// auto-pick a checkpoint column that a respawn walks into — enemies reset
+// to their spawn points on reload, and fire bars sweep their whole disc.
+func TestCheckpointAvoidsSpawnThreats(t *testing.T) {
+	levels := append([]*Level{}, DefaultLevels()...)
+	for d := 1; d <= 7; d++ {
+		levels = append(levels, DailyLevelFor(2026, 8, d))
+	}
+	for _, l := range levels {
+		if l.spawnThreatNear(l.CheckpointX, l.Height-2) {
+			t.Errorf("%s: checkpoint at %.0f overlaps a spawned threat", l.Name, l.CheckpointX)
+		}
+	}
+}
+
 func TestPlantMercyAndDamage(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) {
 		b.Pipe(20, 2)

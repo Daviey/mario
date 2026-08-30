@@ -1,6 +1,9 @@
 package engine
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Theme is a level's visual world: palette and scenery selection.
 type Theme uint8
@@ -193,8 +196,13 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 }
 
 // computeCheckpoint picks the mid-level respawn column: the first column
-// at or past the middle with two rows of ground under it and standing room
-// above. Falls back to the player start.
+// at or past the middle with two rows of ground under it, standing room
+// above, and no spawned threat at the column. Enemies reset to their
+// spawn points when the level reloads, so a spawn overlapping the
+// respawn footprint killed the player on the first playing tick — 1-1's
+// guard goomba sat exactly on the auto-picked column and every life
+// after a death past the checkpoint drained in a death loop (live bug,
+// 2026-08-30). Falls back to the player start.
 func (l *Level) computeCheckpoint() {
 	ground := l.Height - 2
 	for x := l.Width / 2; x < l.Width-8; x++ {
@@ -204,8 +212,62 @@ func (l *Level) computeCheckpoint() {
 		if l.At(x, ground-1).Solid() || l.At(x, ground-2).Solid() {
 			continue // no standing room (pipe, blocks, stairs)
 		}
+		if l.spawnThreatNear(float64(x), ground) {
+			continue // an enemy spawn or fire bar would kill on arrival
+		}
 		l.CheckpointX = float64(x)
 		return
 	}
 	l.CheckpointX = l.PlayerStart.X
+}
+
+// spawnThreatNear reports whether a player standing with its feet on
+// (colX, ground) would overlap — or sit inside a fire bar's sweep — a
+// threat as it spawns. Enemy spawns reset on every level reload, so this
+// is exactly the world a respawning player walks into. Plants count too:
+// their rise mercy keeps a hidden plant down, but a pipe mouth under the
+// respawn column is still a trap the moment the player steps off it.
+func (l *Level) spawnThreatNear(colX float64, ground int) bool {
+	for _, s := range l.GoombaSpawns {
+		if math.Abs(s.X-colX) < SmallW+GoombaW {
+			return true
+		}
+	}
+	for _, s := range l.KoopaSpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	for _, s := range l.ParaSpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	for _, s := range l.PlantSpawns {
+		if math.Abs(s.X+PlantW/2-(colX+SmallW/2)) < (SmallW+PlantW)/2+0.25 {
+			return true
+		}
+	}
+	// A fire bar sweeps a full disc of (FireBarLen-1) ball gaps plus one
+	// ball radius around its hub.
+	reach := float64(FireBarLen-1)*FireBarBallGap + FireBarBallSize/2
+	x0, x1 := colX, colX+SmallW
+	y0, y1 := float64(ground)-SmallH, float64(ground)
+	for _, fb := range l.BarSpawns {
+		dx, dy := 0.0, 0.0
+		if fb.X < x0 {
+			dx = x0 - fb.X
+		} else if fb.X > x1 {
+			dx = fb.X - x1
+		}
+		if fb.Y < y0 {
+			dy = y0 - fb.Y
+		} else if fb.Y > y1 {
+			dy = fb.Y - y1
+		}
+		if dx*dx+dy*dy < reach*reach {
+			return true
+		}
+	}
+	return false
 }

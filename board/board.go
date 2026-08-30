@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.08.30a"
+const EngineVersion = "2026.08.30b"
 
 // Client is a configured PostgREST endpoint.
 type Client struct {

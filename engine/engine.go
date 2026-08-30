@@ -305,8 +305,25 @@ func (g *Game) respawn() {
 		g.checkpoint = cp
 		g.Player.Pos.X = cp
 	}
+	g.clearSpawnThreats()
 	g.State = StateWorldCard
 	g.stateTimer = WorldCardTicks
+}
+
+// clearSpawnThreats removes enemies overlapping the player's footprint.
+// A level reload puts every enemy back at its spawn point, so a spawn
+// inside the checkpoint (or level-start) footprint killed the player on
+// the first playing tick — 1-1's guard goomba sat exactly on the
+// auto-computed checkpoint, draining every remaining life in a death
+// loop (live bug, 2026-08-30). computeCheckpoint avoids threatened
+// columns; this is the belt-and-braces invariant for hand-authored and
+// generated levels whose checkpoints bypass that picker.
+func (g *Game) clearSpawnThreats() {
+	p := g.Player
+	g.Enemies = filter(g.Enemies, func(e *Enemy) bool {
+		return !(e.Pos.X < p.Pos.X+p.W && e.Pos.X+e.W > p.Pos.X &&
+			e.Pos.Y < p.Pos.Y+p.H && e.Pos.Y+e.H > p.Pos.Y)
+	})
 }
 
 func (g *Game) updatePlaying(in Input) {
@@ -585,6 +602,7 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	g.Player = newPlayer(lvl.PlayerStart, power)
 	g.Paused = false
 	g.stateTimer = 0
+	g.clearSpawnThreats()
 }
 
 func (g *Game) cleanup() {
