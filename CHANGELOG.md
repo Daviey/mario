@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.7.0 — 2026-08-30
+
+An internals-and-polish release: buffer recycling and render perf, a corrected 2-4 checkpoint with an engine version bump, EFI input fixes, and a broad internal cleanup across sshd, board, and input.
+
+## Highlights
+- render: per-tick buffers (screens, world raster, RGB) now recycle — steady-state rendering is allocation-free, with new pipeline benchmarks.
+- Engine version bumped to 2026.08.30c: 2-4's checkpoint moved after fire-bar reach was corrected — leaderboard verification changes with it.
+- EFI input fixed: evdev 24-byte stride handling and press-time shift echo.
+
+## Added
+- Restart hint after score submission; web build can quit back to the title.
+- Demo title-screen cloud bands; victory flag mast now meets the castle roof.
+- New tests across board, sshd (admission/auth/transport/wire), evdev, pgwire, input, router, and render.
+- Benchmarks for the render pipeline in `bench_test.go`.
+
+## Changed
+- `render.ColorMode` type for depth constants; `BlinkVisible` exported with godoc.
+- Palette caches keyed by content; scratch diff builder; `hudSegs` memoization; `Fill` fast path.
+- Input mapper restructured into a `keyState` struct; router naming and status constants cleaned up.
+- sshd: dead code removed, `serverKexStep` extracted, sequence-number/lock invariants pinned.
+- Shared terminal prologue/epilogue constants and pointer writers in `cmd`; `resolveMoshBin`, `viewFor` helpers.
+- Deduplicated `queryPending`/`newReplayGame`; arming contract documented; `clampMeta` rune fix.
+- Packaging tools share a `newc` writer with deterministic mkcpio inodes and a symlink policy.
+
+## Fixed
+- Fire-bar checkpoint reach corrected; the 2-4 checkpoint moved accordingly.
+- EFI evdev misread 24-byte stride; press-time shift echo corrected.
+- Accidentally-committed EFI build artifact removed from the repo.
+
+## Packaging
+- No packaging-format changes; builds unchanged.
+
+## Note for players
+- Engine version bumped to 2026.08.30c: older leaderboard replays may be re-verified or become invalid, and pending scores recorded on the previous version will be dropped at the next verification pass.
+
+
 ## v0.6.0 — 2026-08-30
 
 Maintenance release focused on respawn safety and replay diagnostics for the leaderboard verifier.
