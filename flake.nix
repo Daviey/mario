@@ -40,6 +40,15 @@
       };
     in
     {
+      # versioned.<system>.<stamp> — the game package stamped with an
+      # arbitrary render.Version string. Callers with a real git repo
+      # (deploy tooling) pass `git describe --tags` here so endpoints
+      # show the release identity instead of the sandbox's bare rev.
+      versioned = nixpkgs.lib.genAttrs systems (system: rec {
+        mario = mkMario { inherit system; };
+        stamp = s: mkMario { inherit system; versionStamp = s; };
+      });
+
       packages = forAllSystems (pkgs@{ system, ... }:
         let
           # The single-file UEFI bootable and its pieces (x86_64 only).
