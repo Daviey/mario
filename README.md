@@ -198,3 +198,10 @@ size sweeps, and offline fakes for the leaderboard backend.
 ## License
 
 [MIT](LICENSE)
+
+## Trademark
+
+This is a non-commercial fan project, not affiliated with or endorsed by Nintendo.
+Super Mario Bros. and Mario are trademarks of Nintendo. Everything in this repository
+was written from scratch for it; no Nintendo code, ROMs or data files are included.
+If you are a rights holder with concerns, please open an issue.
