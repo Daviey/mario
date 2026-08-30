@@ -2,6 +2,7 @@ package mario
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/replay"
 )
 
 func TestRunDemo(t *testing.T) {
@@ -318,5 +320,75 @@ func TestSoundHookDeliversCoinEvent(t *testing.T) {
 	}
 	if !slices.Contains(got, "coin") {
 		t.Fatalf("sound hook never saw a coin event; events = %v", got)
+	}
+}
+
+func recordedTicks(t *testing.T, a *App) int {
+	t.Helper()
+	var wire struct {
+		Ticks int `json:"ticks"`
+	}
+	if err := json.Unmarshal([]byte(a.rec.JSON()), &wire); err != nil {
+		t.Fatalf("recording JSON: %v", err)
+	}
+	return wire.Ticks
+}
+
+func TestRecorderSurvivesDeaths(t *testing.T) {
+	// Regression (live bug, found 2026-08-30): prevState was assigned
+	// AFTER Update, so when the recorder-arming switch examined the
+	// first card tick of a death respawn, prevState had already become
+	// StateWorldCard and the Dying/ScoreTick continuation case never
+	// matched. Every death called rec.Start(), wiping the recording
+	// down to the final life's segment; the replay verifier then
+	// deleted the submission because the fragment replayed to a
+	// different (smaller) game than the player actually played. A
+	// recording must span the WHOLE run — deaths included — and must
+	// reproduce it when replayed.
+	a := New(nil)
+	a.Feed([]byte("\r")) // AnyKey: title → world card
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("never reached playing: %v", a.Game.State)
+	}
+	// Play long enough that the pre-death segment has substance.
+	a.Feed([]byte("d")) // hold right (legacy byte → inferred hold)
+	for range 240 {
+		a.Step()
+	}
+	mid := recordedTicks(t, a)
+	if mid == 0 {
+		t.Fatal("run should be recording before the first death")
+	}
+	// Die repeatedly (natural deaths welcome) until the run is over.
+	for i := 0; a.Game.State != engine.StateGameOver && i < 4000; i++ {
+		if a.Game.State == engine.StatePlaying && i%60 == 0 {
+			a.Feed([]byte("k"))
+		}
+		a.Step()
+	}
+	if a.Game.State != engine.StateGameOver {
+		t.Fatalf("never game over: %v", a.Game.State)
+	}
+	final := recordedTicks(t, a)
+	if final <= mid {
+		t.Fatalf("recording restarted on death: mid=%d final=%d — a death-respawn card must continue the same recording", mid, final)
+	}
+	if !a.rec.Shippable() {
+		t.Fatal("multi-death recording must stay shippable")
+	}
+	// The recording must replay to the run the player actually played.
+	res, err := replay.Run(a.Game.Levels, "classic", a.rec.JSON())
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if res.Score != a.Game.Score || res.Level != a.Game.LevelIndex()+1 || res.State != a.Game.State {
+		t.Fatalf("replay mismatch: replay scored=%d level=%d state=%s, live scored=%d level=%d state=%s",
+			res.Score, res.Level, res.State, a.Game.Score, a.Game.LevelIndex()+1, a.Game.State)
 	}
 }
