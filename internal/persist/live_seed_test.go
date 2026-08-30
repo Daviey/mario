@@ -1,8 +1,12 @@
-package persist
+package persist_test
 
 // Seeds one real leaderboard row so the in-game board has content to
 // display. Skipped unless LIVE=1 (write path — the row is named SEEDCHK,
 // delete it from the scores table when done).
+//
+// External test package: board imports persist (the NameCharSet source
+// of truth lives there), so an internal persist test importing board
+// would be an import cycle.
 import (
 	"context"
 	"os"
@@ -11,6 +15,7 @@ import (
 
 	"github.com/Daviey/mario/board"
 	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/internal/persist"
 	"github.com/Daviey/mario/replay"
 )
 
@@ -25,7 +30,7 @@ func TestLiveSeedOneRow(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	pc, _ := LoadPlayer()
+	pc, _ := persist.LoadPlayer()
 	levels := engine.DefaultLevels()
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
 	var rec replay.Recorder

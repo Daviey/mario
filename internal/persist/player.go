@@ -14,7 +14,14 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
+
+// NameCharSet is the player-name charset: the single Go-side source of
+// truth for what a leaderboard display name may contain (exactly what
+// the 3×5 pixel font can draw). The DB CHECK mirrors it in SQL; ui's
+// name entry and board.SanitizeDisplayName consume this const.
+const NameCharSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-"
 
 type PlayerConfig struct {
 	DeviceID string `json:"device_id"`
@@ -103,10 +110,7 @@ func SanitizeName(s string) (string, bool) {
 		return "", false
 	}
 	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == ' ' || r == '-' || r == '.':
-		default:
+		if r >= utf8.RuneSelf || !strings.ContainsRune(NameCharSet, r) {
 			return "", false
 		}
 	}
