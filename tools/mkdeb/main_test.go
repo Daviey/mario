@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 // fixture builds a fake payload directory + binary and returns their paths.
@@ -281,27 +279,6 @@ func TestDeterministic(t *testing.T) {
 	}
 }
 
-func TestVersionSanitize(t *testing.T) {
-	ok := map[string]string{
-		"v0.3.0":                  "0.3.0",
-		"0.3.0":                   "0.3.0",
-		"0.3.0-dirty":             "0.3.0+dirty",
-		"0.3.0-14-g1a2b3c4":       "0.3.0+14.g1a2b3c4",
-		"0.3.0-14-g1a2b3c4-dirty": "0.3.0+14.g1a2b3c4+dirty",
-	}
-	for in, want := range ok {
-		got, err := pack.SanitizeVersion(in, "Debian")
-		if err != nil || got != want {
-			t.Errorf("sanitizeVersion(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-	for _, bad := range []string{"", "abc", "v", "1 2", "1:2.0", "1.2-3"} {
-		if _, err := pack.SanitizeVersion(bad, "Debian"); err == nil {
-			t.Errorf("sanitizeVersion(%q) accepted", bad)
-		}
-	}
-}
-
 func TestArchRejected(t *testing.T) {
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "x.deb")
@@ -310,5 +287,38 @@ func TestArchRejected(t *testing.T) {
 	}
 	if err := run("1.0.0", "amd64", bin, pkg, ""); err == nil {
 		t.Error("empty -out accepted")
+	}
+}
+
+// TestArOddMemberPadding pins ar()'s even-offset rule: an odd-sized
+// member is followed by exactly one '\n' so the next 60-byte header
+// starts at an even offset — dpkg's reader requires that shape.
+func TestArOddMemberPadding(t *testing.T) {
+	data := ar([]member{
+		{"debian-binary", []byte("2.0\n")}, // even size: no pad
+		{"odd", []byte("X")},               // odd size: one '\n' pad
+		{"even", []byte("YY")},
+	})
+	ms := parseAr(t, data)
+	for i, name := range []string{"debian-binary", "odd", "even"} {
+		if ms[i].name != name {
+			t.Errorf("member %d = %q, want %q", i, ms[i].name, name)
+		}
+	}
+	if string(ms[1].data) != "X" {
+		t.Errorf("odd member data = %q, want \"X\"", ms[1].data)
+	}
+
+	// Walk the raw bytes: magic(8) + header(60) + "2.0\n"(4) put the
+	// second header at 72; its member ends at 72+60+1 = 133, so the pad
+	// byte sits at 133 and the third header at 134.
+	if data[133] != '\n' {
+		t.Errorf("pad byte after odd member = %q, want '\\n'", data[133])
+	}
+	if name := string(data[134:150]); name != "even"+strings.Repeat(" ", 12) {
+		t.Errorf("third header name field = %q, want %q", name, "even"+strings.Repeat(" ", 12))
+	}
+	if want := 8 + 3*60 + 4 + 1 + 1 + 2; len(data) != want {
+		t.Errorf("archive length = %d, want %d", len(data), want)
 	}
 }

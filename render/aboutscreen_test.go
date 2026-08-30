@@ -15,7 +15,7 @@ func TestAboutScreenText(t *testing.T) {
 	s := Render(g, testPal, ui)
 	var rows []string
 	for y := 1; y < s.H-1; y++ {
-		rows = append(rows, s.RowString(y))
+		rows = append(rows, s.rowString(y))
 	}
 	all := strings.Join(rows, "\n")
 	for _, want := range []string{

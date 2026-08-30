@@ -106,8 +106,8 @@ func (g *Game) updatePlayer(in Input) {
 	if landed {
 		fall := p.Vel.Y
 		p.Vel.Y = 0
-		p.stompChain = 0 // the stomp combo ends when feet touch ground
-		if fall > 0.12 { // hard landing: squash pose and twin dust puffs
+		p.stompChain = 0         // the stomp combo ends when feet touch ground
+		if fall > HardLandFall { // hard landing: squash pose and twin dust puffs
 			p.SquashT = 6
 			g.spawnDustPuff(p.Pos.X+p.W/2-0.2, p.Pos.Y+p.H)
 			g.spawnDustPuff(p.Pos.X+p.W/2+0.2, p.Pos.Y+p.H)
@@ -141,7 +141,7 @@ func (g *Game) bumpHidden(p *Player) {
 		if t != HiddenCoin && t != HiddenLife {
 			continue
 		}
-		if horizontalOverlap(p.Pos.X, p.W, float64(tx)) < 0.15 {
+		if horizontalOverlap(p.Pos.X, p.W, float64(tx)) < HiddenGrazeOverlap {
 			continue
 		}
 		p.Pos.Y = float64(headRow) + 1
@@ -152,66 +152,35 @@ func (g *Game) bumpHidden(p *Player) {
 }
 
 // hitBlock resolves a player head-bump against the tile at (tx, ty).
+// Every bumpable block except brick is spent to Used here; brick breaks
+// for a super player and merely jolts for a small one.
 func (g *Game) hitBlock(tx, ty int, p *Player) {
 	idx := ty*g.Level.Width + tx
-	switch g.Level.At(tx, ty) {
-	case Question:
+	switch t := g.Level.At(tx, ty); t {
+	case Question, QuestionMush, QuestionFire, QuestionStar, HiddenCoin, HiddenLife:
 		g.Level.Set(tx, ty, Used)
 		g.bumps[idx] = 8
-		g.addCoin()
-		g.spawnCoinPop(float64(tx)+0.35, float64(ty))
-		g.emit("bump")
-	case QuestionMush:
-		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
-		g.Mushrooms = append(g.Mushrooms, &Mushroom{
-			Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-			Dir:    1,
-			Emerge: MushroomEmergeTicks,
-		})
-		g.emit("bump")
-	case QuestionFire:
-		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
-		// SMB rule: a small player gets a mushroom, a powered one the flower.
-		if p.Power == PowerSmall {
-			g.Mushrooms = append(g.Mushrooms, &Mushroom{
-				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-				Dir:    1,
-				Emerge: MushroomEmergeTicks,
-			})
-		} else {
-			g.FireFlowers = append(g.FireFlowers, &FireFlower{
-				Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-				Emerge: FlowerEmergeTicks,
-			})
+		switch t {
+		case Question, HiddenCoin:
+			g.addCoin()
+			g.spawnCoinPop(float64(tx)+0.35, float64(ty))
+		case QuestionFire:
+			// SMB rule: a small player gets a mushroom, a powered one the flower.
+			if p.Power == PowerSmall {
+				g.spawnBlockMushroom(tx, ty, MushSuper)
+			} else {
+				g.FireFlowers = append(g.FireFlowers, &FireFlower{
+					Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+					Emerge: FlowerEmergeTicks,
+				})
+			}
+		case QuestionMush:
+			g.spawnBlockMushroom(tx, ty, MushSuper)
+		case QuestionStar:
+			g.spawnBlockMushroom(tx, ty, MushStar)
+		case HiddenLife:
+			g.spawnBlockMushroom(tx, ty, MushLife)
 		}
-		g.emit("bump")
-	case QuestionStar:
-		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
-		g.Mushrooms = append(g.Mushrooms, &Mushroom{
-			Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-			Dir:    1,
-			Emerge: MushroomEmergeTicks,
-			Kind:   MushStar,
-		})
-		g.emit("bump")
-	case HiddenCoin:
-		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
-		g.addCoin()
-		g.spawnCoinPop(float64(tx)+0.35, float64(ty))
-		g.emit("bump")
-	case HiddenLife:
-		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
-		g.Mushrooms = append(g.Mushrooms, &Mushroom{
-			Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
-			Dir:    1,
-			Emerge: MushroomEmergeTicks,
-			Kind:   MushLife,
-		})
 		g.emit("bump")
 	case Brick:
 		if p.Power >= PowerSuper {
@@ -231,12 +200,23 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 		if e.Gone || e.State == EnemySquashed || e.State == EnemyFlipped {
 			continue
 		}
-		if math.Abs((e.Pos.Y+e.H)-float64(ty)) < 0.2 && horizontalOverlap(e.Pos.X, e.W, float64(tx)) > 0 {
+		if math.Abs((e.Pos.Y+e.H)-float64(ty)) < BumpFlipTol && horizontalOverlap(e.Pos.X, e.W, float64(tx)) > 0 {
 			g.flipEnemy(e)
 			g.Score += StompScore
 			g.spawnScorePop(e.Pos.X, e.Pos.Y, StompScore, false)
 		}
 	}
+}
+
+// spawnBlockMushroom spawns a block power-up mushroom emerging from the
+// top of (tx, ty); it walks right once fully emerged.
+func (g *Game) spawnBlockMushroom(tx, ty int, kind MushroomKind) {
+	g.Mushrooms = append(g.Mushrooms, &Mushroom{
+		Pos:    Vec{float64(tx) + 0.05, float64(ty) - 0.05},
+		Dir:    1,
+		Emerge: MushroomEmergeTicks,
+		Kind:   kind,
+	})
 }
 
 // hurtPlayer applies enemy contact damage: fire and super shrink to small,

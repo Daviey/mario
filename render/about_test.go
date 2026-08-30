@@ -121,7 +121,7 @@ func TestStatusAboutBannerOnTitle(t *testing.T) {
 	// Full render: the bottom screen row carries the disclaimer at the
 	// title, and the controls once the game is running.
 	scr := Render(g, testPal)
-	row := strings.TrimSpace(scr.RowString(scr.H - 1))
+	row := strings.TrimSpace(scr.rowString(scr.H - 1))
 	if !strings.Contains(row, "unofficial fan game") {
 		t.Errorf("title bottom row = %q; want about banner", row)
 	}

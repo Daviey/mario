@@ -8,6 +8,8 @@ import (
 // Theme is a level's visual world: palette and scenery selection.
 type Theme uint8
 
+// Level themes, weakest flavour first; the renderer picks palettes and
+// scenery per theme.
 const (
 	ThemeOverworld Theme = iota
 	ThemeUnderground
@@ -18,6 +20,8 @@ const (
 // Tile is a single grid cell of a level.
 type Tile uint8
 
+// Level tiles. Empty is the zero value so a fresh grid is open air;
+// Solid carries the collision subset (see Tile.Solid).
 const (
 	Empty Tile = iota
 	Ground
@@ -169,7 +173,7 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 			case 'c':
 				l.CoinSpawns = append(l.CoinSpawns, Vec{float64(x) + 0.2, float64(y) + 0.2})
 			case 'V': // air cell above a pipe's left column
-				l.PlantSpawns = append(l.PlantSpawns, Vec{float64(x) + 0.65, float64(y) + 1})
+				l.PlantSpawns = append(l.PlantSpawns, Vec{float64(x) + PlantCenterOffset, float64(y) + 1})
 			case 'F', 'T':
 				l.Tiles[y*w+x] = tileChars[ch]
 				if l.FlagX < 0 || x < l.FlagX {
@@ -204,6 +208,8 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 // after a death past the checkpoint drained in a death loop (live bug,
 // 2026-08-30). Falls back to the player start.
 func (l *Level) computeCheckpoint() {
+	// The two ground rows every level stands on sit at the bottom, so
+	// Height-2 is the ground surface a respawn column must have.
 	ground := l.Height - 2
 	for x := l.Width / 2; x < l.Width-8; x++ {
 		if !l.At(x, ground).Solid() || !l.At(x, ground+1).Solid() {
@@ -248,9 +254,12 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 			return true
 		}
 	}
-	// A fire bar sweeps a full disc of (FireBarLen-1) ball gaps plus one
-	// ball radius around its hub.
-	reach := float64(FireBarLen-1)*FireBarBallGap + FireBarBallSize/2
+	// A fire bar sweeps a full disc around its hub: BallPos puts the
+	// outermost ball's centre FireBarHubClear + FireBarLen*FireBarBallGap
+	// tiles out, and its collision box adds half a ball beyond that
+	// (entity.go). The reach must mirror that law exactly — counting only
+	// FireBarLen-1 gaps left the guard a tile short of the sweep.
+	reach := FireBarHubClear + float64(FireBarLen)*FireBarBallGap + FireBarBallSize/2
 	x0, x1 := colX, colX+SmallW
 	y0, y1 := float64(ground)-SmallH, float64(ground)
 	for _, fb := range l.BarSpawns {

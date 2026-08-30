@@ -41,11 +41,15 @@ func (f *Frame) At(x, y int) Color {
 	return f.px[y*f.W+x]
 }
 
-// Fill paints a rectangle.
+// Fill paints a rectangle, clipped to the frame in one pass — the tile
+// and sprite painters stamp thousands of small rects per frame, and the
+// old per-pixel Set re-checked the bounds for every pixel.
 func (f *Frame) Fill(x, y, w, h int, c Color) {
-	for ty := y; ty < y+h; ty++ {
-		for tx := x; tx < x+w; tx++ {
-			f.Set(tx, ty, c)
+	x1, y1 := min(x+w, f.W), min(y+h, f.H)
+	for ty := max(y, 0); ty < y1; ty++ {
+		base := ty * f.W
+		for tx := max(x, 0); tx < x1; tx++ {
+			f.px[base+tx] = c
 		}
 	}
 }
@@ -54,7 +58,6 @@ func (f *Frame) Fill(x, y, w, h int, c Color) {
 // are transparent. flip mirrors horizontally (for left-facing entities);
 // scale multiplies the pixel size (for title art).
 func (f *Frame) DrawSprite(art []string, cols map[rune]Color, x, y int, flip bool, scale int) {
-
 	w := sprW(art)
 	for row, line := range art {
 		for col, r := range line {
@@ -68,6 +71,10 @@ func (f *Frame) DrawSprite(art []string, cols map[rune]Color, x, y int, flip boo
 			sx := col
 			if flip {
 				sx = w - 1 - col
+			}
+			if scale == 1 { // every entity sprite: one clipped Set, no rect math
+				f.Set(x+sx, y+row, c)
+				continue
 			}
 			f.Fill(x+sx*scale, y+row*scale, scale, scale, c)
 		}
@@ -532,6 +539,9 @@ func drawQuestion(f *Frame, p *Palette, x, y int, bright bool) {
 	f.Set(x+3, y+3, m)
 	f.Fill(x+2, y+5, 2, 1, m) // dot on orange, separated by the gap row
 }
+
+// drawUsed paints a spent ? block: dull brown with a dark border seam
+// and four inner rivets.
 func drawUsed(f *Frame, p *Palette, x, y int) {
 	f.Fill(x, y, Pix, Pix, p.UsedBG)
 	f.Fill(x, y, Pix, 1, p.Dark)

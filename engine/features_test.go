@@ -412,7 +412,7 @@ func TestDailyLevelsSolvableShape(t *testing.T) {
 		}
 		// Every plant sits on a pipe mouth.
 		for _, p := range l.PlantSpawns {
-			if l.At(int(math.Round(p.X-0.65)), int(p.Y)) != Pipe {
+			if l.At(int(math.Round(p.X-PlantCenterOffset)), int(p.Y)) != Pipe {
 				t.Fatalf("seed %d: plant at %v not on a pipe", seed, p)
 			}
 		}
@@ -451,5 +451,67 @@ func TestAttractDemoRoundTrip(t *testing.T) {
 	}
 	if g.Lives != StartLives {
 		t.Errorf("lives %d after demo, want reset", g.Lives)
+	}
+}
+
+func TestFireballExpiresAfterLife(t *testing.T) {
+	// A fireball that hits nothing sputters out on its own after
+	// FireballLife ticks of bouncing; the wide flat level keeps walls
+	// and enemies out of its path so only the clock can kill it.
+	g := newGame(t, buildLevel(t, 200))
+	g.Player.Power = PowerFire
+	g.Player.Pos = Vec{30, 12}
+	g.throwFireball()
+	fb := g.Fireballs[0]
+	for range FireballLife - 1 {
+		g.Update(Input{})
+		if fb.Gone {
+			t.Fatalf("fireball sputtered early (life=%d)", fb.Life)
+		}
+	}
+	g.Update(Input{}) // the FireballLife-th tick
+	if !fb.Gone {
+		t.Fatalf("fireball outlived FireballLife (life=%d)", fb.Life)
+	}
+}
+
+func TestDailyUndergroundHasBrickCeiling(t *testing.T) {
+	// The underground variant is chosen by the seed's first roll; sweep
+	// enough seeds to hit it at least once, then hold it to the same
+	// solid-ceiling contract as the hand-built 1-2.
+	found := 0
+	for seed := range 300 {
+		l := DailyLevel(uint64(50_000 + seed))
+		if l.Theme != ThemeUnderground {
+			continue
+		}
+		found++
+		for x := range l.Width {
+			if l.At(x, 0) != Brick {
+				t.Fatalf("seed %d: underground ceiling gap at x=%d", seed, x)
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("seed sweep found no underground daily; test is vacuous")
+	}
+}
+
+// TestCheckpointFireBarGuardCoversFullSweep pins the audit fix in
+// spawnThreatNear: the threat disc must reach the outermost ball's far
+// edge (FireBarHubClear + FireBarLen*FireBarBallGap + half a ball =
+// 3.975 tiles). The hub sits on the respawn column, so the distance is
+// purely vertical: a hub at row 8 is 3.5 tiles above the standing
+// player — inside the sweep, though the old (FireBarLen-1)-gap formula
+// (reach 2.975) cleared it. A hub at row 7 is 4.5 tiles up: outside.
+func TestCheckpointFireBarGuardCoversFullSweep(t *testing.T) {
+	lvl := func(row int) *Level {
+		return buildLevel(t, 60, func(b *Builder) { b.Set(20, row, 'h') })
+	}
+	if !lvl(8).spawnThreatNear(20, GroundTop) {
+		t.Error("hub at row 8: column 20 sits inside the fire-bar sweep but was cleared")
+	}
+	if lvl(7).spawnThreatNear(20, GroundTop) {
+		t.Error("hub at row 7: column 20 is outside the sweep (4.5 > 3.975) but was flagged")
 	}
 }

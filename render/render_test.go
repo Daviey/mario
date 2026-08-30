@@ -2,6 +2,7 @@ package render
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -328,7 +329,7 @@ func TestDecorationsDrawn(t *testing.T) {
 	}
 	if !white {
 		for tx := 0; tx < g.ViewW; tx++ {
-			if row, _, ok := CloudAt(tx); ok && row >= 6 && row <= 10 {
+			if row, ok := CloudAt(tx); ok && row >= 6 && row <= 10 {
 				t.Fatalf("cloud at tx=%d row=%d should be visible", tx, row)
 			}
 		}
@@ -433,7 +434,7 @@ func TestColorModeSequences(t *testing.T) {
 func TestColorDepthFor(t *testing.T) {
 	for _, tc := range []struct {
 		term, colorterm string
-		want            int
+		want            ColorMode
 	}{
 		{"xterm-256color", "", Colors256},
 		{"tmux-256color", "", Colors256},
@@ -442,6 +443,10 @@ func TestColorDepthFor(t *testing.T) {
 		{"xterm-kitty", "", Colors24},
 		{"xterm-256color", "truecolor", Colors24},
 		{"xterm-256color", "24bit", Colors24},
+		{"xterm-256color", "256color", Colors256}, // not a truecolor hint
+		{"xterm", "yes", Colors24},
+		{"xterm", "Truecolor", Colors24}, // hint match is case-insensitive
+		{"xterm", "garbage", Colors16},   // unknown hint falls to the TERM test
 		{"xterm", "", Colors16},
 		{"vt100", "", Colors16},
 		{"dumb", "", Colors16},
@@ -507,7 +512,7 @@ func TestScreenHelpers(t *testing.T) {
 		t.Errorf("Center wrote %+v", c)
 	}
 	if rowText(s, 0) != "hello     " {
-		t.Errorf("RowString = %q", rowText(s, 0))
+		t.Errorf("rowString = %q", rowText(s, 0))
 	}
 	if (Cell{}) != s.At(-1, 0) {
 		t.Error("out-of-bounds At must return zero cell")
@@ -543,20 +548,40 @@ func TestFrameANSIHelper(t *testing.T) {
 
 func TestDecorationHelpersDeterministic(t *testing.T) {
 	for tx := 0; tx < 200; tx++ {
-		r1, w1, ok1 := CloudAt(tx)
-		r2, w2, ok2 := CloudAt(tx)
-		if ok1 != ok2 || r1 != r2 || w1 != w2 {
+		r1, ok1 := CloudAt(tx)
+		r2, ok2 := CloudAt(tx)
+		if ok1 != ok2 || r1 != r2 {
 			t.Fatalf("CloudAt nondeterministic at %d", tx)
 		}
 	}
 	n := 0
 	for tx := 0; tx < 90; tx++ {
-		if _, _, ok := CloudAt(tx); ok {
+		if _, ok := CloudAt(tx); ok {
 			n++
 		}
 	}
 	if n == 0 || n > 30 {
 		t.Errorf("cloud density = %d/90 columns", n)
+	}
+}
+
+// TestBasicSGRCodes pins the whole basic-mode SGR table read by
+// colorParams: normal colors 30-37/40-47, bright 90-97/100-107 —
+// including the bright backgrounds no palette swatch currently puts on
+// the wire.
+func TestBasicSGRCodes(t *testing.T) {
+	for i := range 16 {
+		c := Color{ANSI: i}
+		wantFg, wantBg := strconv.Itoa(30+i), strconv.Itoa(40+i)
+		if i >= 8 {
+			wantFg, wantBg = strconv.Itoa(82+i), strconv.Itoa(92+i) // 90..97 / 100..107
+		}
+		if got := colorParams(Colors16, c, false); got != wantFg {
+			t.Errorf("ANSI %d fg = %q, want %q", i, got, wantFg)
+		}
+		if got := colorParams(Colors16, c, true); got != wantBg {
+			t.Errorf("ANSI %d bg = %q, want %q", i, got, wantBg)
+		}
 	}
 }
 

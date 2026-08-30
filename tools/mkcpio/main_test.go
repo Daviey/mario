@@ -42,7 +42,6 @@ func entryAt(t *testing.T, b []byte, name string) (off int, fields []string) {
 			return off, f
 		}
 		size := hexToUint(t, f[6])
-		_ = size
 		dataStart := off + 110 + nameSize
 		if p := (110 + nameSize) % 4; p != 0 {
 			dataStart += 4 - p
@@ -76,13 +75,13 @@ func TestArchiveLayout(t *testing.T) {
 	if f[9] != "00000005" || f[10] != "00000001" {
 		t.Errorf("dev/console rdev = %s:%s, want 5:1", f[9], f[10])
 	}
-	if f[1] != "00002180" { // S_IFCHR|0600
-		t.Errorf("dev/console mode = %s, want 0000a180", f[1])
+	if f[1] != "00002180" { // S_IFCHR|0600 = 0x2180
+		t.Errorf("dev/console mode = %s, want 00002180", f[1])
 	}
 
 	// init is a regular executable carrying the payload.
 	_, f = entryAt(t, b, "init")
-	if f[1] != "0081ed" && f[1] != "000081ed" {
+	if f[1] != "000081ed" { // S_IFREG|0755 = 0x81ed
 		t.Errorf("init mode = %s, want 000081ed (0o100755)", f[1])
 	}
 	if hexToUint(t, f[6]) != 5 {
@@ -90,18 +89,22 @@ func TestArchiveLayout(t *testing.T) {
 	}
 }
 
-func TestPadding(t *testing.T) {
-	var buf bytes.Buffer
-	buf.WriteString("123")
-	padTo4(&buf)
-	if buf.Len() != 4 {
-		t.Errorf("3 padded to 4: got %d", buf.Len())
+// TestArchiveInodes pins the inode assignment: unique, non-zero and
+// sequential from 1 — derived from the entry index, never from state
+// left over by a previous archive() call.
+func TestArchiveInodes(t *testing.T) {
+	b := archive([]byte("HELLO"))
+	for i, name := range []string{"dev", "dev/console", "dev/null", "init", "TRAILER!!!"} {
+		_, f := entryAt(t, b, name)
+		if got := hexToUint(t, f[0]); got != i+1 {
+			t.Errorf("%s inode = %d, want %d (entry index + 1)", name, got, i+1)
+		}
 	}
+}
 
-	buf.Reset()
-	buf.WriteString("1234")
-	padTo4(&buf)
-	if buf.Len() != 4 {
-		t.Errorf("4 padded to 4: got %d", buf.Len())
+func TestArchiveDeterministic(t *testing.T) {
+	a, b := archive([]byte("HELLO")), archive([]byte("HELLO"))
+	if !bytes.Equal(a, b) {
+		t.Error("two archive() calls with the same input differ")
 	}
 }

@@ -12,7 +12,7 @@ func bumpUnder(t *testing.T, g *Game, tx, ty int) {
 	g.Player.Pos = Vec{float64(tx) + 0.15, 13 - g.Player.H}
 	g.Player.Vel = Vec{}
 	run(g, 1, Input{}) // settle grounded state
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		at := g.Level.At(tx, ty)
 		if at == Used || at == Empty || g.BumpActive(tx, ty) {
 			return
@@ -255,7 +255,10 @@ func TestCeilingPicksWithBestOverlap(t *testing.T) {
 	g.Player.Pos = Vec{10.8, 13 - SmallH} // overlaps the right tile more
 	g.Player.Vel = Vec{}
 	run(g, 1, Input{})
-	for i := 0; i < 40 && g.Level.At(11, 9) == Question; i++ {
+	for range 40 {
+		if g.Level.At(11, 9) != Question {
+			break
+		}
 		g.Update(Input{Up: true})
 	}
 	if got := g.Level.At(11, 9); got != Used {
@@ -272,5 +275,29 @@ func TestApproxHelper(t *testing.T) {
 	}
 	if math.Abs(0) != 0 {
 		t.Error("sanity")
+	}
+}
+
+func TestHiddenBlockGrazeBoundary(t *testing.T) {
+	// A rising head must overlap a hidden block by HiddenGrazeOverlap
+	// to trigger it; a thinner graze passes straight through, classic
+	// invisible-block behaviour. Both cases are checked at the exact
+	// boundary (0.14 vs 0.15 of the tile).
+	for _, tc := range []struct {
+		px      float64
+		overlap float64
+		want    Tile
+	}{
+		{19.34, 0.14, HiddenCoin}, // just under the boundary: no trigger
+		{19.35, 0.15, Used},       // exactly at the boundary: triggers
+	} {
+		g := newGame(t, buildLevel(t, 60, func(b *Builder) { b.Set(20, 9, 'H') }))
+		p := g.Player
+		p.Pos = Vec{tc.px, 9.1} // head row 9 while rising
+		p.Vel = Vec{Y: -0.2}
+		g.bumpHidden(p)
+		if got := g.Level.At(20, 9); got != tc.want {
+			t.Errorf("px=%.2f (overlap %.2f): tile = %v, want %v", tc.px, tc.overlap, got, tc.want)
+		}
 	}
 }

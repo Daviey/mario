@@ -14,8 +14,11 @@ import (
 // prefix == 20 zero bits).
 const powBits = 20
 
-// solvePow returns a nonce (decimal string) whose payload hash carries
-// powBits leading zero bits.
+// solvePow returns a nonce (decimal string) whose hash over
+// "<device_id>:<score>:<nonce>" carries powBits leading zero bits. The
+// nonce must stay a bare decimal string: the server's verify_pow()
+// trigger rebuilds exactly that payload text before re-hashing, so any
+// other nonce encoding (hex, padded, signed) would fail server-side.
 func solvePow(deviceID string, score int) string {
 	prefix := []byte(deviceID + ":" + strconv.Itoa(score) + ":")
 	for n := uint64(0); ; n++ {
@@ -26,7 +29,10 @@ func solvePow(deviceID string, score int) string {
 	}
 }
 
-// powOK reports whether h has powBits leading zero bits.
+// powOK reports whether h has powBits leading zero bits. The case-20
+// test is verify_pow()'s hex check spelled in bytes: h[0] and h[1] zero
+// plus a zero top nibble of h[2] is exactly the "00000" prefix the
+// migration looks for. Any other difficulty must extend both sides.
 func powOK(h [32]byte) bool {
 	switch powBits {
 	case 20:

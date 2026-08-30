@@ -20,13 +20,10 @@ import (
 )
 
 type ptyClient struct {
-	m        *os.File
-	cmd      *exec.Cmd
-	mu       sync.Mutex
-	out      string
-	cond     *sync.Cond
-	sawQueue chan struct{}
-	sawGame  chan struct{}
+	m   *os.File
+	cmd *exec.Cmd
+	mu  sync.Mutex
+	out string
 }
 
 func (p *ptyClient) Out() string {
@@ -117,7 +114,6 @@ func startPTYSSH(t *testing.T, sshPath string, port int) *ptyClient {
 		t.Fatalf("ssh: %v", err)
 	}
 	p := &ptyClient{m: m, cmd: cmd}
-	p.cond = sync.NewCond(&p.mu)
 	go func() {
 		buf := make([]byte, 16*1024)
 		for {
@@ -127,7 +123,6 @@ func startPTYSSH(t *testing.T, sshPath string, port int) *ptyClient {
 				p.mu.Lock()
 				p.out += string(buf[:nr])
 				p.mu.Unlock()
-				p.cond.Broadcast()
 			}
 			if err != nil {
 				return

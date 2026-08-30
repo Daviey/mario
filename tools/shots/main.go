@@ -9,7 +9,8 @@
 //	CGO_ENABLED=0 go run ./tools/shots -scene board -out /tmp/board.ansi
 //	CGO_ENABLED=0 go run ./tools/shots -scene strip -from 600 -to 1400 -step 2 -out /tmp/gif/frame
 //
-// Levels are 1-based (1-1 .. 2-4). All scenes default to a 40-tile viewport.
+// Levels are 1-based (1-1 .. 2-4). All scenes honor -width; the
+// default viewport is 40 tiles.
 package main
 
 import (
@@ -47,7 +48,7 @@ func main() {
 	case "play":
 		writeFrame(*out, playTo(*level, *tick, *width), nil)
 	case "board":
-		boardFrame(*out)
+		boardFrame(*out, *width)
 	case "strip":
 		if *step < 1 || *to < *from {
 			fmt.Fprintln(os.Stderr, "shots: bad strip range")
@@ -87,8 +88,8 @@ func playTo(level, ticks, width int) *engine.Game {
 // boardFrame drives the demo to game over, then shows the leaderboard
 // against canned rows — the same path as `mario -ui-preview board`, with a
 // fuller board so the screenshot reads like a real one.
-func boardFrame(path string) {
-	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+func boardFrame(path string, width int) {
+	g := engine.NewGame(engine.DefaultLevels(), width, engine.LevelHeight)
 	for t := range 6000 {
 		g.Update(ui.ScriptInput(t))
 	}

@@ -21,7 +21,9 @@ func (r *dailyRng) next() uint64 {
 	return x * 0x2545F4914F6CDD1D
 }
 
-// intn returns a deterministic int in [0, n).
+// intn returns a deterministic int in [0, n). Deliberately naive modulo:
+// for the small n values used here the bias is ~2^-58, and the segment
+// weights below are tuned around this exact mapping.
 func (r *dailyRng) intn(n int) int { return int(r.next() % uint64(n)) }
 
 // DailySeed folds a calendar date into a generator seed.

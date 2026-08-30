@@ -1,6 +1,7 @@
 package render
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,6 +88,39 @@ func TestDiffTwoSpansSameRow(t *testing.T) {
 	}
 	if n := strings.Count(d, "A") + strings.Count(d, "B"); n != 2 {
 		t.Errorf("span glyphs written %d times, want 2: %q", n, d)
+	}
+}
+
+// TestDiffBridgesShortSameStyleGap pins the bridge cost model. Two runs
+// on one row, the second in a new color with a short gap of clean
+// same-style cells between them: re-writing the gap carries the style
+// state up to the run for fewer bytes than a cursor move plus the SGR
+// the run needs anyway (a 3-cell gap is 3 bytes against the 4-byte
+// "\x1b[3C"; at 4 cells the costs tie and the cursor move wins). The
+// clean gap glyphs must therefore be re-emitted, with no cursor
+// addressing for the second run — if the cost comparison ever
+// regresses, the span silently switches to CUP/CUF (same visible
+// result, more bytes every such frame).
+func TestDiffBridgesShortSameStyleGap(t *testing.T) {
+	a := mkScreen(10, 1, '.')
+	b := mkScreen(10, 1, '.')
+	b.Set(1, 0, 'A', testPal.Text)
+	b.SetStyled(5, 0, 'B', testPal.FlagRed, Color{}, false)
+	b.SetStyled(6, 0, 'B', testPal.FlagRed, Color{}, false)
+	d := Diff(a, b)
+	// Bridge: the three clean cells between the runs are re-written.
+	if !strings.Contains(d, "A...") {
+		t.Errorf("clean gap cells not re-emitted (bridge lost): %q", d)
+	}
+	// Exactly one cursor address — the first run's. No relative move.
+	if cups := regexp.MustCompile(`\x1b\[\d+;\d+H`).FindAllString(d, -1); len(cups) != 1 {
+		t.Errorf("want exactly 1 cursor address, got %d: %q", len(cups), d)
+	}
+	if regexp.MustCompile(`\x1b\[\d+C`).MatchString(d) {
+		t.Errorf("relative forward move emitted although bridging is cheaper: %q", d)
+	}
+	if n := strings.Count(d, "B"); n != 2 {
+		t.Errorf("B written %d times, want 2: %q", n, d)
 	}
 }
 

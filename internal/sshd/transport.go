@@ -49,7 +49,10 @@ const (
 
 var errMAC = errors.New("sshd: message authentication failed")
 
-// dirState is one direction of the packet protocol.
+// dirState is one direction of the packet protocol: cipher and MAC keys
+// (nil until NEWKEYS swaps them in) plus the packet sequence number,
+// which runs unbroken for the connection's lifetime — see the swap in
+// serverKex for why it is never reset.
 type dirState struct {
 	stream cipher.Stream // nil until NEWKEYS
 	macKey []byte        // nil until NEWKEYS
@@ -76,11 +79,9 @@ type transport struct {
 	sessionID []byte // fixed at the first exchange, reused on rekey
 }
 
+// newTransport wraps conn with no crypto state yet; keys arrive with
+// the first NEWKEYS.
 func newTransport(conn net.Conn) *transport { return &transport{conn: conn} }
-
-func deadlineAfter(secs int) time.Time {
-	return time.Now().Add(time.Duration(secs) * time.Second)
-}
 
 // exchangeVersion sends our identification string and reads the peer's,
 // skipping any banner lines that precede it (RFC 4253 §4.2 allows up to
@@ -99,6 +100,11 @@ func (t *transport) exchangeVersion(ourVersion string) error {
 		if one[0] == '\n' {
 			l := trimEOL(line)
 			if len(l) >= 4 && string(l[:4]) == "SSH-" {
+				// 1.x banners (and the 1.99 dual-protocol probes of
+				// banner scanners) are tolerated: the version string
+				// commits us to nothing — a client that cannot do SSH2
+				// fails the algorithm negotiation immediately after,
+				// and refusing here would only change the error.
 				if len(l) < 7 || (string(l[4:7]) != "2.0" && string(l[4:6]) != "1.") {
 					return fmt.Errorf("sshd: unsupported version %q", l)
 				}
@@ -115,6 +121,7 @@ func (t *transport) exchangeVersion(ourVersion string) error {
 	return errors.New("sshd: no version string")
 }
 
+// trimEOL strips trailing CR/LF from a version-exchange line.
 func trimEOL(l []byte) []byte {
 	for len(l) > 0 && (l[len(l)-1] == '\n' || l[len(l)-1] == '\r') {
 		l = l[:len(l)-1]
@@ -155,7 +162,7 @@ func (t *transport) writePacketLocked(payload []byte) error {
 	if t.out.stream != nil {
 		t.out.stream.XORKeyStream(pkt[:total], pkt[:total])
 	}
-	t.conn.SetWriteDeadline(deadlineAfter(writeTimeoutSec))
+	t.conn.SetWriteDeadline(time.Now().Add(writeTimeoutSec * time.Second))
 	_, err := t.conn.Write(pkt)
 	t.out.seq++
 	return err
@@ -217,6 +224,8 @@ func (t *transport) readPacket() ([]byte, error) {
 	return payload, nil
 }
 
+// macSum computes hmac-sha2-256 over the packet bytes prefixed with
+// the 32-bit sequence number (RFC 4253 §6.4).
 func macSum(key []byte, seq uint32, pkt []byte) []byte {
 	h := hmac.New(sha256.New, key)
 	var s [4]byte
@@ -239,6 +248,7 @@ func generateHostKey() (*hostKey, error) {
 	return &hostKey{priv: priv}, nil
 }
 
+// public returns the raw ed25519 public key bytes.
 func (h *hostKey) public() ed25519.PublicKey { return h.priv.Public().(ed25519.PublicKey) }
 
 // publicBlob is the SSH wire encoding of the public key.
@@ -267,7 +277,9 @@ func (h *hostKey) fingerprint() string {
 // buildKexinit assembles our KEXINIT payload with a fresh cookie.
 func buildKexinit() []byte {
 	var cookie [16]byte
-	rand.Read(cookie[:])
+	// crypto/rand never fails on supported platforms; a zero cookie
+	// would only cost a predictable KEXINIT, never a secret.
+	_, _ = rand.Read(cookie[:])
 	w := &buf{}
 	w.u8(msgKexinit)
 	w.b = append(w.b, cookie[:]...)
@@ -286,6 +298,8 @@ func buildKexinit() []byte {
 	return w.b
 }
 
+// listHas reports whether the comma-separated algorithm name list
+// offers want.
 func listHas(list, want string) bool {
 	for _, s := range splitList(list) {
 		if s == want {
@@ -295,6 +309,8 @@ func listHas(list, want string) bool {
 	return false
 }
 
+// splitList splits a comma-separated algorithm name list, dropping
+// empty fields.
 func splitList(list string) []string {
 	var out []string
 	start := 0
@@ -411,12 +427,16 @@ func (t *transport) serverKex(hk *hostKey) (queued [][]byte, err error) {
 		return nil, err
 	}
 	keys := deriveKeys(shared, hash, t.sessionID)
-	// From here on our writes use the new keys; the peer's packets keep
-	// the old keys until its NEWKEYS arrives.
+	// Each direction swaps at its own NEWKEYS, and neither sequence
+	// counter ever resets: strict-kex is not negotiated (modern OpenSSH
+	// only resets on kex-strict-* agreement), so both per-direction
+	// counters run unbroken for the connection's lifetime. Outbound:
+	// from this line our writes use the new keys, seq carried over.
+	// Inbound: the peer's packets between our NEWKEYS and its own —
+	// exactly what the loop below reads and queues — still decrypt and
+	// MAC under the OLD keys with the OLD counter; only the client's
+	// NEWKEYS swaps t.in (new keys and IV, seq again carried over).
 	enc, _ := aes.NewCipher(keys.encS)
-	// Without strict-kex negotiated, sequence numbers are NOT reset at
-	// NEWKEYS (modern OpenSSH only resets when kex-strict-* is agreed);
-	// the per-direction counter runs for the connection's lifetime.
 	t.out = dirState{stream: cipher.NewCTR(enc, keys.ivS), macKey: keys.macS, seq: t.out.seq}
 
 	for {
@@ -437,11 +457,17 @@ func (t *transport) serverKex(hk *hostKey) (queued [][]byte, err error) {
 	return queued, nil
 }
 
-// kdfKeys is the derived key material (RFC 4253 §7.2).
+// kdfKeys is the derived key material (RFC 4253 §7.2). The AES-128 key
+// and IV lengths are pinned at exactly 16 bytes — the only length
+// aes.NewCipher accepts for AES-128 — so NewCipher cannot fail on them
+// and the ignored errors at the cipher call sites above (and in the
+// test client's mirror of this swap) are sound.
 type kdfKeys struct {
 	ivC, ivS, encC, encS, macC, macS []byte
 }
 
+// deriveKeys expands the shared secret into the six keys and IVs via
+// the RFC 4253 §7.2 KDF; see kdfKeys for the fixed lengths.
 func deriveKeys(k, h, sessionID []byte) *kdfKeys {
 	// mpint-encoded K feeds the KDF hash (RFC 4253 §7.1).
 	mw := &buf{}

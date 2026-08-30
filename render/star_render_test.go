@@ -51,7 +51,7 @@ func TestHiddenBlocksInvisible(t *testing.T) {
 	for x := 3; x < 12; x++ {
 		clear := true
 		for a := x - 2; a <= x+2; a++ {
-			if _, _, ok := CloudAt(a); ok {
+			if _, ok := CloudAt(a); ok {
 				clear = false
 				break
 			}

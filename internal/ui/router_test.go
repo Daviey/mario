@@ -84,6 +84,52 @@ func TestRouterDecodesKittyForUI(t *testing.T) {
 	}
 }
 
+// One read can carry a whole kitty press+release pair. In capture mode
+// the plain decoder must hand the UI exactly the one text byte of the
+// press — the release decodes to nothing — and none of it may leak to
+// the mapper.
+func TestRouterMultiEventChunkInCapture(t *testing.T) {
+	m := input.NewMapper()
+	ui := NewUI(nil, nil)
+	r := NewRouter(m, ui)
+
+	ui.mu.Lock()
+	ui.mode = render.UIEntry
+	ui.mu.Unlock()
+	r.Feed([]byte("\x1b[97;1:1u\x1b[97;1:3u")) // press then release 'a'
+	if in := r.Poll(); in.Left || in.Quit || in.AnyKey {
+		t.Fatalf("multi-event chunk leaked to the mapper: %+v", in)
+	}
+	ui.mu.Lock()
+	got := string(ui.keys)
+	ui.mu.Unlock()
+	if got != "a" {
+		t.Fatalf("UI captured %q, want exactly %q", got, "a")
+	}
+}
+
+// SS3 arrows decode to nothing in the plain view, so a capture-mode
+// screen never sees them — not even a stray byte that could dismiss it.
+func TestRouterSS3DroppedDuringCapture(t *testing.T) {
+	m := input.NewMapper()
+	ui := NewUI(nil, nil)
+	r := NewRouter(m, ui)
+
+	ui.mu.Lock()
+	ui.mode = render.UIBoard
+	ui.mu.Unlock()
+	r.Feed([]byte("\x1bOC")) // SS3 right arrow
+	if in := r.Poll(); in.Right || in.Quit {
+		t.Fatalf("SS3 during capture reached the game: %+v", in)
+	}
+	ui.mu.Lock()
+	got := string(ui.keys)
+	ui.mu.Unlock()
+	if got != "" {
+		t.Fatalf("UI captured %q, want nothing", got)
+	}
+}
+
 func TestRouterClearsHoldsOnCapture(t *testing.T) {
 	// A hold going into the game-over ask: the UI takes the keyboard,
 	// the mapper stops seeing bytes, and its release — whenever it

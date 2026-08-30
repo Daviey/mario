@@ -17,10 +17,7 @@ func (g *Game) updateMushrooms() {
 			if m.Kind == MushStar {
 				walk = StarWalk
 			}
-			m.Vel.Y += Gravity
-			if m.Vel.Y > MaxFall {
-				m.Vel.Y = MaxFall
-			}
+			m.Vel.Y = applyGravity(m.Vel.Y, Gravity)
 			if g.moveX(&m.Pos, MushroomW, MushroomH, float64(m.Dir)*walk) {
 				m.Dir = -m.Dir
 			}
@@ -116,10 +113,7 @@ func (g *Game) updateFireballs() {
 			fb.Gone = true
 			continue
 		}
-		fb.Vel.Y += FireballGravity
-		if fb.Vel.Y > MaxFall {
-			fb.Vel.Y = MaxFall
-		}
+		fb.Vel.Y = applyGravity(fb.Vel.Y, FireballGravity)
 		if g.moveX(&fb.Pos, FireballW, FireballH, fb.Vel.X) {
 			fb.Gone = true
 			g.spawnSparkle(fb.Pos.X, fb.Pos.Y)

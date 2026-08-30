@@ -4,6 +4,10 @@
 // and TLS (SSLRequest upgrade) transports, cleartext, MD5 and
 // SCRAM-SHA-256 authentication with server-signature verification.
 // Stdlib only, by repo policy.
+//
+// TLS is caller-configured via Config.TLS; board.DBFromEnv documents the
+// require-mode choice (encrypt, no identity check) its sole caller makes
+// for Supabase's direct endpoint.
 package pgwire
 
 import (
@@ -67,7 +71,10 @@ func (v Value) Int() (int, error) {
 	return n, nil
 }
 
-// Conn is a single threaded connection (no concurrent use).
+// Conn is a single threaded connection (no concurrent use). Every
+// operation derives its socket deadline from the caller's context (see
+// guard), so a stuck server read surfaces as the ctx error instead of
+// outliving the call.
 type Conn struct {
 	conn   net.Conn
 	br     *bufio.Reader

@@ -10,6 +10,9 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
+// Router routes raw input bytes between the game mapper and the
+// leaderboard UI: while a UI screen captures the keyboard, bytes flow to
+// the UI alone (see the package comment).
 type Router struct {
 	mapper    *input.Mapper
 	ui        *UI
@@ -17,6 +20,8 @@ type Router struct {
 	capturing bool // last-seen capture state, to catch the transition
 }
 
+// NewRouter wires a router around mapper and ui, plain-decoding bytes
+// for the byte-oriented UI consumers.
 func NewRouter(mapper *input.Mapper, ui *UI) *Router {
 	return &Router{mapper: mapper, ui: ui, plain: input.NewPlainDecoder()}
 }
@@ -31,9 +36,9 @@ func (r *Router) Feed(b []byte) {
 	// for keys still held at that moment. Drop them now — a leaked hold
 	// survives into the next run (a sticky kitty hold forever, a legacy
 	// one for its grace window) and the restarted game runs on untouched.
-	if cap := r.ui.capturing(); cap != r.capturing {
-		r.capturing = cap
-		if cap {
+	if held := r.ui.capturing(); held != r.capturing {
+		r.capturing = held
+		if held {
 			r.mapper.ReleaseAll()
 		}
 	}
@@ -47,7 +52,10 @@ func (r *Router) Feed(b []byte) {
 
 // poll returns this tick's game input. A restart requested from the
 // board screen is injected as the same edge a mapped 'r' press would
-// produce — the native and wasm loops both go through here.
+// produce — the native and wasm loops both go through here. Feed runs
+// on the reader goroutine, Poll on the game goroutine; the shared
+// mapper mutex serializes them, so every byte Fed before a Poll returns
+// is already decoded into that Poll's input.
 func (r *Router) Poll() engine.Input {
 	// A truncated escape wedged in the plain decoder would swallow
 	// every later UI trigger byte; age it out with the tick clock.

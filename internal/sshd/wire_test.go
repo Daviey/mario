@@ -45,6 +45,36 @@ func TestReaderRejectsTruncated(t *testing.T) {
 	}
 }
 
+// The err latch: once one read fails, every later read is a zero-value
+// no-op and ok() stays false — parsers rely on checking ok() once at
+// the end instead of after each field.
+func TestReaderErrLatch(t *testing.T) {
+	w := &buf{}
+	w.u32(100)
+	r := &reader{b: w.b[:2]} // header claims more than it carries
+	if s := r.str(); s != nil {
+		t.Fatalf("truncated str = %v, want nil", s)
+	}
+	if r.ok() {
+		t.Fatal("reader ok after truncated str")
+	}
+	if got := r.u8(); got != 0 {
+		t.Fatalf("post-error u8 = %d, want 0", got)
+	}
+	if got := r.u32(); got != 0 {
+		t.Fatalf("post-error u32 = %d, want 0", got)
+	}
+	if got := r.str(); got != nil {
+		t.Fatalf("post-error str = %v, want nil", got)
+	}
+	if r.boolean() {
+		t.Fatal("post-error boolean = true, want false")
+	}
+	if r.ok() {
+		t.Fatal("ok() true after a latched error")
+	}
+}
+
 func TestMpintEdges(t *testing.T) {
 	enc := func(v []byte) []byte {
 		w := &buf{}

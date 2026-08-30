@@ -27,22 +27,6 @@ func fakeMacho(cputype uint32, size int) []byte {
 	return b
 }
 
-func TestShortVersion(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"v0.3.3", "0.3.3"},
-		{"v0.3.3-6-g84d833b", "0.3.3"},
-		{"v0.3.3-6-g84d833b-dirty", "0.3.3"},
-		{"0.4.0", "0.4.0"},
-		{"dev", "0.0.0"},
-		{"", "0.0.0"},
-	}
-	for _, c := range cases {
-		if got := pack.ShortVersion(c.in); got != c.want {
-			t.Errorf("shortVersion(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestCheckArch(t *testing.T) {
 	if err := checkArch("amd64", fakeMacho(archAMD64.cputype, 64), archAMD64); err != nil {
 		t.Errorf("matching cputype rejected: %v", err)

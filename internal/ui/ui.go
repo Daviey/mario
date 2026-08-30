@@ -6,7 +6,9 @@ package ui
 // tick loop; submit/fetch are injectable for tests.
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,20 @@ const requestTimeout = 15 * time.Second
 // shared with SanitizeName/SanitizeDisplayName and the DB CHECK.
 const maxNameLen = 8
 
+// Leaderboard status strings, carried to render.ScoreUI.Status and drawn
+// verbatim — the exact bytes are a UI contract, not copy to polish.
+const (
+	statusOffline    = "OFFLINE"
+	statusSubmitting = "SUBMITTING"
+	statusUnrecorded = "UNRECORDED"
+	statusSubmitted  = "SUBMITTED!"
+	statusSubmitFail = "SUBMIT FAILED"
+)
+
+// UI is the in-game leaderboard state machine described by the package
+// comment: game over flows into a submit prompt, pixel-font name entry,
+// then the board screen (also reachable from the title with 'l'/'L').
+// Every method is safe from any goroutine; Tick drives the screen logic.
 type UI struct {
 	mu      sync.Mutex
 	mode    render.UIMode
@@ -122,9 +138,11 @@ func (u *UI) FeedKeys(b []byte) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// Terminals and the web build send multi-byte sequences for arrows and
-	// key releases. If processed raw, the leading 0x1b instantly dismisses
-	// the UI screens. Drop any chunk that looks like an escape sequence.
+	// Belt-and-braces for direct callers: the Router already strips
+	// escape sequences (PlainDecoder re-encodes them before this runs),
+	// but anyone feeding raw chunks straight in — a test, a preview —
+	// would see the leading 0x1b of an arrow/release sequence instantly
+	// dismiss the screen. Drop any chunk that looks like an escape.
 	if len(b) > 1 && b[0] == 0x1b && (b[1] == '[' || b[1] == 'O') {
 		return
 	}
@@ -175,7 +193,7 @@ func (u *UI) TakeDailyAtTitle(g *engine.Game) bool {
 	if u.mode != render.UIOff || g.State != engine.StateTitle || len(u.noted) == 0 {
 		return false
 	}
-	if bytesContain(u.noted, 'd') || bytesContain(u.noted, 'D') {
+	if bytes.ContainsAny(u.noted, "dD") {
 		u.noted = nil
 		return true
 	}
@@ -219,7 +237,7 @@ func (u *UI) showBoardLocked() {
 		// Offline build (no credentials): still show the screen, with a
 		// status — never an eternal LOADING.
 		u.loading = false
-		u.status = "OFFLINE"
+		u.status = statusOffline
 		return
 	}
 	u.loading = true
@@ -235,12 +253,17 @@ func (u *UI) ShowAbout() {
 	u.mode = render.UIAbout
 }
 
+// fetchInto runs one fetch on its own goroutine and lands the result on
+// the machine. The recover contract: a panicking or otherwise broken
+// fetch degrades to OFFLINE here instead of killing the process — this
+// runs off the tick loop, where an unrecovered panic would take the
+// whole game (and the 60Hz loop) down with it.
 func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 	defer func() {
 		if r := recover(); r != nil {
 			u.mu.Lock()
 			u.loading = false
-			u.status = "OFFLINE"
+			u.status = statusOffline
 			u.rows = nil
 			u.mu.Unlock()
 		}
@@ -265,7 +288,7 @@ func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 	defer u.mu.Unlock()
 	u.loading = false
 	if err != nil {
-		u.status = "OFFLINE"
+		u.status = statusOffline
 		u.rows = nil
 		return
 	}
@@ -308,12 +331,12 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	// Title-screen 'l'/'L' opens the board, 'i'/'I' the about screen.
 	// Both cases each: shift/caps-lock make case unpredictable.
 	if u.mode == render.UIOff && g.State == engine.StateTitle && len(u.noted) > 0 {
-		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
+		if bytes.ContainsAny(u.noted, "lL") {
 			u.noted = nil
 			u.showBoardLocked()
 			return u.snapshotLocked(g)
 		}
-		if bytesContain(u.noted, 'i') || bytesContain(u.noted, 'I') {
+		if bytes.ContainsAny(u.noted, "iI") {
 			u.noted = nil
 			u.mode = render.UIAbout
 			return u.snapshotLocked(g)
@@ -368,8 +391,8 @@ func (u *UI) keyLocked(b byte) {
 		case b == 0x1b:
 			u.mode = render.UIAsk // back to the prompt
 		default:
-			c := upperByte(b)
-			if len(u.name) < maxNameLen && byteIn(c, persist.NameCharSet) {
+			c := bytes.ToUpper([]byte{b})[0]
+			if len(u.name) < maxNameLen && strings.ContainsRune(persist.NameCharSet, rune(c)) {
 				u.name = append(u.name, c)
 			}
 		}
@@ -415,7 +438,7 @@ func (u *UI) submitLocked() {
 	u.done = true
 	u.loading = true
 	if submit == nil {
-		u.status = "OFFLINE"
+		u.status = statusOffline
 		u.loading = false
 		return
 	}
@@ -427,11 +450,11 @@ func (u *UI) submitLocked() {
 	}
 	if replayData == "" {
 		// The server rejects replay-less rows; don't bother it.
-		u.status = "UNRECORDED"
+		u.status = statusUnrecorded
 		u.loading = false
 		return
 	}
-	u.status = "SUBMITTING"
+	u.status = statusSubmitting
 	mode, day := "", ""
 	if u.daily {
 		mode, day = "daily", u.day
@@ -447,9 +470,9 @@ func (u *UI) submitLocked() {
 		err := submit(entry)
 		u.mu.Lock()
 		if err != nil {
-			u.status = "SUBMIT FAILED"
+			u.status = statusSubmitFail
 		} else {
-			u.status = "SUBMITTED!"
+			u.status = statusSubmitted
 			u.subOK = true
 			if u.saveName != nil {
 				u.saveName(name)
@@ -504,31 +527,6 @@ func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {
 		Rank:     rank,
 		Daily:    u.daily,
 	}
-}
-
-func upperByte(b byte) byte {
-	if b >= 'a' && b <= 'z' {
-		return b - 'a' + 'A'
-	}
-	return b
-}
-
-func byteIn(b byte, set string) bool {
-	for i := 0; i < len(set); i++ {
-		if set[i] == b {
-			return true
-		}
-	}
-	return false
-}
-
-func bytesContain(b []byte, c byte) bool {
-	for _, x := range b {
-		if x == c {
-			return true
-		}
-	}
-	return false
 }
 
 // identityLocked refreshes the cached player snapshot. Session hosts read

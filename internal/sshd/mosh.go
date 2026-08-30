@@ -120,6 +120,10 @@ func (s *Server) moshPorts() string {
 // output to the SSH channel. The child is deliberately NOT killed when
 // the SSH side ends — mosh-server outlives the connection by design.
 func (s *Server) startMosh(c *conn, req *moshRequest) error {
+	// Soft cap: the check races the Add(1) after the spawn (there is no
+	// compare-and-increment here), so a burst of concurrent handshakes
+	// can each pass before any child registers — the count settles
+	// back as they exit. Overload protection, not a hard limit.
 	if moshRunning.Load() >= moshMax {
 		return fmt.Errorf("sshd: too many mosh sessions")
 	}

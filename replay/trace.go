@@ -24,15 +24,9 @@ func Trace(levels []*engine.Level, mode, data string, w io.Writer) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	g := engine.NewGame(levels, 40, engine.LevelHeight)
-	switch mode {
-	case "", "classic":
-		g.Reset()
-	case "daily":
-		g.Daily = true
-		g.BeginDaily()
-	default:
-		return Result{}, fmt.Errorf("replay: unknown mode %q", mode)
+	g, err := newReplayGame(levels, mode)
+	if err != nil {
+		return Result{}, err
 	}
 	prev := g.State
 	prevLives := g.Lives

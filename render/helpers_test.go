@@ -33,7 +33,7 @@ func newGame(t *testing.T) *engine.Game {
 }
 
 // rowText returns the glyphs of one screen row.
-func rowText(s *Screen, y int) string { return s.RowString(y) }
+func rowText(s *Screen, y int) string { return s.rowString(y) }
 
 // worldPx reads a world pixel back out of the blitted screen (fg = upper
 // half of the cell, bg = lower half). Row 0 is the first world pixel row.

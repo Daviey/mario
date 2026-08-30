@@ -45,9 +45,10 @@ type admission struct {
 	active  int
 	waiters []*waiter
 	ewmaSec float64 // EWMA of admitted session length, seconds
-	samples int64
 }
 
+// newAdmission returns an admission queue seeded with the ewmaSeed
+// session-length prior (no real observations yet).
 func newAdmission() *admission {
 	return &admission{ewmaSec: ewmaSeed}
 }
@@ -138,12 +139,14 @@ func (a *admission) enter(s *Session, maxSessions, maxQueue int, timeout time.Du
 }
 
 // exit records the session length and hands the freed slot straight to
-// the head of the line, if any.
+// the head of the line, if any: the head is dequeued and its ready
+// channel closed under mu, and the remaining waiters are renumbered in
+// place — each waiter re-reads its own w.pos on every poll, so the
+// renumbering needs no per-waiter wakeup.
 func (a *admission) exit(dur time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.active--
-	a.samples++
 	d := dur.Seconds()
 	if d < 1 {
 		d = 1 // an instant reconnect shouldn't drag the ETA to zero

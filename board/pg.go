@@ -105,43 +105,34 @@ func (c *DBClient) Close() error { return c.conn.Close() }
 
 // Pending mirrors Client.Pending over SQL.
 func (c *DBClient) Pending(ctx context.Context, n int) ([]PendingRow, error) {
-	rows, err := c.conn.Query(ctx, `SELECT id,name,score,level,mode,day,engine_version,replay,
-		surface,user_agent,term,colorterm,input_regime,viewport
-		FROM scores WHERE verified = false AND replay IS NOT NULL
-		ORDER BY created_at ASC LIMIT `+strconv.Itoa(n))
-	if err != nil {
-		return nil, fmt.Errorf("db pending: %w", err)
-	}
-	out := make([]PendingRow, 0, len(rows))
-	for _, r := range rows {
-		if len(r) != 14 {
-			return nil, fmt.Errorf("db pending: got %d columns, want 14", len(r))
-		}
-		p, err := pendingRowFromValues(r)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, nil
+	return c.queryPending(ctx, "pending",
+		" WHERE verified = false AND replay IS NOT NULL", "ASC", n)
 }
 
 // Latest returns the n most recent replay-backed rows, newest first,
 // verified or not — the operator dump behind `mario -dump-replays`.
 func (c *DBClient) Latest(ctx context.Context, n int) ([]PendingRow, error) {
+	return c.queryPending(ctx, "latest",
+		" WHERE replay IS NOT NULL", "DESC", n)
+}
+
+// queryPending is the body Pending and Latest share: the 14-column
+// scores select with a WHERE fragment, a created_at ordering direction
+// and a row limit. label names the caller in errors.
+func (c *DBClient) queryPending(ctx context.Context, label, where, dir string, n int) ([]PendingRow, error) {
 	rows, err := c.conn.Query(ctx, `SELECT id,name,score,level,mode,day,engine_version,replay,
 		surface,user_agent,term,colorterm,input_regime,viewport
-		FROM scores WHERE replay IS NOT NULL
-		ORDER BY created_at DESC LIMIT `+strconv.Itoa(n))
+		FROM scores`+where+`
+		ORDER BY created_at `+dir+` LIMIT `+strconv.Itoa(n))
 	if err != nil {
-		return nil, fmt.Errorf("db latest: %w", err)
+		return nil, fmt.Errorf("db %s: %w", label, err)
 	}
 	out := make([]PendingRow, 0, len(rows))
 	for _, r := range rows {
 		if len(r) != 14 {
-			return nil, fmt.Errorf("db latest: got %d columns, want 14", len(r))
+			return nil, fmt.Errorf("db %s: got %d columns, want 14", label, len(r))
 		}
-		p, err := pendingRowFromValues(r)
+		p, err := pendingRowFromValues(r, label)
 		if err != nil {
 			return nil, err
 		}
@@ -152,19 +143,20 @@ func (c *DBClient) Latest(ctx context.Context, n int) ([]PendingRow, error) {
 
 // pendingRowFromValues converts one 14-column query result into a
 // PendingRow. NULL text columns become "" exactly like the PostgREST JSON
-// path (its nulls decode to the zero value).
-func pendingRowFromValues(r []pgwire.Value) (PendingRow, error) {
+// path (its nulls decode to the zero value). label names the calling
+// query in errors.
+func pendingRowFromValues(r []pgwire.Value, label string) (PendingRow, error) {
 	var p PendingRow
 	p.ID = r[0].String()
 	p.Name = r[1].String()
 	n, err := r[2].Int()
 	if err != nil {
-		return p, fmt.Errorf("db pending: score: %w", err)
+		return p, fmt.Errorf("db %s: score: %w", label, err)
 	}
 	p.Score = n
 	n, err = r[3].Int()
 	if err != nil {
-		return p, fmt.Errorf("db pending: level: %w", err)
+		return p, fmt.Errorf("db %s: level: %w", label, err)
 	}
 	p.Level = n
 	p.Mode = r[4].String()
@@ -178,7 +170,7 @@ func pendingRowFromValues(r []pgwire.Value) (PendingRow, error) {
 	p.InputRegime = r[12].String()
 	p.Viewport = r[13].String()
 	if p.ID == "" {
-		return p, errors.New("db pending: NULL id")
+		return p, fmt.Errorf("db %s: NULL id", label)
 	}
 	return p, nil
 }

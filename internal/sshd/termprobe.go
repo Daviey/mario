@@ -50,6 +50,10 @@ const defaultProbeWait = 250 * time.Millisecond
 // swallowed indefinitely.
 const probeBufMax = 4096
 
+// termProbe sniffs DA2/DA3 replies out of the inbound byte stream. It
+// starts in buffering mode (keystrokes held until the session installs
+// its feed), switches to pure filtering once drained, and can abandon
+// itself (gaveUp) when a reply never terminates — see offer.
 type termProbe struct {
 	mu       sync.Mutex
 	decided  bool // a reply yielded a family decision
@@ -63,6 +67,8 @@ type termProbe struct {
 	gaveUp   bool      // probe abandoned: pure passthrough, nothing held
 }
 
+// newTermProbe starts a probe in buffering mode that gives itself up
+// after maxWait (defaultProbeWait when zero or negative).
 func newTermProbe(maxWait time.Duration) *termProbe {
 	if maxWait <= 0 {
 		maxWait = defaultProbeWait

@@ -1,9 +1,9 @@
 package main
 
-// replaycmd.go — operator tooling for leaderboard recordings. A dropped
-// or suspicious score row is diagnosed in two steps: dump the row's
-// recording from the database, then trace it tick by tick against the
-// current engine and read where the run dies (and why).
+// Operator tooling for leaderboard recordings: a dropped or suspicious
+// score row is diagnosed in two steps — dump the row's recording from
+// the database, then trace it tick by tick against the current engine
+// and read where the run dies (and why).
 
 import (
 	"context"

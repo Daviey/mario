@@ -78,6 +78,56 @@ func TestTermProbeOfferDrainFilter(t *testing.T) {
 	}
 }
 
+// DCS-form (DA3) replies: ST-terminated amid keystrokes in buffering
+// mode, reassembly across a split landing exactly at the DCS
+// header/name boundary, and — the sharp edge — a SECOND reply after
+// the decision, which must strip cleanly without a second close of
+// the known channel (a panic pre-guard) or a changed verdict.
+func TestTermProbeDCSSplitAndSecondReply(t *testing.T) {
+	// ST-terminated DCS amid keystrokes, buffering mode.
+	p := newTermProbe(time.Minute)
+	if _, buffered := p.offer([]byte("a\x1bP!|kitty\x1b\\b")); !buffered {
+		t.Fatal("DCS offer not buffered")
+	}
+	if decided, ok := p.result(0); !decided || !ok {
+		t.Fatal("kitty DA3 did not decide truecolor")
+	}
+	if got := string(p.drain()); got != "ab" {
+		t.Fatalf("drained %q, want %q with the DCS stripped", got, "ab")
+	}
+
+	// Split exactly at the DCS header/name boundary: the complete
+	// header ("\x1bP!|") is held, the name arrives later.
+	p2 := newTermProbe(time.Minute)
+	if _, buffered := p2.offer([]byte("x\x1bP!|")); !buffered {
+		t.Fatal("partial DCS header not buffered")
+	}
+	if _, buffered := p2.offer([]byte("wezterm\x1b\\y")); !buffered {
+		t.Fatal("DCS completion not buffered")
+	}
+	if decided, ok := p2.result(0); !decided || !ok {
+		t.Fatal("wezterm DA3 split across offers did not decide truecolor")
+	}
+	if got := string(p2.drain()); got != "xy" {
+		t.Fatalf("drained %q, want %q", got, "xy")
+	}
+
+	// A second DA2 reply after the decision: stripped, no panic, and
+	// the verdict cannot flip.
+	rest, _ := p2.offer([]byte("z\x1b[>65;1;0cw"))
+	if got := string(rest); got != "zw" {
+		t.Fatalf("post-decision DA2 strip = %q, want %q", got, "zw")
+	}
+	// A second, contradicting DCS reply after the decision: ditto.
+	rest, _ = p2.offer([]byte("\x1bP!|Apple_Terminal\x1b\\v"))
+	if got := string(rest); got != "v" {
+		t.Fatalf("post-decision DCS strip = %q, want %q", got, "v")
+	}
+	if decided, ok := p2.result(0); !decided || !ok {
+		t.Fatal("verdict changed by a second reply")
+	}
+}
+
 // End to end: the query goes out at pty-req, the client's reply sets
 // the session's color depth, and keystrokes typed during the probe
 // window survive into the feed.
@@ -176,7 +226,7 @@ func TestSessionColorDepth(t *testing.T) {
 		name string
 		term string
 		env  [2]string
-		want int
+		want render.ColorMode
 	}{
 		{"silent 256color", "xterm-256color", [2]string{"", ""}, render.Colors256},
 		{"plain xterm", "xterm", [2]string{"", ""}, render.Colors16},
@@ -184,7 +234,7 @@ func TestSessionColorDepth(t *testing.T) {
 		{"ghostty family", "xterm-ghostty", [2]string{"", ""}, render.Colors24},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := make(chan int, 1)
+			got := make(chan render.ColorMode, 1)
 			srv := startServer(t, func(s *Session) {
 				got <- s.ColorDepth()
 				<-s.Done()

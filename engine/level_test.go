@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func newGame(t *testing.T, l *Level) *Game {
 }
 
 func run(g *Game, n int, in Input) {
-	for i := 0; i < n; i++ {
+	for range n {
 		g.Update(in)
 	}
 }
@@ -206,7 +207,7 @@ func TestDefaultLevelsValid(t *testing.T) {
 		}
 		// Pits are jumpable: at most 4 columns wide.
 		run, maxRun := 0, 0
-		for x := 0; x < l.Width; x++ {
+		for x := range l.Width {
 			if !l.At(x, 13).Solid() && !l.At(x, 14).Solid() {
 				run++
 				if run > maxRun {
@@ -261,6 +262,9 @@ func TestLevelNameAndIndex(t *testing.T) {
 }
 
 // snapshot captures a comparable fingerprint of game state (determinism).
+// It deliberately spans every live entity list so pause and determinism
+// tripwires notice a frozen or diverging plant, mushroom, flower,
+// fireball or particle too.
 func snapshot(g *Game) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "s=%d c=%d l=%d t=%d st=%v cam=%.4f p=(%.4f,%.4f,%.4f,%.4f) sup=%v",
@@ -272,5 +276,23 @@ func snapshot(g *Game) string {
 	for _, c := range g.CoinItems {
 		fmt.Fprintf(&sb, "|c(%.1f,%.1f,%v)", c.Pos.X, c.Pos.Y, c.Gone)
 	}
+	for _, p := range g.Plants {
+		fmt.Fprintf(&sb, "|pl(%.3f,%.3f,%v,%d)", p.Pos.X, p.Pos.Y, p.State, p.Timer)
+	}
+	for _, m := range g.Mushrooms {
+		fmt.Fprintf(&sb, "|m(%.3f,%.3f,%d,%v)", m.Pos.X, m.Pos.Y, m.Kind, m.Gone)
+	}
+	for _, f := range g.FireFlowers {
+		fmt.Fprintf(&sb, "|f(%.3f,%.3f,%d,%v)", f.Pos.X, f.Pos.Y, f.Emerge, f.Gone)
+	}
+	for _, fb := range g.Fireballs {
+		fmt.Fprintf(&sb, "|fb(%.3f,%.3f,%d,%v)", fb.Pos.X, fb.Pos.Y, fb.Life, fb.Gone)
+	}
+	for _, pa := range g.Particles {
+		fmt.Fprintf(&sb, "|pa(%.2f,%.2f,%d,%d)", pa.Pos.X, pa.Pos.Y, pa.Kind, pa.Life)
+	}
 	return sb.String()
 }
+
+// approx reports float equality within test tolerance.
+func approx(a, b float64) bool { return math.Abs(a-b) < 1e-6 }

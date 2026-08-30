@@ -16,9 +16,6 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-// blinkVisible mirrors render's blink cadence (~0.7s on, ~0.3s off).
-func blinkVisible(tick int) bool { return tick%40 < 28 }
-
 // uiLine is one centered line of a leaderboard screen.
 type uiLine struct {
 	text  string
@@ -54,7 +51,7 @@ func centerBlock(f *render.Frame, worldY, worldH int, lines []uiLine, tick int) 
 
 func drawLines(f *render.Frame, lines []uiLine, y int, tick int) {
 	for _, ln := range lines {
-		if ln.blink && !blinkVisible(tick) {
+		if ln.blink && !render.BlinkVisible(tick) {
 			y += 7
 			continue
 		}
@@ -128,7 +125,7 @@ func boardScreen(f *render.Frame, p *render.Palette, u *render.ScoreUI, worldY, 
 	}
 
 	if u.Loading {
-		if blinkVisible(tick) {
+		if render.BlinkVisible(tick) {
 			msg := "LOADING"
 			f.DrawTextPx(msg, (f.W-render.TextWidthPx(msg))/2, worldY+14, p.TextDim)
 		}

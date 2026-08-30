@@ -124,3 +124,41 @@ func TestCalibrationSurvivesRestart(t *testing.T) {
 		t.Errorf("session restart re-stutters: first hold survived %d ticks, want >= 18", held)
 	}
 }
+
+// ApplyCalibration is the trust boundary for persisted state: whatever
+// the (possibly corrupt or stale) file says gets clamped into range, and
+// a habit array that doesn't match this mapper's key set is ignored
+// wholesale rather than partially applied.
+func TestApplyCalibrationClamps(t *testing.T) {
+	m := NewMapper()
+	m.ks[kRight].heldHabit = true  // seeded habit for the ignore-rows to preserve
+	full := make([]bool, keyCount) // a full array: applied wholesale
+	full[kDown] = true
+	cases := []struct {
+		// after this row's apply: the clamped osDelay, and the habits
+		// of kDown and kRight (a full-length array replaces wholesale,
+		// a wrong-length one is ignored completely).
+		name        string
+		cal         Calibration
+		osWant      int
+		down, right bool
+	}{
+		{"negative osDelay clamps to 0", Calibration{OSDelay: -7}, 0, false, true},
+		{"osDelay above maxHoldWindow clamps down", Calibration{OSDelay: 9999}, maxHoldWindow, false, true},
+		{"wrong-length habit array ignored", Calibration{OSDelay: 36, HeldHabit: []bool{true}}, 36, false, true},
+		{"right-length habit array applied", Calibration{HeldHabit: full}, 0, true, false},
+	}
+	for _, c := range cases {
+		m.ApplyCalibration(c.cal)
+		got := m.Calibration()
+		if got.OSDelay != c.osWant {
+			t.Errorf("%s: osDelay = %d, want %d", c.name, got.OSDelay, c.osWant)
+		}
+		if got.HeldHabit[kDown] != c.down {
+			t.Errorf("%s: heldHabit[kDown] = %v, want %v", c.name, got.HeldHabit[kDown], c.down)
+		}
+		if got.HeldHabit[kRight] != c.right {
+			t.Errorf("%s: heldHabit[kRight] = %v, want %v", c.name, got.HeldHabit[kRight], c.right)
+		}
+	}
+}

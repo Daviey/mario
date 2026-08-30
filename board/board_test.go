@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Daviey/mario/internal/persist"
 )
@@ -189,6 +190,13 @@ func TestFromEnv(t *testing.T) {
 	t.Setenv("SUPABASE_KEY", "")
 	if _, err := FromEnv(); err == nil {
 		t.Fatal("missing env must error")
+	}
+	// The error must name exactly the missing variable(s).
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("SUPABASE_KEY", "k")
+	_, err := FromEnv()
+	if err == nil || !strings.Contains(err.Error(), "SUPABASE_URL") || strings.Contains(err.Error(), "SUPABASE_KEY") {
+		t.Fatalf("err = %v, want it to name SUPABASE_URL only", err)
 	}
 	t.Setenv("SUPABASE_URL", "https://x.supabase.co/")
 	t.Setenv("SUPABASE_KEY", "k")
@@ -441,5 +449,75 @@ func TestClampPlaySessionColors(t *testing.T) {
 		if p.Colors != tc.want {
 			t.Errorf("ClampPlaySession colors %d = %d, want %d", tc.in, p.Colors, tc.want)
 		}
+	}
+}
+
+// TestClampMetaRuneBoundary pins that truncation lands on rune
+// boundaries: cutting mid-rune (either after the lead byte or between
+// continuation bytes) would ship invalid UTF-8, which Postgres rejects
+// outright.
+func TestClampMetaRuneBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		n        int
+	}{
+		{"abcdef", "abc", 3}, // ASCII: plain cut
+		{"aécd", "aé", 3},    // cut between a rune's continuation bytes
+		{"aé", "a", 2},       // cut right after the lead byte
+		{"é", "", 1},         // nothing of the rune fits
+		{"éé", "é", 2},       // cut exactly between runes
+		{"日本語", "日本", 6},     // 3-byte runes
+	} {
+		if got := clampMeta(tc.in, tc.n); got != tc.want {
+			t.Errorf("clampMeta(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
+		} else if !utf8.ValidString(got) {
+			t.Errorf("clampMeta(%q, %d) = %q is not valid UTF-8", tc.in, tc.n, got)
+		}
+	}
+}
+
+// TestClampPlaySessionBounds pins the non-color clamps: the engine
+// version's 32-char cap, the score caps (the plays CHECK mirrors them),
+// clock ordering, and the ip literal-only rule (hostnames never reach
+// the ip column).
+func TestClampPlaySessionBounds(t *testing.T) {
+	start := time.Unix(1000, 0)
+	p := PlaySession{
+		IP:            "game.example.com", // hostname: rejected outright
+		StartedAt:     start,
+		EndedAt:       start.Add(-time.Second),
+		EngineVersion: strings.Repeat("x", 40),
+		Score:         -5,
+	}
+	ClampPlaySession(&p)
+	if p.IP != "" {
+		t.Errorf("hostname ip %q survived the clamp", p.IP)
+	}
+	if !p.EndedAt.Equal(start) {
+		t.Errorf("EndedAt %v before StartedAt %v was not reset", p.EndedAt, start)
+	}
+	if want := strings.Repeat("x", 32); p.EngineVersion != want {
+		t.Errorf("EngineVersion = %d chars, want %d", len(p.EngineVersion), len(want))
+	}
+	if p.Score != 0 {
+		t.Errorf("negative score %d not clamped to 0", p.Score)
+	}
+
+	p.Score = 99999999
+	ClampPlaySession(&p)
+	if p.Score != 9999999 {
+		t.Errorf("score %d not clamped to 9999999", p.Score)
+	}
+
+	// Real literals in both families pass through untouched.
+	p.IP, p.Viewport = "192.168.1.5", "80x24"
+	ClampPlaySession(&p)
+	if p.IP != "192.168.1.5" || p.Viewport != "80x24" {
+		t.Errorf("legitimate literal fields clamped: ip=%q viewport=%q", p.IP, p.Viewport)
+	}
+	p.IP = "::1"
+	ClampPlaySession(&p)
+	if p.IP != "::1" {
+		t.Errorf("ipv6 literal %q rejected", p.IP)
 	}
 }

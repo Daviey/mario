@@ -84,9 +84,11 @@ const (
 	boardMaxRows = 10 // the board shows the top ten
 )
 
-// blinkVisible reports whether blinking lines draw this tick (same cadence
-// as the pixel UI: ~0.7s on, ~0.3s off at 60 Hz).
-func blinkVisible(tick int) bool { return tick%40 < 28 }
+// BlinkVisible reports whether blinking lines draw this tick (the one
+// blink cadence shared by every surface — terminal text, the WASM canvas
+// and the EFI framebuffer UI); on ~28 of every 40 ticks (0.47s on, 0.2s
+// off at 60 Hz).
+func BlinkVisible(tick int) bool { return tick%40 < 28 }
 
 // drawScoreUIText paints the active leaderboard screen as real text cells
 // over a dark background, replacing the world rows of the screen (rows
@@ -138,7 +140,7 @@ type uiLine struct {
 func drawCenteredBlock(s *Screen, bg Color, tick int, lines []uiLine) {
 	top := 1 + max(0, (s.H-2-len(lines))/2)
 	for i, ln := range lines {
-		if ln.blink && !blinkVisible(tick) {
+		if ln.blink && !BlinkVisible(tick) {
 			continue
 		}
 		s.Center(top+i, ln.text, ln.fg, bg, ln.bold)
@@ -169,7 +171,7 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 	bodyY := 3
 	switch {
 	case ui.Loading:
-		if blinkVisible(tick) {
+		if BlinkVisible(tick) {
 			s.Center(bodyY, "LOADING...", p.White, bg, false)
 		}
 	case len(ui.Rows) == 0:
@@ -197,11 +199,11 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 	}
 	switch {
 	case ui.Title:
-		if blinkVisible(tick) {
+		if BlinkVisible(tick) {
 			s.Center(footY, "L CLOSE", p.White, bg, false)
 		}
 	default:
-		if blinkVisible(tick) {
+		if BlinkVisible(tick) {
 			s.Center(footY, "R RESTART   Q QUIT", p.White, bg, false)
 		}
 	}

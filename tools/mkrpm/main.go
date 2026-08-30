@@ -268,7 +268,7 @@ type entry struct {
 }
 
 // store builds one RPM header: an index of tags over a packed data
-// segment. bytes() lays the data out in tag order — rpm's verifier
+// segment. encode() lays the data out in tag order — rpm's verifier
 // requires each tag's data to start where the previous (in index
 // order) ended — with integers naturally aligned (misaligned ints are
 // rejected) and strings/blobs packed unaligned (aligning those breaks
@@ -335,14 +335,18 @@ func typeAlign(typ uint32) int {
 	}
 }
 
-// bytes renders the header. regionTag is 62 (HEADERSIGNATURES) for the
+// encode renders the header. regionTag is 62 (HEADERSIGNATURES) for the
 // signature header, 63 (HEADERIMMUTABLE) for the main one. The region
 // is tracked by an index entry — first in the index — pointing at a
 // 16-byte trailer at the very end of the data segment; the trailer
 // repeats the entry with a negative offset spanning the whole index.
 // Odd, but rpm's digest ranges are defined over exactly this shape
 // (hdrblobDigestUpdate hashes magic + lengths + region + region data).
-func (s *store) bytes(regionTag uint32) []byte {
+//
+// encode sorts s.entries by tag in place: rpm requires index order and
+// data order to agree, and every store is rendered exactly once and
+// then discarded, so mutating the receiver is safe.
+func (s *store) encode(regionTag uint32) []byte {
 	sort.Slice(s.entries, func(i, j int) bool { return s.entries[i].tag < s.entries[j].tag })
 
 	var data []byte
@@ -498,7 +502,7 @@ func mainHeader(ver, rpmArch string, entries []payloadEntry, payloadDigest [sha2
 	s.addString(tagPayloadFlags, "9") // matches gzip.BestCompression below
 	s.addStrings(tagPayloadDigest, []string{hex.EncodeToString(payloadDigest[:])})
 	s.addInt32s(tagPayloadDigestAlgo, pgpHashSHA256)
-	return s.bytes(tagHeaderImmutable)
+	return s.encode(tagHeaderImmutable)
 }
 
 // signatureHeader builds the digest-only signature header. The SHA1 and
@@ -517,7 +521,7 @@ func signatureHeader(hdr, payload []byte, cpioLen int) []byte {
 	_, _ = h.Write(payload)
 	s.addBin(sigMD5, h.Sum(nil))
 	s.addInt32s(sigPayloadSize, int32(cpioLen))
-	return s.bytes(tagHeaderSignature)
+	return s.encode(tagHeaderSignature)
 }
 
 // lead writes the 96-byte legacy lead: magic, format version 3.0,
@@ -553,46 +557,14 @@ func cpioArchive(entries []payloadEntry) []byte {
 		} else {
 			mode |= 0o100000
 		}
-		writeNewc(&buf, "./"+e.path, mode, uint64(len(e.data)), e.data, uint64(i+1), nlink)
+		pack.WriteNewcEntry(&buf, pack.NewcEntry{
+			Name: "./" + e.path, Mode: mode, Nlink: nlink,
+			Size: uint64(len(e.data)), Data: e.data, Ino: uint64(i + 1),
+		})
 	}
-	writeNewc(&buf, "TRAILER!!!", 0, 0, nil, 0, 1)
+	pack.WriteNewcEntry(&buf, pack.NewcEntry{Name: "TRAILER!!!", Nlink: 1})
 	if r := buf.Len() % 512; r != 0 {
 		buf.Write(make([]byte, 512-r))
 	}
 	return buf.Bytes()
-}
-
-// writeNewc appends one newc entry: "070701" magic + 13 hex fields,
-// then NUL-terminated name and file data, each padded to 4 bytes.
-func writeNewc(buf *bytes.Buffer, name string, mode, size uint64, data []byte, ino, nlink uint64) {
-	fields := []uint64{
-		ino,                   // c_ino
-		mode,                  // c_mode (S_IFMT bits | permissions)
-		0,                     // c_uid
-		0,                     // c_gid
-		nlink,                 // c_nlink
-		0,                     // c_mtime (epoch: deterministic)
-		size,                  // c_filesize
-		0,                     // c_devmajor
-		0,                     // c_devminor
-		0,                     // c_rdevmajor
-		0,                     // c_rdevminor
-		uint64(len(name)) + 1, // c_namesize (NUL included)
-		0,                     // c_check (always 0 for newc)
-	}
-	buf.WriteString("070701")
-	for _, f := range fields {
-		fmt.Fprintf(buf, "%08x", f)
-	}
-	buf.WriteString(name)
-	buf.WriteByte(0)
-	pad4(buf)
-	buf.Write(data)
-	pad4(buf)
-}
-
-func pad4(buf *bytes.Buffer) {
-	if r := buf.Len() % 4; r != 0 {
-		buf.Write(make([]byte, 4-r))
-	}
 }
