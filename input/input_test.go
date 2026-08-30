@@ -690,3 +690,30 @@ func TestReleaseAllDropsHoldsAndEdges(t *testing.T) {
 		t.Fatal("mapper must accept new presses after ReleaseAll")
 	}
 }
+
+// ReleaseAll fires exactly when input stops reaching the mapper mid-hold
+// (the UI captured the keyboard). The silent-expiry sweep that would
+// settle heldHabit never runs for that hold — so ReleaseAll must settle
+// it itself: a key with repeats observed was held, and the next press
+// deserves the calibrated grace, not a fresh holdWindow stall.
+func TestReleaseAllSettlesHoldHabit(t *testing.T) {
+	m := NewMapper()
+	m.Feed([]byte("d")) // press
+	m.Poll()
+	m.Feed([]byte("d")) // first repeat: the press is proven a hold
+	m.Poll()
+	m.ReleaseAll()
+
+	m.Feed([]byte("d")) // fresh press after the board/restart
+	if in := m.Poll(); !in.Right {
+		t.Fatal("press after ReleaseAll not delivered")
+	}
+	// holdWindow is 12; the uncalibrated hold grace (defaultOSDelay+2)
+	// is 38. The habit surviving ReleaseAll is what keeps the key live
+	// across the repeat delay.
+	for i := range holdWindow + 4 {
+		if in := m.Poll(); !in.Right {
+			t.Fatalf("held key dropped at poll %d: hold habit lost to ReleaseAll", i)
+		}
+	}
+}
