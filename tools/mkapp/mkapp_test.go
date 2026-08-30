@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 // fakeMacho builds a minimal little-endian 64-bit Mach-O header + filler
@@ -35,7 +37,7 @@ func TestShortVersion(t *testing.T) {
 		{"", "0.0.0"},
 	}
 	for _, c := range cases {
-		if got := shortVersion(c.in); got != c.want {
+		if got := pack.ShortVersion(c.in); got != c.want {
 			t.Errorf("shortVersion(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
@@ -224,7 +226,7 @@ func TestAppZipDeterministic(t *testing.T) {
 		}
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
-		if err := zipDir(staging, zw); err != nil {
+		if err := pack.ZipDir(staging, zw, normalizeZipMode); err != nil {
 			t.Fatal(err)
 		}
 		if err := zw.Close(); err != nil {
@@ -262,7 +264,7 @@ func TestAppZipDeterministic(t *testing.T) {
 		if got := f.Mode().Perm(); uint32(got) != w.mode {
 			t.Errorf("entry %q mode = %v, want %#o", f.Name, got, w.mode)
 		}
-		if !f.Modified.Equal(zipEpoch) {
+		if !f.Modified.Equal(pack.ZipEpoch) {
 			t.Errorf("entry %q has non-epoch mtime %v", f.Name, f.Modified)
 		}
 		rc, err := f.Open()
@@ -317,7 +319,7 @@ func TestZipDirNormalizesModes(t *testing.T) {
 	write("exec", 0o700)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	if err := zipDir(dir, zw); err != nil {
+	if err := pack.ZipDir(dir, zw, normalizeZipMode); err != nil {
 		t.Fatal(err)
 	}
 	if err := zw.Close(); err != nil {

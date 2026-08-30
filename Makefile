@@ -309,7 +309,11 @@ web:
 	# Cache-bust the service worker per release: the deployed sw.js carries
 	# the git version as its CACHE name, so every deploy keys a fresh cache
 	# (activate drops older ones) instead of serving stale bytes forever.
-	sed 's/mario-v0\.2\.0/mario-$(VERSION)/' web/sw.js > $(WEBDIST)/sw.js
+	# The sed matches the CACHE declaration by prefix — never a hardcoded
+	# version literal — and the grep fails the build when the stamp did
+	# not land, so a hand-edited sw.js cannot ship a stale cache name.
+	sed "s|^const CACHE = 'mario-[^']*';|const CACHE = 'mario-$(VERSION)';|" web/sw.js > $(WEBDIST)/sw.js
+	@grep -Fqx "const CACHE = 'mario-$(VERSION)';" $(WEBDIST)/sw.js || { echo "ERROR: sw.js CACHE stamp did not land (want const CACHE = 'mario-$(VERSION)';)" >&2; exit 1; }
 	cp -r web/icons $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \

@@ -36,11 +36,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/Daviey/mario/internal/art"
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 const (
@@ -162,7 +162,7 @@ func run(version, arch, bin, pkgdir, out string) error {
 	if !ok {
 		return fmt.Errorf("unsupported architecture %q (want amd64, arm64, riscv64, arm or 386)", arch)
 	}
-	ver, err := sanitizeVersion(version)
+	ver, err := pack.SanitizeVersion(version, "RPM")
 	if err != nil {
 		return err
 	}
@@ -188,14 +188,14 @@ func run(version, arch, bin, pkgdir, out string) error {
 	// Everything else mirrors the .deb payload exactly.
 	entries := manifest([]file{
 		{"usr/bin/mario", 0o755, false, game},
-		{"usr/share/man/man6/mario.6.gz", 0o644, true, gz(man)},
+		{"usr/share/man/man6/mario.6.gz", 0o644, true, pack.Gzip(man, gzip.DefaultCompression)},
 		{"usr/share/doc/mario/copyright", 0o644, true, copyright},
 		{"usr/share/applications/mario.desktop", 0o644, false, desktop},
 		{"usr/share/icons/hicolor/48x48/apps/mario.png", 0o644, false, art.IconPNG(48, 8)},
 	})
 
 	cpio := cpioArchive(entries)
-	payload := gzip9(cpio)
+	payload := pack.Gzip(cpio, gzip.BestCompression)
 	digest := sha256.Sum256(payload)
 	hdr := mainHeader(ver, rpmArch, entries, digest)
 	sig := signatureHeader(hdr, payload, len(cpio))
@@ -255,26 +255,6 @@ func manifest(files []file) []payloadEntry {
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].path < all[j].path })
 	return all
-}
-
-// sanitizeVersion maps a git-describe version onto a valid RPM version:
-// strips the leading "v", rewrites the off-tag suffix ("-14-g1a2b3c" →
-// "+14.g1a2b3c", "-dirty" → "+dirty" — an RPM version must not contain
-// '-', which would read as the version/release separator), then rejects
-// anything still outside the charset (must start with a digit).
-var (
-	verRe  = regexp.MustCompile(`^[0-9][0-9A-Za-z.+~_]*$`)
-	offTag = regexp.MustCompile(`-(\d+)-g([0-9A-Fa-f]+)`)
-)
-
-func sanitizeVersion(v string) (string, error) {
-	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	v = offTag.ReplaceAllString(v, "+$1.g$2")
-	v = strings.ReplaceAll(v, "-dirty", "+dirty")
-	if !verRe.MatchString(v) {
-		return "", fmt.Errorf("invalid RPM version %q (must start with a digit; no '-' after describe mapping)", v)
-	}
-	return v, nil
 }
 
 // --- header (index + data store) ---
@@ -615,26 +595,4 @@ func pad4(buf *bytes.Buffer) {
 	if r := buf.Len() % 4; r != 0 {
 		buf.Write(make([]byte, 4-r))
 	}
-}
-
-// --- compression ---
-
-// gzip9 compresses the payload at the level PAYLOADFLAGS ("9")
-// advertises. Go's flate is deterministic for a fixed level.
-func gzip9(b []byte) []byte {
-	var buf bytes.Buffer
-	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	_, _ = w.Write(b)
-	_ = w.Close()
-	return buf.Bytes()
-}
-
-// gz mirrors tools/mkdeb's helper so the man page carries identical
-// bytes in both package formats.
-func gz(b []byte) []byte {
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	_, _ = w.Write(b)
-	_ = w.Close()
-	return buf.Bytes()
 }

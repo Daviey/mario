@@ -27,12 +27,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Daviey/mario/internal/art"
+	"github.com/Daviey/mario/tools/internal/pack"
 )
 
 const (
@@ -68,7 +68,7 @@ func run(version, arch, bin, pkgdir, out string) error {
 	if !debs[arch] {
 		return fmt.Errorf("unsupported Debian architecture %q (want amd64, arm64, riscv64, armhf or i386)", arch)
 	}
-	ver, err := sanitizeVersion(version)
+	ver, err := pack.SanitizeVersion(version, "Debian")
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func run(version, arch, bin, pkgdir, out string) error {
 
 	files := []file{
 		{"usr/games/mario", 0o755, game},
-		{"usr/share/man/man6/mario.6.gz", 0o644, gz(man)},
+		{"usr/share/man/man6/mario.6.gz", 0o644, pack.Gzip(man, gzip.DefaultCompression)},
 		{"usr/share/doc/mario/copyright", 0o644, copyright},
 		{"usr/share/applications/mario.desktop", 0o644, desktop},
 		{"usr/share/icons/hicolor/48x48/apps/mario.png", 0o644, art.IconPNG(48, 8)},
@@ -130,28 +130,6 @@ type file struct {
 type member struct {
 	name string
 	data []byte
-}
-
-// sanitizeVersion maps a git-describe version onto a valid Debian native
-// version: strips the leading "v", rewrites the off-tag suffix
-// ("-14-g1a2b3c" → "+14.g1a2b3c", "-dirty" → "+dirty" — a native
-// version must not contain '-', which dpkg would read as an
-// upstream/revision split), then rejects anything still outside the
-// Debian charset (must start with a digit; no ':' epoch, no spaces, no
-// leftover hyphens).
-var (
-	verRe  = regexp.MustCompile(`^[0-9][0-9A-Za-z.+~_]*$`)
-	offTag = regexp.MustCompile(`-(\d+)-g([0-9A-Fa-f]+)`)
-)
-
-func sanitizeVersion(v string) (string, error) {
-	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	v = offTag.ReplaceAllString(v, "+$1.g$2")
-	v = strings.ReplaceAll(v, "-dirty", "+dirty")
-	if !verRe.MatchString(v) {
-		return "", fmt.Errorf("invalid Debian version %q (must start with a digit; no '-' after describe mapping)", v)
-	}
-	return v, nil
 }
 
 func controlFile(ver, arch string, dataLen int) []byte {
@@ -229,14 +207,6 @@ func tarball(files []file) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func gz(b []byte) []byte {
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	_, _ = w.Write(b)
-	_ = w.Close()
-	return buf.Bytes()
 }
 
 // ar writes a classic (GNU-style) ar archive: 8-byte magic, then 60-byte
