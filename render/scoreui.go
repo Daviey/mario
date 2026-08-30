@@ -22,6 +22,8 @@ const (
 	UIEntry
 	// UIBoard is the leaderboard table.
 	UIBoard
+	// UIAbout is the fan-game about screen (title 'i').
+	UIAbout
 )
 
 // String names the mode for logs and the JSON bridge.
@@ -33,6 +35,8 @@ func (m UIMode) String() string {
 		return "entry"
 	case UIBoard:
 		return "board"
+	case UIAbout:
+		return "about"
 	}
 	return "off"
 }
@@ -117,6 +121,8 @@ func drawScoreUIText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 		})
 	case UIBoard:
 		drawBoardText(s, ui, p, tick)
+	case UIAbout:
+		drawAboutText(s, p, tick)
 	}
 }
 
@@ -205,4 +211,20 @@ func rowColor(mine bool, p *Palette) Color {
 		return p.GoldLight
 	}
 	return p.White
+}
+
+// drawAboutText paints the about screen: what the game is, what it isn't,
+// and where it runs. Real text (same layer as the other UI screens).
+func drawAboutText(s *Screen, p *Palette, tick int) {
+	drawCenteredBlock(s, p.Dark, tick, []uiLine{
+		{"SUPER CLI MARIO", p.White, true, false},
+		{"", p.White, false, false},
+		{"a fan-made terminal platformer", p.GoldLight, false, false},
+		{"unofficial fan art · not affiliated with nintendo", p.White, false, false},
+		{"mario is a trademark of nintendo", p.TextDim, false, false},
+		{"", p.White, false, false},
+		{"plays in your terminal · over ssh · in the browser", p.White, false, false},
+		{"", p.White, false, false},
+		{"I CLOSE", p.TextDim, false, true},
+	})
 }

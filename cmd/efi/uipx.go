@@ -40,6 +40,8 @@ func uiFrame(base *render.Frame, p *render.Palette, u *render.ScoreUI, tick int)
 		entryScreen(base, p, u, worldY, worldH)
 	case render.UIBoard:
 		boardScreen(base, p, u, worldY, worldH, tick)
+	case render.UIAbout:
+		aboutScreen(base, p, worldY, worldH, tick)
 	}
 	return base
 }
@@ -152,7 +154,26 @@ func boardScreen(f *render.Frame, p *render.Palette, u *render.ScoreUI, worldY, 
 		if row.Verified {
 			mark = "+"
 		}
+
 		txt := fmt.Sprintf("%2d %-8s %06d L%-2d %s", i+1, row.Name, row.Score, row.Level, mark)
 		f.DrawTextPx(txt, (f.W-render.TextWidthPx(txt))/2, worldY+14+i*7, color)
 	}
+}
+
+// aboutScreen is the about page in the arcade glyph set (no lowercase,
+// no '·' — charset A-Z 0-9 space . - + / : ! ?).
+func aboutScreen(f *render.Frame, p *render.Palette, worldY, worldH int, tick int) {
+	centerBlock(f, worldY, worldH, []uiLine{
+		{"SUPER CLI MARIO", p.White, false},
+		{"", p.White, false},
+		{"A FAN-MADE TERMINAL PLATFORMER", p.GoldLight, false},
+		{"UNOFFICIAL FAN ART", p.White, false},
+		{"NOT AFFILIATED WITH NINTENDO", p.White, false},
+		{"MARIO IS A TRADEMARK OF NINTENDO", p.TextDim, false},
+		{"", p.White, false},
+		{"PLAYS IN YOUR TERMINAL", p.White, false},
+		{"OVER SSH AND IN THE BROWSER", p.White, false},
+		{"", p.White, false},
+		{"I CLOSE", p.TextDim, true},
+	}, tick)
 }

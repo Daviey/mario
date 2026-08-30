@@ -272,6 +272,13 @@
         + (st.best > 0 ? '<p class="hint">BEST ' + escHtml(pad(st.best, 6)) + '</p>' : '')
         + '<p class="gold blink">SUBMIT TO LEADERBOARD?</p>'
         + (IS_TOUCH() ? '' : '<p>Y YES&nbsp;&nbsp;&nbsp;N NO</p>');
+    } else if (st.mode === 'about') {
+      html = '<h3>SUPER CLI MARIO</h3>'
+        + '<p class="gold">a fan-made terminal platformer</p>'
+        + '<p>unofficial fan art · not affiliated with nintendo</p>'
+        + '<p class="hint">mario is a trademark of nintendo</p>'
+        + '<p>plays in your terminal · over ssh · in the browser</p>'
+        + (IS_TOUCH() ? '' : '<p class="hint blink">I CLOSE</p>');
     } else if (st.mode === 'entry') {
       const name = escHtml(st.name || '');
       const padN = '&nbsp;'.repeat(Math.max(0, 9 - name.length));
@@ -519,8 +526,9 @@
   </div>
   <div id="pad-ask" style="display:none; gap:16px"><button class="pbtn btn-yes" data-tap="y">YES</button><button class="pbtn btn-no" data-tap="n">NO</button></div>
   <div id="pad-board" style="display:none; gap:16px"><button class="pbtn btn-no" data-tap="l">CLOSE</button><button class="pbtn btn-yes" data-tap="r">RESTART</button></div>
+  <div id="pad-about" style="display:none; gap:16px"><button class="pbtn btn-no" data-tap="i">CLOSE</button></div>
   <div id="pad-entry" style="display:none"></div>`;
-  const padViews = { game: document.getElementById('pad-game'), ask: document.getElementById('pad-ask'), board: document.getElementById('pad-board'), entry: document.getElementById('pad-entry') };
+  const padViews = { game: document.getElementById('pad-game'), ask: document.getElementById('pad-ask'), board: document.getElementById('pad-board'), about: document.getElementById('pad-about'), entry: document.getElementById('pad-entry') };
   window.setPadMode = (m) => {
     padEl.className = m === 'entry' ? 'keypad' : m;
     for (const k in padViews) padViews[k].style.display = k === m ? (m === 'game' ? 'contents' : m === 'entry' ? '' : 'flex') : 'none';

@@ -667,6 +667,11 @@ func mappedKey(code int) (keyEvent, bool) {
 		// AnyKey edge can never start the game — gameio routes the raw
 		// byte to the UI before the mapper sees it.
 		return keyEvent{}, true
+	case 'i', 'I':
+		// About key, same treatment as 'l': title screen 'i' opens the
+		// about screen, and the no-op mapping keeps its AnyKey edge from
+		// ever starting the game.
+		return keyEvent{}, true
 	}
 	return keyEvent{special: spAny}, true
 }

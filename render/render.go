@@ -258,8 +258,10 @@ func (s *Screen) Text(x, y int, text string, fg Color) {
 
 // TextStyled writes a styled string.
 func (s *Screen) TextStyled(x, y int, text string, fg, bg Color, bold bool) {
-	for i, r := range text {
-		s.SetStyled(x+i, y, r, fg, bg, bold)
+	cx := x
+	for _, r := range text {
+		s.SetStyled(cx, y, r, fg, bg, bold)
+		cx++
 	}
 }
 
@@ -1130,7 +1132,7 @@ func titleTextEls(f *Frame, g *engine.Game) []titleText {
 	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1, inkGold, true, true)
 	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom
-		add(pickTextPx([]string{"L BOARD D DAILY", "L/D BOARD DAILY", "L DAILY"}, f.W-2), hintY, 1, inkWhite, false, true)
+		add(pickTextPx([]string{"L BOARD D DAILY I ABOUT", "L BOARD I ABOUT", "L/D BOARD DAILY", "L DAILY"}, f.W-2), hintY, 1, inkWhite, false, true)
 		if best := g.Best; best > 0 {
 			if bestY := hintY + 6; bestY+5 <= f.H {
 				add(fmt.Sprintf("BEST %06d", best), bestY, 1, inkGold, false, true)
