@@ -34,7 +34,7 @@ func gateHandler(t *testing.T) (handler func(*Session), release chan struct{}) {
 // span packets).
 func waitData(t *testing.T, tc *testClient, want string) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second) // generous: the single-core CI runner starves handshakes when all package test binaries run concurrently
 	var got string
 	for !strings.Contains(got, want) {
 		if time.Now().After(deadline) {
