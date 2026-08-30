@@ -94,6 +94,13 @@ func (a *admission) enter(s *Session, maxSessions, maxQueue int, timeout time.Du
 	a.mu.Lock()
 	lastPos := w.pos // under mu: exit/remove shift positions concurrently
 	a.mu.Unlock()
+	// One timer per arm, reset each loop: a fresh time.After per
+	// iteration parked an unreleasable timer (and its 1s wake) for
+	// every second of the whole wait — hundreds per queued player.
+	drop := time.NewTimer(time.Until(deadline))
+	poll := time.NewTimer(time.Second)
+	defer drop.Stop()
+	defer poll.Stop()
 	for {
 		select {
 		case <-w.ready:
@@ -101,15 +108,16 @@ func (a *admission) enter(s *Session, maxSessions, maxQueue int, timeout time.Du
 		case <-s.Done():
 			a.remove(w)
 			return time.Time{}, errQueueClosed
-		case <-time.After(time.Until(deadline)):
+		case <-drop.C:
 			a.remove(w)
 			s.Write([]byte("\r\n\r\nThe line moved too slowly — disconnected. Come back soon!\r\n"))
 			return time.Time{}, errQueueClosed
-		case <-time.After(time.Second):
+		case <-poll.C:
 			a.mu.Lock()
 			pos := w.pos
 			if pos == 0 { // dequeued by a timeout path racing us
 				a.mu.Unlock()
+				poll.Reset(time.Second)
 				continue
 			}
 			var upd []byte
@@ -124,6 +132,7 @@ func (a *admission) enter(s *Session, maxSessions, maxQueue int, timeout time.Du
 					return time.Time{}, errQueueClosed
 				}
 			}
+			poll.Reset(time.Second)
 		}
 	}
 }
