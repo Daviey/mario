@@ -180,6 +180,14 @@ type Result struct {
 // levels and reports what it scored. mode must match the submitted run
 // ("classic" or "daily"); for daily the caller swaps in the challenge
 // level for the recorded day beforehand.
+//
+// The viewport is hardcoded to 40xLevelHeight on purpose: the simulation
+// never reads the viewport (the camera is write-only state — nothing in
+// the engine spawns, freezes or culls off CameraX), so a recording made at
+// any live viewport replays identically here. TestReplayViewportIndependent
+// is the tripwire: if gameplay ever couples to ViewW/CameraX (e.g. classic
+// off-screen enemy freezing), that test breaks first — fix the engine or
+// persist the viewport in the wire format before shipping.
 func Run(levels []*engine.Level, mode string, data string) (Result, error) {
 	inputs, err := decode(data)
 	if err != nil {
