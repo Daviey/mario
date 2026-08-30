@@ -144,6 +144,21 @@ func (s *Session) TrueColor() bool {
 	return s.ch.decideColorTerm() != ""
 }
 
+// ColorTerm returns the DECIDED color-depth signal for this session —
+// env request > TERM family > DA probe (see TrueColor). Empty means the
+// 16-color palette. Telemetry should report this, not the raw env: the
+// probe decides most real sessions.
+func (s *Session) ColorTerm() string {
+	return s.ch.decideColorTerm()
+}
+
+// ClientVersion returns the client's SSH identification string (e.g.
+// "SSH-2.0-OpenSSH_10.4") from the RFC 4253 banner exchange — the
+// ssh-surface user agent for telemetry.
+func (s *Session) ClientVersion() string {
+	return string(s.ch.t.vPeer)
+}
+
 // DrainProbe stops the color-depth probe and returns any player
 // keystrokes it buffered while waiting for the DA2/DA3 reply. Call
 // right after OnFeed so nothing typed during the probe window is

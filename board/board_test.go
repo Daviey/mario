@@ -335,6 +335,8 @@ func TestRecordPlay(t *testing.T) {
 		Term:        "xterm-ghostty",
 		Viewport:    "40x14",
 		InputRegime: "kitty",
+		Colors:      31,
+		Client:      "SSH-2.0-OpenSSH_10.4",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -359,6 +361,8 @@ func TestRecordPlay(t *testing.T) {
 		"level": float64(3), "score": float64(4200), "submitted": true,
 		"runs": float64(2), "term": "xterm-ghostty", "viewport": "40x14",
 		"input_regime": "kitty", "engine_version": EngineVersion,
+		"colors": float64(16), // 31 is not a real palette: clamped to 16
+		"client": "SSH-2.0-OpenSSH_10.4",
 	} {
 		if sent[k] != want {
 			t.Errorf("%s = %v, want %v", k, sent[k], want)
