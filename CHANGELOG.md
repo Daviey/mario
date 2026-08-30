@@ -2,6 +2,38 @@
 
 ## v0.4.1 — 2026-08-29
 
+This release adds a from-scratch SSH game server and live terminal resizing, while cutting terminal render bandwidth by more than half. Packaging and CI also grew an AppImage target and auto-deployed web hosting.
+
+## Highlights
+- `mario -serve ADDR` runs an unauthenticated SSH server that presents the game — from-scratch SSH2 stack (transport, KEX, session channels), one game per connection.
+- Terminal output reworked with a differential SGR encoder, solid spaces and gap bridging, cutting bandwidth ~56% per tick.
+- The viewport now follows terminal resizes live while playing.
+
+## Added
+- SSH game server (`mario -serve`), stdlib-only SSH2 implementation with E2E and unit tests.
+- Live terminal resize support (`App.Resize`), with race tests for concurrent resize vs step and viewport sweeps.
+- AppImage packaging for linux/amd64, built via nix with a CI smoke guard.
+- Auto-deploy of the web build to mario.baby on every push to main (connection config in repo secrets).
+- Changelog backfill for v0.1.0..v0.3.4; release notes now written into the release body and committed to CHANGELOG.md (no separate asset).
+- Touch web control additions: restart pill and wrapped control row on narrow phones.
+
+## Changed
+- Wire-encoding contract documented for the differential renderer; round-trip and bandwidth tests added.
+- Slow SSH links no longer stall gameplay: ticks and input flow independently of rendering backpressure.
+
+## Fixed
+- AppImage CI job failure root-caused (bwrap needs CAP_SYS_ADMIN under root) and fixed; documented.
+- Restored Snapshot+Flush vs Draw equivalence assertion and the WEBLDFLAGS credential injection for the web build.
+
+## Packaging
+- New linux/amd64 AppImage artifact.
+- Web build continuously deployed at mario.baby.
+- Manpage and README updated for the new serve mode and features.
+
+
+
+## v0.4.1 — 2026-08-29
+
 This release adds an SSH arcade mode, cuts terminal bandwidth roughly in half, makes the viewport follow terminal resizes live, and auto-deploys the web build to mario.baby.
 
 ## Highlights
