@@ -102,6 +102,16 @@ func calKey(remote string) string {
 	return remote
 }
 
+// colorBits maps the decided color-depth signal to the palette's color
+// count: a truecolor decision renders 24-bit; anything else is the
+// ANSI-16 fallback.
+func colorBits(decided string) int {
+	if decided != "" {
+		return 24
+	}
+	return 16
+}
+
 // sessionMapper builds the session's input mapper, warm from the cache
 // when this host has played before. The returned func stores what the
 // session learned (call it when the session ends).
@@ -204,7 +214,9 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 			Submitted:     app.Submitted(),
 			Runs:          app.Runs(),
 			Term:          s.Term(),
-			ColorTerm:     s.Env("COLORTERM"),
+			ColorTerm:     s.ColorTerm(),
+			Colors:        colorBits(s.ColorTerm()),
+			Client:        s.ClientVersion(),
 			InputRegime:   regime,
 			Viewport:      strconv.Itoa(app.Game.ViewW) + "x" + strconv.Itoa(app.Game.ViewH),
 			EngineVersion: board.EngineVersion,

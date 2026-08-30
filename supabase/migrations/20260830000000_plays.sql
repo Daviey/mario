@@ -26,6 +26,8 @@ create table public.plays (
   runs int not null default 0 check (runs between 0 and 1000000),
   term text check (char_length(term) <= 64),
   colorterm text check (char_length(colorterm) <= 32),
+  colors int not null default 16 check (colors in (16, 24)),
+  client text check (char_length(client) <= 128),
   input_regime text check (input_regime is null or input_regime in ('kitty', 'legacy')),
   viewport text check (viewport is null or viewport ~ '^[0-9]+x[0-9]+$'),
   engine_version text check (char_length(engine_version) <= 32),
