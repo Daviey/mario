@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.6.0 — 2026-08-30
+
+Maintenance release focused on respawn safety and replay diagnostics for the leaderboard verifier.
+
+## Highlights
+- Checkpoint respawns can no longer be instantly lethal: enemies overlapping the respawn column are cleared.
+- New tooling to dump and trace replay recordings for debugging leaderboard disputes.
+
+## Added
+- `mario -dump-replays N` to export recent leaderboard recordings with metadata.
+- `mario -replay FILE` with tick-by-tick trace of transitions and death causes.
+- Respawn threat guards and tests covering checkpoint safety (engine/level.go, engine/features_test.go).
+
+## Changed
+- Verifier tooling guidance updated for cross-version replay validation (AGENTS.md).
+
+## Fixed
+- Respawn at a checkpoint no longer kills the player when an enemy spawn overlaps the checkpoint column; enemy threats are cleared on respawn.
+
+## Packaging
+- CHANGELOG updated for prior v0.4.1 and v0.5.0 releases.
+
+
 ## v0.5.0 — 2026-08-30
 
 Big SSH-server release: mosh roaming, auto truecolor detection, an admission queue for full servers, plus a 256-color tier, a bell, cheats, and several live input/recording bugfixes.
