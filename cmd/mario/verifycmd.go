@@ -10,10 +10,21 @@ import (
 	"github.com/Daviey/mario/replay"
 )
 
+// verifyBackend is the three operations the verifier loop needs. Both
+// the PostgREST service-key client and the direct-Postgres fallback
+// implement it.
+type verifyBackend interface {
+	Pending(ctx context.Context, n int) ([]board.PendingRow, error)
+	SetVerified(ctx context.Context, id string) error
+	DeleteRow(ctx context.Context, id string) error
+}
+
 // runVerifyPending replays every unverified score that carries a recording
 // and keeps only rows whose replay reproduces the claimed score and level.
 // It runs in the GitHub Action verifier with the service-role key; the
-// publishable key cannot see unverified rows.
+// publishable key cannot see unverified rows. Locally, the direct
+// database path (SUPABASE_DB_PASSWORD) is the fallback when no service
+// key is present.
 func runVerifyPending() error {
 	// The Bearer key must never travel to a URL that came from a
 	// CWD-relative .env: a planted file could otherwise redirect the
@@ -25,13 +36,27 @@ func runVerifyPending() error {
 	board.LoadDotEnv(".env")
 	base := os.Getenv("SUPABASE_URL")
 	key := os.Getenv("SUPABASE_SERVICE_KEY")
-	if base == "" || key == "" {
-		return fmt.Errorf("verify: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
+	if base == "" {
+		return fmt.Errorf("verify: SUPABASE_URL must be set")
 	}
 	if envURL == "" && envKey != "" {
 		return fmt.Errorf("verify: SUPABASE_URL is set only by .env while SUPABASE_SERVICE_KEY comes from the environment — refusing to send the service key to a file-configured URL")
 	}
-	c := board.New(base, key)
+	var c verifyBackend
+	switch {
+	case key != "":
+		c = board.New(base, key)
+	default:
+		ctx0, cancel0 := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel0()
+		db, err := board.DBFromEnv(ctx0)
+		if err != nil {
+			return fmt.Errorf("verify: no SUPABASE_SERVICE_KEY and no direct-DB fallback (%w); set one of SUPABASE_SERVICE_KEY / SUPABASE_DB_PASSWORD", err)
+		}
+		defer db.Close()
+		fmt.Println("verify: direct database connection (no service key)")
+		c = db
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()

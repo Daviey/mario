@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -73,11 +74,36 @@ func TestVerifyPendingKeepAndDrop(t *testing.T) {
 	}
 }
 
-func TestVerifyPendingNeedsServiceKey(t *testing.T) {
+// Without a service key the verifier falls back to the direct database
+// connection; with neither credential available it must refuse to run.
+func TestVerifyPendingNeedsCredentials(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "https://example.invalid")
 	t.Setenv("SUPABASE_SERVICE_KEY", "")
-	if err := runVerifyPending(); err == nil {
-		t.Fatal("verifier must refuse to run without the service key")
+	t.Setenv("SUPABASE_DB_PASSWORD", "")
+	err := runVerifyPending()
+	if err == nil {
+		t.Fatal("verifier must refuse to run without service key or db password")
+	}
+	if want := "SUPABASE_DB_PASSWORD"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error should mention the db fallback credential: %v", err)
+	}
+}
+
+// With only the database password available the direct-Postgres backend
+// is selected (and fails on an unreachable host — the selection, not the
+// credential check, is what is under test).
+func TestVerifyPendingFallsBackToDirectDB(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "https://example.invalid")
+	t.Setenv("SUPABASE_SERVICE_KEY", "")
+	t.Setenv("SUPABASE_DB_PASSWORD", "nope")
+	t.Setenv("SUPABASE_DB_HOST", "127.0.0.1")
+	t.Setenv("SUPABASE_DB_PORT", "1") // nothing listens here
+	err := runVerifyPending()
+	if err == nil {
+		t.Fatal("direct db backend on a closed port must fail")
+	}
+	if want := "db connect"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error should come from the db dial, got: %v", err)
 	}
 }
 
