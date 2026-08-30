@@ -147,7 +147,7 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 	// the client sends via -l flags are stripped with the rest of the
 	// untrusted argv — so force C.UTF-8 (always present with glibc;
 	// the client's rendering is UTF-8 regardless).
-	if t := c.ch.term; t != "" {
+	if t := c.ch.termValue(); t != "" {
 		req.term = t
 	}
 	cmd.Env = moshEnv(os.Environ(), req.term, c.ch.decideColorTerm())

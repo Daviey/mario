@@ -48,6 +48,14 @@ type Server struct {
 	// 10m). Zero means the default.
 	QueueTimeout time.Duration
 
+	// PostAuthWait bounds how long a connection that finished the
+	// key exchange may sit without opening its session channel
+	// (default 60s). Such connections hold a goroutine and a
+	// transport but are invisible to the session cap — admission
+	// counts playing sessions only — so without this deadline an
+	// idling fleet bypasses the cap entirely. Tests shrink it.
+	PostAuthWait time.Duration
+
 	// ProbeWait bounds how long a session waits for the client
 	// terminal's DA2/DA3 color-depth reply before falling back to the
 	// TERM rules (default 250ms). Tests shrink it.
@@ -187,6 +195,16 @@ func (s *Session) Done() <-chan struct{} { return s.ch.done }
 
 // Close ends the session: EOF + channel close, then the connection.
 func (s *Session) Close() error { return s.ch.shutdown() }
+
+// defaultPostAuthWait is the fallback for Server.PostAuthWait: how long
+// a post-KEX connection may sit with no session channel (see there).
+const defaultPostAuthWait = 60 * time.Second
+
+// maxAuthTries caps failed userauth attempts per connection. Auth is a
+// formality here — method "none" is the only success — so a client
+// grinding out failures is pure abuse; past the cap it gets a
+// DISCONNECT instead of an infinite reply loop.
+const maxAuthTries = 20
 
 var errChannelClosed = errors.New("sshd: channel closed")
 
@@ -331,6 +349,10 @@ type conn struct {
 	ch    *channel // the single session channel, nil until opened
 	queue [][]byte // packets buffered across a rekey
 
+	// authFails counts failed userauth attempts; reader-goroutine
+	// only, capped at maxAuthTries.
+	authFails int
+
 	// Control lane: the reader goroutine never writes to the socket
 	// once the session may be producing frames. A synchronous write
 	// there — a window adjust, a keepalive reply — would queue behind
@@ -341,10 +363,15 @@ type conn struct {
 	// lossless — a dropped adjust would wedge the client after 2MB, a
 	// dropped ChannelSuccess hangs ssh(1) on a want-reply request),
 	// both sent by pumpControl. Input handling stays pure: read → feed.
-	ctlMu     sync.Mutex
-	ctlQ      []ctlMsg      // FIFO of replies, sync markers, keepalives
-	ctlWake   chan struct{} // pump wake-up (cap 1, edge)
-	adjustSig chan struct{} // "owed ≥ adjustFloor" edge
+	ctlMu sync.Mutex
+	ctlQ  []ctlMsg // FIFO of replies, sync markers, keepalives
+
+	// ctlWake wakes the pump (cap 1, edge). adjustSig is the
+	// "owed ≥ adjustFloor" edge and hands the pump the channel
+	// pointer itself, so no goroutine ever reads c.ch across the
+	// reader's single write of it (openChannel).
+	ctlWake   chan struct{}
+	adjustSig chan *channel
 	dead      chan struct{} // closed when serveConn returns
 }
 
@@ -384,7 +411,10 @@ func (c *conn) writeControlDrop(pkt []byte) {
 // else queues without loss until ctlMax, where the connection is
 // closed instead — ssh(1) waits forever on a missing reply to a
 // want-reply request (a silent hang, worse than a disconnect), so the
-// reply lane must never drop.
+// reply lane must never drop. The dying connection also releases the
+// backlog: ctlMax queued packets (and their buffers) are trimmed and
+// sync-marker waiters unblocked immediately, not held until the
+// handlers wind down.
 func (c *conn) sendControl(m ctlMsg) {
 	c.ctlMu.Lock()
 	if m.drop && len(c.ctlQ) >= ctlKeepaliveCap {
@@ -392,6 +422,12 @@ func (c *conn) sendControl(m ctlMsg) {
 		return
 	}
 	if len(c.ctlQ) >= ctlMax {
+		for _, old := range c.ctlQ {
+			if old.done != nil {
+				close(old.done)
+			}
+		}
+		c.ctlQ = nil
 		c.ctlMu.Unlock()
 		c.srv.Log.Printf("session %s: control queue overflow, closing", c.t.conn.RemoteAddr())
 		c.t.conn.Close()
@@ -428,8 +464,8 @@ func (c *conn) pumpControl() {
 		select {
 		case <-c.dead:
 			return
-		case <-c.adjustSig:
-			if pkt := c.ch.takeOwed(); pkt != nil {
+		case ch := <-c.adjustSig:
+			if pkt := ch.takeOwed(); pkt != nil {
 				if err := c.t.writePacket(pkt); err != nil {
 					c.t.conn.Close()
 					return
@@ -481,6 +517,9 @@ func (s *Server) init() error {
 	}
 	if s.QueueTimeout <= 0 {
 		s.QueueTimeout = defaultQueueTimeout
+	}
+	if s.PostAuthWait <= 0 {
+		s.PostAuthWait = defaultPostAuthWait
 	}
 	if s.MaxQueue == 0 {
 		s.MaxQueue = defaultMaxQueue
@@ -598,7 +637,7 @@ func (s *Server) serveConn(nc net.Conn) {
 		t:         newTransport(nc),
 		srv:       s,
 		ctlWake:   make(chan struct{}, 1),
-		adjustSig: make(chan struct{}, 1),
+		adjustSig: make(chan *channel, 1),
 		dead:      make(chan struct{}),
 	}
 	defer close(c.dead)
@@ -621,7 +660,14 @@ func (s *Server) serveConn(nc net.Conn) {
 	// Authenticated (by not authenticating). Clear the handshake deadline
 	// and start the control lane — from here on the reader goroutine
 	// never writes to the socket (see conn's control-lane comment).
+	// The write side stays unbounded, but the read side keeps one last
+	// deadline: a connection that never opens its session channel holds
+	// a goroutine and a transport while being invisible to the session
+	// cap (admission counts playing sessions only), so it must not be
+	// allowed to idle forever. openChannel disarms this once a session
+	// exists.
 	nc.SetDeadline(time.Time{})
+	nc.SetReadDeadline(time.Now().Add(s.PostAuthWait))
 	go c.pumpControl()
 
 	if err := c.loop(); err != nil {
@@ -680,6 +726,10 @@ func (c *conn) loop() error {
 	for {
 		p, err := c.nextPacket()
 		if err != nil {
+			if c.ch == nil && errors.Is(err, os.ErrDeadlineExceeded) {
+				// The post-auth channel-open deadline (see serveConn).
+				return c.dropIdle()
+			}
 			return err
 		}
 		if len(p) == 0 {
@@ -726,6 +776,21 @@ func (c *conn) loop() error {
 					return err
 				}
 			default:
+				c.authFails++
+				if c.authFails > maxAuthTries {
+					// Written here, on the reader goroutine: no session
+					// exists while auth is failing, so the wire is quiet
+					// and the control lane has nothing to protect.
+					w := &buf{}
+					w.u8(msgDisconnect)
+					w.u32(discProtocolError)
+					w.cstr("too many failed authentication attempts")
+					w.cstr("")
+					if err := c.t.writePacket(w.b); err != nil {
+						return err
+					}
+					return errors.New("too many failed authentication attempts")
+				}
 				w := &buf{}
 				w.u8(msgUserauthFailure)
 				w.cstr("none")
@@ -797,9 +862,11 @@ func (c *conn) loop() error {
 				// half the window; without them a window-tracking client
 				// (ssh is) goes input-silent after 2MB of cumulative
 				// input — an hour of held keys, or a few big pastes.
+				// The signal carries the channel pointer so the pump
+				// never reads c.ch itself.
 				if rawLen > 0 && c.ch.addOwed(rawLen) {
 					select {
-					case c.adjustSig <- struct{}{}:
+					case c.adjustSig <- c.ch:
 					default:
 					}
 				}
@@ -872,12 +939,34 @@ func (c *conn) openChannel(p []byte) error {
 	}
 	c.ch.cond = sync.NewCond(&c.ch.mu)
 
+	// A session channel exists: the post-auth read deadline (see
+	// serveConn) has done its job — from here the connection's life is
+	// the session's (queue timeout, client close, transport error).
+	c.t.conn.SetReadDeadline(time.Time{})
+
 	w.u8(msgChannelOpenConf)
 	w.u32(peerID)
 	w.u32(0)             // our channel id
 	w.u32(1 << 21)       // our receive window (generous: keystrokes only)
 	w.u32(maxPayloadLen) // our max packet size
 	return c.t.writePacket(w.b)
+}
+
+// dropIdle ends a connection whose post-auth channel-open deadline
+// (Server.PostAuthWait, armed in serveConn) expired: KEX is done but no
+// session channel was ever opened, so the connection holds a goroutine
+// and a transport while the session cap cannot see it. The client gets
+// a proper DISCONNECT rather than a bare TCP teardown.
+func (c *conn) dropIdle() error {
+	w := &buf{}
+	w.u8(msgDisconnect)
+	w.u32(discByApplication)
+	w.cstr("no session channel opened in time")
+	w.cstr("")
+	// Direct write on the reader goroutine: no session ever started,
+	// the wire is quiet and the control lane has nothing to protect.
+	c.t.writePacket(w.b)
+	return errors.New("idle connection dropped: no session channel before PostAuthWait")
 }
 
 func (c *conn) channelRequest(p []byte) error {
@@ -990,7 +1079,7 @@ func (c *conn) channelRequest(p []byte) error {
 		c.ch.mu.Lock()
 		needProbe := c.ch.probe == nil && c.ch.term != ""
 		if needProbe {
-			c.ch.probe = newTermProbe()
+			c.ch.probe = newTermProbe(c.ch.wait)
 		}
 		c.ch.mu.Unlock()
 		sess := &Session{ch: c.ch}
