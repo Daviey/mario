@@ -81,6 +81,18 @@ func (l *Level) Set(tx, ty int, t Tile) {
 	l.Tiles[ty*l.Width+tx] = t
 }
 
+// poleTopRow returns the row of the flagpole's topmost tile (the finial)
+// in the flag column. Builder.Flag places it at FlagTopRow; the scan keeps
+// hand-authored rows honest, and the fallback covers flagless levels.
+func (l *Level) poleTopRow() int {
+	for ty := range l.Height {
+		if t := l.At(l.FlagX, ty); t == FlagTop || t == FlagPole {
+			return ty
+		}
+	}
+	return FlagTopRow
+}
+
 var tileChars = map[byte]Tile{
 	' ': Empty,
 	'#': Ground,

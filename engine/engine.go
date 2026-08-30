@@ -107,6 +107,7 @@ type Game struct {
 	checkpoint float64 // tile X of the mid-level respawn point; -1 unreached
 	flagTopY   float64 // pole-slide start height (drives FlagDrop)
 	bumps      map[int]int
+	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
 	prevIn     Input
 	curIn      Input
 }
@@ -387,19 +388,11 @@ func (g *Game) grabFlag() {
 	g.emit("flag")
 
 	// Height bonus: the higher the grab, the bigger the pay, SMB style.
+	// The scale is the pole itself — feet at the finial pay the top tier,
+	// feet at the base the minimum — so every tier sits on the pole the
+	// player can actually see and reach.
 	feet := p.Pos.Y + p.H
-	frac := (float64(g.Level.Height-2) - feet) / (float64(g.Level.Height-2) - 3)
-	bonus := 100
-	switch {
-	case frac > 0.8:
-		bonus = 5000
-	case frac > 0.6:
-		bonus = 2000
-	case frac > 0.4:
-		bonus = 800
-	case frac > 0.2:
-		bonus = 400
-	}
+	bonus := flagGrabBonus(feet, float64(g.Level.Height-2), float64(g.Level.poleTopRow()))
 	g.Score += bonus
 	g.spawnScorePop(p.Pos.X, p.Pos.Y, bonus, false)
 
@@ -408,6 +401,25 @@ func (g *Game) grabFlag() {
 	p.Vel = Vec{}
 	p.Facing = 1
 	g.flagTopY = p.Pos.Y
+}
+
+// flagGrabBonus returns the height-tier flagpole bonus. frac normalises the
+// grab height onto the pole span — 1 with the feet at the finial (topRow),
+// 0 at the ground beside the pole (groundRow) — and the tiers descend from
+// there; grabbing above the finial still pays the top tier.
+func flagGrabBonus(feet, groundRow, topRow float64) int {
+	frac := (groundRow - feet) / (groundRow - topRow)
+	switch {
+	case frac > 0.8:
+		return 5000
+	case frac > 0.6:
+		return 2000
+	case frac > 0.4:
+		return 800
+	case frac > 0.2:
+		return 400
+	}
+	return 100
 }
 
 func (g *Game) updateFlagSlide() {

@@ -8,6 +8,7 @@ import "math"
 const (
 	LevelHeight = 15
 	GroundTop   = 13
+	FlagTopRow  = 7 // row of the flagpole finial placed by Builder.Flag
 )
 
 // Builder assembles ASCII level rows programmatically.
@@ -89,10 +90,10 @@ func (b *Builder) Coins(y int, xs ...int) {
 	}
 }
 
-// Flag places the goal flagpole at column x.
+// Flag places the goal flagpole at column x, finial at FlagTopRow.
 func (b *Builder) Flag(x int) {
-	b.Set(x, 7, 'T')
-	b.Fill(x, 8, x, GroundTop-1, 'F')
+	b.Set(x, FlagTopRow, 'T')
+	b.Fill(x, FlagTopRow+1, x, GroundTop-1, 'F')
 }
 
 // Rows returns the assembled ASCII rows.

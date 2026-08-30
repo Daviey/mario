@@ -143,6 +143,44 @@ func TestFlagSequencePaysBonusAndAdvances(t *testing.T) {
 	}
 }
 
+func TestFlagGrabBonusTiersCoverPoleSpan(t *testing.T) {
+	// The pole the builder actually draws: finial at FlagTopRow, base at
+	// the ground. Every advertised tier must be paid somewhere on that span.
+	ground, top := float64(GroundTop), float64(FlagTopRow)
+	seen := map[int]bool{}
+	for feet := top; feet <= ground; feet += 0.05 {
+		seen[flagGrabBonus(feet, ground, top)] = true
+	}
+	for _, want := range []int{5000, 2000, 800, 400, 100} {
+		if !seen[want] {
+			t.Errorf("bonus %d has no grab height on pole rows %.0f..%.0f", want, top, ground)
+		}
+	}
+	if got := flagGrabBonus(top, ground, top); got != 5000 {
+		t.Errorf("grab at the finial pays %d, want 5000", got)
+	}
+	if got := flagGrabBonus(ground, ground, top); got != 100 {
+		t.Errorf("grab at the base pays %d, want 100", got)
+	}
+}
+
+func TestFlagTopTierReachableByJump(t *testing.T) {
+	// 2-4 geometry: an 8-step staircase with the flag three columns past
+	// its top step. A running jump off the top step crosses the pole near
+	// the finial and must pay the top tier.
+	l := buildLevel(t, 60, func(b *Builder) { b.StairsUp(45, 8) })
+	g := newGame(t, l)
+	g.Player.Pos = Vec{52, GroundTop - 8 - SmallH} // standing on the top step
+	g.Player.Vel.X = MaxRun
+	run(g, 60, Input{Right: true, Run: true, Up: true})
+	if g.State == StatePlaying {
+		t.Fatalf("player never grabbed the flag (x=%f y=%f)", g.Player.Pos.X, g.Player.Pos.Y)
+	}
+	if g.Score != 5000 {
+		t.Errorf("score = %d, want 5000 from a top-of-pole grab", g.Score)
+	}
+}
+
 func TestLevelClearAdvancesToNextLevel(t *testing.T) {
 	levels := []*Level{
 		buildLevel(t, 60, func(b *Builder) { b.Flag(40) }),
