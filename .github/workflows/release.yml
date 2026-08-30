@@ -362,7 +362,7 @@ jobs:
           if [ -n "$PREV" ]; then RANGE="$PREV..$TAG"; else RANGE="$TAG"; fi
           {
             cat <<EOF
-          You are writing the release notes for a GitHub release of "mario" — a terminal (CLI) Mario-style platformer in Go with a browser WASM build, an Android APK, .deb packages, a UEFI-bootable image, and an online leaderboard on Supabase. Private repo, single developer, commit subjects are short lowercase imperatives.
+          You are writing the release notes for a GitHub release of "mario" — a terminal (CLI) Mario-style platformer in Go with a browser WASM build, an Android APK, .deb packages, a UEFI-bootable image, and an online leaderboard on Supabase. Public repo, single developer, commit subjects are short lowercase imperatives.
 
           Release: $TAG (previous release: ${PREV:-none — first release})
 

@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-Public repo: `github.com/Daviey/mario`. MIT-licensed.
+Terminal (CLI) Mario-style platformer in Go — plus a browser WASM build — with an online high-score board on Supabase. Single module `github.com/Daviey/mario`, stdlib-only, no external dependencies. Public repo: `github.com/Daviey/mario`. MIT-licensed.
 
 ## Project Overview
 
