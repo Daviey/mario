@@ -264,26 +264,39 @@ func (a *App) Step() {
 	if !g.Demo && !g.Cheats {
 		switch g.State {
 		case engine.StateWorldCard:
-			// A fresh run begins here — unless the card follows a death
-			// respawn or a level clear, in which case the same run (and
-			// its recording) continues.
-			switch a.prevState {
-			case engine.StateDying, engine.StateScoreTick:
-			default:
-				a.rec.Start()
+			// A fresh run begins at a card — unless the card follows a
+			// death respawn or a level clear, in which case the same run
+			// (and its recording) continues. Evaluated on the card's
+			// FIRST tick only (prevState is StateWorldCard on the rest):
+			// prevState is assigned before Update below, so on the entry
+			// tick it still holds the state the game was in when Update
+			// performed the transition. The original post-Update
+			// assignment made the continuation case unreachable and
+			// every card tick re-armed the recorder, wiping it down to
+			// the final life's segment — the replay verifier then
+			// deleted every death-containing submission (live bug,
+			// found 2026-08-30).
+			if a.prevState != engine.StateWorldCard {
+				switch a.prevState {
+				case engine.StateDying, engine.StateScoreTick:
+				default:
+					a.rec.Start()
+				}
 			}
 		case engine.StateTitle:
 			a.rec.Reset()
 		}
 		a.rec.Record(in)
 	}
+	// prevState captures the state BEFORE Update (see the arming
+	// comment above); the transition into a card happens inside Update.
+	a.prevState = g.State
 	g.Update(in)
 	if a.sound != nil && !g.Demo {
 		for _, ev := range g.Events {
 			a.sound(ev)
 		}
 	}
-	a.prevState = g.State
 	if g.State == engine.StateGameOver || g.State == engine.StateWin {
 		a.rec.Finish()
 	}
