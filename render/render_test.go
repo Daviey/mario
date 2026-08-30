@@ -403,20 +403,52 @@ func TestOverlayPixelText(t *testing.T) {
 	}
 }
 
-func TestTrueColorVsBasicSequences(t *testing.T) {
+func TestColorModeSequences(t *testing.T) {
 	g := newGame(t)
-	tc := Render(g, NewPalette(true)).String()
+	tc := Render(g, NewPalette(Colors24)).String()
 	if !strings.Contains(tc, "38;2;") || !strings.Contains(tc, "48;2;") {
 		t.Error("truecolor frame missing 24-bit sequences")
 	}
-	basic := Render(g, NewPalette(false)).String()
-	if strings.Contains(basic, "38;2;") {
-		t.Error("basic frame must not emit 24-bit sequences")
+	cube := Render(g, NewPalette(Colors256)).String()
+	if !strings.Contains(cube, "38;5;") || !strings.Contains(cube, "48;5;") {
+		t.Error("256-color frame missing 38;5 sequences")
+	}
+	if strings.Contains(cube, "38;2;") || strings.Contains(cube, "48;2;") {
+		t.Error("256-color frame must not emit 24-bit sequences")
+	}
+	basic := Render(g, NewPalette(Colors16)).String()
+	if strings.Contains(basic, "38;") || strings.Contains(basic, "48;") {
+		t.Error("basic frame must not emit indexed-color sequences")
 	}
 	// Differential SGR emits bare ANSI-16 codes ("36") without the old
 	// "0;" reset prefix; match them in any position.
 	if !regexp.MustCompile(`\x1b\[[0-9;]*(3[0-7]|9[0-7])m`).MatchString(basic) {
 		t.Error("basic frame missing ANSI-16 codes")
+	}
+}
+
+// TestColorDepthFor pins the shared three-tier decision: known
+// truecolor beats everything, an advertised 256-color TERM earns the
+// fixed cube, and only a terminal claiming neither falls to base-16.
+func TestColorDepthFor(t *testing.T) {
+	for _, tc := range []struct {
+		term, colorterm string
+		want            int
+	}{
+		{"xterm-256color", "", Colors256},
+		{"tmux-256color", "", Colors256},
+		{"screen-256color", "", Colors256},
+		{"xterm-ghostty", "", Colors24},
+		{"xterm-kitty", "", Colors24},
+		{"xterm-256color", "truecolor", Colors24},
+		{"xterm-256color", "24bit", Colors24},
+		{"xterm", "", Colors16},
+		{"vt100", "", Colors16},
+		{"dumb", "", Colors16},
+	} {
+		if got := ColorDepthFor(tc.term, tc.colorterm); got != tc.want {
+			t.Errorf("ColorDepthFor(%q, %q) = %d, want %d", tc.term, tc.colorterm, got, tc.want)
+		}
 	}
 }
 

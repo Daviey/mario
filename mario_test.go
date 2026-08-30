@@ -10,13 +10,15 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Daviey/mario/render"
+
 	"github.com/Daviey/mario/engine"
 	"github.com/Daviey/mario/replay"
 )
 
 func TestRunDemo(t *testing.T) {
 	var buf bytes.Buffer
-	RunDemo(&buf, engine.DefaultLevels(), true, 6000)
+	RunDemo(&buf, engine.DefaultLevels(), render.Colors24, 6000)
 	out := buf.String()
 	if !strings.Contains(out, "demo: ticks=6000") {
 		t.Errorf("demo summary missing: %q", out[:min(80, len(out))])
@@ -29,7 +31,7 @@ func TestRunDemo(t *testing.T) {
 	}
 	// Deterministic: same input script, same outcome.
 	var buf2 bytes.Buffer
-	RunDemo(&buf2, engine.DefaultLevels(), true, 6000)
+	RunDemo(&buf2, engine.DefaultLevels(), render.Colors24, 6000)
 	if buf.String() != buf2.String() {
 		t.Error("demo output is not deterministic")
 	}
@@ -192,7 +194,7 @@ func TestLoadLevelsCustom(t *testing.T) {
 
 	// The custom level is playable through the demo path.
 	var buf bytes.Buffer
-	RunDemo(&buf, levels, false, 6000)
+	RunDemo(&buf, levels, render.Colors16, 6000)
 	if !strings.Contains(buf.String(), "demo:") {
 		t.Error("demo failed on custom level")
 	}

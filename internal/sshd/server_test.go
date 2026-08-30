@@ -246,13 +246,17 @@ func (tc *testClient) openSession(window, maxPkt uint32) {
 }
 
 func (tc *testClient) ptyReq(cols, rows uint32) {
+	tc.ptyReqTerm(cols, rows, "xterm-256color")
+}
+
+func (tc *testClient) ptyReqTerm(cols, rows uint32, term string) {
 	tc.hadPty = true
 	w := &buf{}
 	w.u8(msgChannelRequest)
 	w.u32(0)
 	w.cstr("pty-req")
 	w.boolean(true)
-	w.cstr("xterm-256color")
+	w.cstr(term)
 	w.u32(cols)
 	w.u32(rows)
 	w.u32(0)

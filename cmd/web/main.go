@@ -85,7 +85,7 @@ func main() {
 		return nil
 	}))
 
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	// The canvas always shows the world; leaderboard screens go to the
 	// page as JSON and render as real DOM text (window.marioBoard).
 	board := js.Global().Get("marioBoard")

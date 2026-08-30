@@ -40,7 +40,7 @@ func Diff(prev, next *Screen) string {
 	if next == nil {
 		return ""
 	}
-	if prev == nil || prev.W != next.W || prev.H != next.H || prev.TrueColor != next.TrueColor {
+	if prev == nil || prev.W != next.W || prev.H != next.H || prev.Colors != next.Colors {
 		var b strings.Builder
 		b.WriteString(syncBegin)
 		// A size change means cells painted by the old frame may sit
@@ -55,7 +55,7 @@ func Diff(prev, next *Screen) string {
 	}
 
 	var b strings.Builder
-	st := sgrState{tc: next.TrueColor}
+	st := sgrState{mode: next.Colors}
 	lastY, lastX := -1, 0 // cursor sits just past the last emitted run
 	dirty := false
 	for y := range next.H {

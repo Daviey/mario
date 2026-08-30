@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Daviey/mario/render"
 )
 
 // Server serves the game over SSH.
@@ -150,6 +152,16 @@ func (s *Session) TrueColor() bool {
 // probe decides most real sessions.
 func (s *Session) ColorTerm() string {
 	return s.ch.decideColorTerm()
+}
+
+// ColorDepth reports the SGR color mode this session's client renders
+// (render.Colors24/256/16): 24-bit when TrueColor holds (env request >
+// TERM family > DA probe), otherwise the fixed 256-color cube whenever
+// the pty TERM advertises 256 colors — every -256color terminal and
+// mosh's cell model honors it — and base-16 only for terminals that
+// claim neither.
+func (s *Session) ColorDepth() int {
+	return render.ColorDepthFor(s.Term(), s.ColorTerm())
 }
 
 // ClientVersion returns the client's SSH identification string (e.g.

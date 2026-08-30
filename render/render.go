@@ -20,18 +20,30 @@ import (
 // RGB is a 24-bit color (0xRRGGBB).
 type RGB uint32
 
-// Color pairs a truecolor value with its nearest ANSI-16 fallback index
-// (0-15, standard 8 + bright 8 ordering).
+// Color pairs a truecolor value with its fallback indexes for lesser
+// terminals: Idx256 points into the fixed xterm cube (16-255, rendered
+// exactly by every -256color terminal), ANSI into the base-16 palette
+// (0-15, rendered as whatever the user's profile says).
 type Color struct {
-	RGB  RGB
-	ANSI int
+	RGB    RGB
+	Idx256 int
+	ANSI   int
 }
 
-func color(hex uint32, ansi int) Color { return Color{RGB: RGB(hex), ANSI: ansi} }
+func color(hex uint32, ansi int) Color {
+	return Color{RGB: RGB(hex), Idx256: nearest256(RGB(hex)), ANSI: ansi}
+}
+
+// Color depths: what a Screen serializes (see NewPalette).
+const (
+	Colors16  = 16  // base ANSI palette, SGR 30-37/90-97
+	Colors256 = 256 // fixed xterm cube, SGR 38;5 — exact on every -256color terminal
+	Colors24  = 24  // truecolor, SGR 38;2
+)
 
 // Palette holds every color the renderer uses.
 type Palette struct {
-	TrueColor bool
+	Colors int // Colors24, Colors256 or Colors16 — the SGR encoding this palette emits
 
 	Sky          Color // classic SMB sky blue
 	GroundLight  Color // sunlit top edge of terrain
@@ -89,17 +101,35 @@ func TrueColorTerm(term string) bool {
 		term == "kitty" || term == "xterm-kitty" || term == "alacritty"
 }
 
-// NewPalette returns the game palette, emitting 24-bit color sequences when
-// trueColor is set and basic ANSI-16 sequences otherwise.
-func NewPalette(trueColor bool) *Palette {
+// ColorDepthFor picks the SGR color mode for a terminal described only
+// by its TERM (and a COLORTERM the environment carried, if any):
+// 24-bit when the terminal is known to render it (TrueColorTerm
+// families or a COLORTERM hint), otherwise the fixed xterm cube
+// whenever TERM advertises 256 colors — the convention every
+// -256color terminal and mosh's cell model honors — and base-16 only
+// for terminals that claim neither. Shared decision rule for the
+// native runner, the SSH host's sessions and the mosh child alike.
+func ColorDepthFor(term, colorterm string) int {
+	if colorterm != "" || TrueColorTerm(term) {
+		return Colors24
+	}
+	if strings.Contains(term, "256") {
+		return Colors256
+	}
+	return Colors16
+}
+
+// NewPalette returns the game palette. colors picks the SGR encoding:
+// Colors24 emits 24-bit sequences, Colors256 the fixed xterm cube
+// (38;5), Colors16 the base ANSI palette.
+func NewPalette(colors int) *Palette {
 	return &Palette{
-		TrueColor:    trueColor,
+		Colors:       colors,
 		Sky:          color(0x5C94FC, 12),
 		GroundLight:  color(0xF8B060, 11),
 		GroundMid:    color(0xC84C0C, 1),
 		GroundDark:   color(0x7C2800, 1),
-		BrickLight:   color(0xD86818, 208%16),
-		BrickDark:    color(0x6B2B00, 1),
+		BrickLight:   color(0xD86818, 3), // 208%16 == 0 once slipped through here: black bricks in 16-color mode
 		QuestionBG:   color(0xFC9838, 11),
 		QuestionDim:  color(0xE08018, 3),
 		QuestionHi:   color(0xFFD9A0, 11),
@@ -213,9 +243,9 @@ type Cell struct {
 
 // Screen is a rectangular cell buffer plus ANSI serialization.
 type Screen struct {
-	W, H      int
-	cells     []Cell
-	TrueColor bool
+	W, H   int
+	cells  []Cell
+	Colors int // Colors24, Colors256 or Colors16
 }
 
 // NewScreen returns a screen with every cell blank black.
@@ -294,7 +324,7 @@ func (s *Screen) RowString(y int) string {
 func (s *Screen) String() string {
 	var b strings.Builder
 	b.WriteString("\x1b[H")
-	st := sgrState{tc: s.TrueColor}
+	st := sgrState{mode: s.Colors}
 	for y := range s.H {
 		for x := range s.W {
 			c := s.cells[y*s.W+x]
@@ -315,7 +345,7 @@ func (s *Screen) String() string {
 // bandwidth goes. A space paints nothing but its background, so its
 // foreground is a don't-care and never costs bytes.
 type sgrState struct {
-	tc   bool
+	mode int  // Colors24/256/16 — which SGR encoding the terminal takes
 	have bool // any style emitted yet (terminal starts at default)
 	fg   Color
 	bg   Color
@@ -326,13 +356,20 @@ func isDefaultColor(c Color) bool { return c.RGB == 0 && c.ANSI == 0 }
 
 // colorParams returns the SGR parameters that set c as foreground
 // (bg=false) or background in the given color mode.
-func colorParams(tc bool, c Color, bg bool) string {
-	if tc {
+func colorParams(mode int, c Color, bg bool) string {
+	switch mode {
+	case Colors24:
 		base := 38
 		if bg {
 			base = 48
 		}
 		return fmt.Sprintf("%d;2;%d;%d;%d", base, c.RGB>>16, (c.RGB>>8)&0xFF, c.RGB&0xFF)
+	case Colors256:
+		base := 38
+		if bg {
+			base = 48
+		}
+		return fmt.Sprintf("%d;5;%d", base, c.Idx256)
 	}
 	return ansiCode(c.ANSI, bg)
 }
@@ -361,10 +398,10 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 			parts = append(parts, "1")
 		}
 		if c.Ch != ' ' && !isDefaultColor(c.Fg) {
-			parts = append(parts, colorParams(st.tc, c.Fg, false))
+			parts = append(parts, colorParams(st.mode, c.Fg, false))
 		}
 		if !isDefaultColor(dBg) {
-			parts = append(parts, colorParams(st.tc, dBg, true))
+			parts = append(parts, colorParams(st.mode, dBg, true))
 		}
 		b.WriteString("\x1b[" + strings.Join(parts, ";") + "m")
 		if c.Ch == ' ' {
@@ -373,10 +410,10 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 	} else {
 		var parts []string
 		if dFg != st.fg {
-			parts = append(parts, colorParams(st.tc, dFg, false))
+			parts = append(parts, colorParams(st.mode, dFg, false))
 		}
 		if dBg != st.bg {
-			parts = append(parts, colorParams(st.tc, dBg, true))
+			parts = append(parts, colorParams(st.mode, dBg, true))
 		}
 		if dBold && !st.bold {
 			parts = append(parts, "1")
@@ -521,7 +558,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 func Render(g *engine.Game, p *Palette, ui ...*ScoreUI) *Screen {
 	vh := viewTilesOf(g)
 	s := NewScreen(g.ViewW*Pix, 2+vh*Pix/2)
-	s.TrueColor = p.TrueColor
+	s.Colors = p.Colors
 	drawHUD(s, g, p)
 	drawStatus(s, g, p)
 	if u := firstUI(ui); u != nil && u.Mode != UIOff {

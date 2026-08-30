@@ -39,7 +39,7 @@ func bigRows(n int) []ScoreRow {
 
 func TestScoreUITextScreens(t *testing.T) {
 	g := uiGame(t)
-	pal := NewPalette(true)
+	pal := NewPalette(Colors24)
 
 	s := Render(g, pal, &ScoreUI{Mode: UIAsk, Score: 12500})
 	found := false
@@ -95,7 +95,7 @@ func TestScoreUITextScreens(t *testing.T) {
 func TestScoreUIAllViewportSizes(t *testing.T) {
 	// No viewport size may panic; text clips/centers instead of spilling.
 	g := uiGame(t)
-	pal := NewPalette(true)
+	pal := NewPalette(Colors24)
 	for _, viewW := range []int{16, 20, 30, 40, 60} {
 		g.ViewW = viewW
 		for _, viewH := range []int{4, 6, 9, 15} {
@@ -114,7 +114,7 @@ func TestBoardClampsOnShortViewports(t *testing.T) {
 	// the HUD or status rows, and still shows its header + footer.
 	g := uiGame(t)
 	g.ViewW, g.ViewH = 20, 4
-	s := Render(g, NewPalette(true), &ScoreUI{Mode: UIBoard, Rows: bigRows(30)})
+	s := Render(g, NewPalette(Colors24), &ScoreUI{Mode: UIBoard, Rows: bigRows(30)})
 	if txt := rowText(s, 1); !strings.Contains(txt, "LEADERBOARD") {
 		t.Errorf("short board header = %q", txt)
 	}
@@ -127,7 +127,7 @@ func TestBoardClampsOnShortViewports(t *testing.T) {
 
 func TestBoardStatusAndFooters(t *testing.T) {
 	g := uiGame(t)
-	pal := NewPalette(true)
+	pal := NewPalette(Colors24)
 	s := Render(g, pal, &ScoreUI{Mode: UIBoard, Rows: bigRows(3), Status: "OFFLINE"})
 	if !strings.Contains(rowText(s, s.H-2), "OFFLINE") {
 		t.Errorf("status footer = %q", rowText(s, s.H-2))

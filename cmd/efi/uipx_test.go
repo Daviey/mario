@@ -10,7 +10,7 @@ import (
 
 func uiGame(t *testing.T) *render.Frame {
 	// A mock world frame to paint UI over.
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	base := render.NewFrame(240, 105, pal.Sky)
 	base.Fill(0, 0, 240, render.HudBandPx, pal.HUDBG)
 	base.Fill(0, base.H-render.StatusBandPx, 240, render.StatusBandPx, pal.StatusBG)
@@ -34,7 +34,7 @@ func countColors(f *render.Frame, ignore ...render.Color) int {
 }
 
 func TestAskScreenPaintsWorldRows(t *testing.T) {
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	f := uiFrame(uiGame(t), pal, &render.ScoreUI{Mode: render.UIAsk, Score: 12500}, 0)
 
 	// The HUD band must stay.
@@ -56,7 +56,7 @@ func TestAskScreenPaintsWorldRows(t *testing.T) {
 }
 
 func TestBoardRendersRowsAndClamps(t *testing.T) {
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	var rows []render.ScoreRow
 	for i := range 30 {
 		rows = append(rows, render.ScoreRow{Name: "DAVE", Score: i})
@@ -74,7 +74,7 @@ func TestBoardRendersRowsAndClamps(t *testing.T) {
 }
 
 func TestEntryFieldRailsAndCursor(t *testing.T) {
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	ui := &render.ScoreUI{Mode: render.UIEntry, Name: "DAVE", CursorOn: true}
 	f := uiFrame(uiGame(t), pal, ui, 0)
 

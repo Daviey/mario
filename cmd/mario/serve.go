@@ -23,7 +23,7 @@ import (
 
 // runServe serves the game over SSH until the listener fails. moshBin
 // (from -mosh, empty = mosh handshake disabled) enables anonymous mosh
-func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, moshBin, moshPorts string, maxSessions int, bellOn bool) error {
+func runServe(levels []*engine.Level, addr, hostKeyFile string, basic bool, moshBin, moshPorts string, maxSessions int, bellOn bool) error {
 	// Calibration warm-start, keyed by client host (see calCache). One
 	// per server process, shared by every session handler.
 	cals := &calCache{}
@@ -39,7 +39,7 @@ func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, 
 	srv := &sshd.Server{
 		Addr:          addr,
 		HostKeyFile:   hostKeyFile,
-		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals, bellOn, playLog) },
+		Handler:       func(s *sshd.Session) { playSession(levels, s, basic, cals, bellOn, playLog) },
 		MoshBin:       moshBin,
 		MoshPortRange: moshPorts,
 	}
@@ -102,16 +102,6 @@ func calKey(remote string) string {
 	return remote
 }
 
-// colorBits maps the decided color-depth signal to the palette's color
-// count: a truecolor decision renders 24-bit; anything else is the
-// ANSI-16 fallback.
-func colorBits(decided string) int {
-	if decided != "" {
-		return 24
-	}
-	return 16
-}
-
 // sessionMapper builds the session's input mapper, warm from the cache
 // when this host has played before. The returned func stores what the
 // session learned (call it when the session ends).
@@ -153,13 +143,17 @@ func (w bellChanWriter) Write(p []byte) (int, error) {
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
-func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache, bellOn bool, bc *board.Client) {
+func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calCache, bellOn bool, bc *board.Client) {
 	// Per-session color depth, not the server process's own terminal:
 	// a forwarded COLORTERM env request, the client's TERM family, or
-	// the DA2/DA3 terminal probe decides (Session.TrueColor). The
-	// server-wide false (-basic) stays a hard override.
-	if trueColor {
-		trueColor = s.TrueColor()
+	// the DA2/DA3 terminal probe decides truecolor (Session.ColorDepth)
+	// — and terminals that merely advertise 256 colors (gnome-terminal
+	// over mosh, Apple Terminal, tmux) get the fixed xterm cube instead
+	// of the terminal-profile-dependent base 16. The server-wide -basic
+	// stays a hard 16-color override.
+	colors := render.Colors16
+	if !basic {
+		colors = s.ColorDepth()
 	}
 
 	// Fill the terminal like the native runner does: width in tiles,
@@ -215,14 +209,14 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 			Runs:          app.Runs(),
 			Term:          s.Term(),
 			ColorTerm:     s.ColorTerm(),
-			Colors:        colorBits(s.ColorTerm()),
+			Colors:        colors,
 			Client:        s.ClientVersion(),
 			InputRegime:   regime,
 			Viewport:      strconv.Itoa(app.Game.ViewW) + "x" + strconv.Itoa(app.Game.ViewH),
 			EngineVersion: board.EngineVersion,
 		}
-		s.Logf("play ip=%s runs=%d level=%d score=%d submitted=%t dur=%ds term=%s",
-			p.IP, p.Runs, p.Level, p.Score, p.Submitted, dur, p.Term)
+		s.Logf("play ip=%s runs=%d level=%d score=%d submitted=%t dur=%ds term=%s colors=%d",
+			p.IP, p.Runs, p.Level, p.Score, p.Submitted, dur, p.Term, colors)
 		if bc == nil {
 			return
 		}
@@ -255,7 +249,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	// print garbage on the player's shell.
 	s.Write([]byte("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
 
-	st := render.NewStream(out, render.NewPalette(trueColor))
+	st := render.NewStream(out, render.NewPalette(colors))
 	drainBells := func() {
 		for {
 			select {

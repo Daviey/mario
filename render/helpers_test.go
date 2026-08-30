@@ -6,7 +6,7 @@ import (
 	"github.com/Daviey/mario/engine"
 )
 
-var testPal = NewPalette(true)
+var testPal = NewPalette(Colors24)
 
 // newGame builds a playing game on a decorated level (20-tile viewport).
 // Everything interesting sits inside the first 20 tiles so it is visible

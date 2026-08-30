@@ -57,7 +57,7 @@ func baseName(path string) string {
 }
 
 // RunDemo plays a deterministic scripted session with no terminal needed.
-func RunDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) {
+func RunDemo(w io.Writer, levels []*engine.Level, colors int, ticks int) {
 	if len(levels) == 0 {
 		levels = engine.DefaultLevels()
 	}
@@ -67,5 +67,5 @@ func RunDemo(w io.Writer, levels []*engine.Level, trueColor bool, ticks int) {
 	}
 	fmt.Fprintf(w, "demo: ticks=%d score=%d coins=%d lives=%d state=%s level=%s\n",
 		ticks, g.Score, g.CoinCount, g.Lives, g.State, g.LevelName())
-	fmt.Fprint(w, render.FrameANSI(g, render.NewPalette(trueColor)))
+	fmt.Fprint(w, render.FrameANSI(g, render.NewPalette(colors)))
 }

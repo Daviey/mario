@@ -25,6 +25,17 @@ ESC = 0x1B
 HALF_TOP = "\u2580"
 HALF_BOTTOM = "\u2588"  # full block, if ever used: whole cell fg
 
+def xterm256(idx):
+    """Fixed xterm palette (the cube + gray ramp; 16-255 are spec-exact,
+    the terminal-configured base 0-15 defaults to black)."""
+    if idx < 16:
+        return (0, 0, 0)
+    if idx < 232:
+        idx -= 16
+        steps = (0, 95, 135, 175, 215, 255)
+        return (steps[idx // 36], steps[(idx // 6) % 6], steps[idx % 6])
+    return ((idx - 232) * 10 + 8,) * 3
+
 
 def parse_ansi(data):
     fg = bg = (0, 0, 0)
@@ -68,6 +79,12 @@ def parse_ansi(data):
                     elif v == 48 and j + 3 < len(parts) and parts[j + 1] == b"2":
                         bg = tuple(int(c) for c in parts[j + 2 : j + 5])
                         j += 4
+                    elif v == 38 and j + 2 < len(parts) and parts[j + 1] == b"5":
+                        fg = xterm256(int(parts[j + 2]))
+                        j += 2
+                    elif v == 48 and j + 2 < len(parts) and parts[j + 1] == b"5":
+                        bg = xterm256(int(parts[j + 2]))
+                        j += 2
                     j += 1
             i += m.end()
             continue

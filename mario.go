@@ -8,7 +8,7 @@
 //
 // //	go pumpInput(app)              // feed raw key bytes via app.Feed
 //
-//	app.Run(render.NewStream(os.Stdout, render.NewPalette(true)))
+//	app.Run(render.NewStream(os.Stdout, render.NewPalette(render.Colors24)))
 //
 // The package wires together the engine, the kitty-protocol input mapper,
 // the one-keyboard-one-owner input router (game keys vs leaderboard text

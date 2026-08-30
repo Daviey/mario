@@ -50,8 +50,9 @@ func TestStreamBandwidth(t *testing.T) {
 		pal  *Palette
 		cap  int // bytes per tick ceiling
 	}{
-		{"truecolor", NewPalette(true), 1500},
-		{"basic", NewPalette(false), 700},
+		{"truecolor", NewPalette(Colors24), 1500},
+		{"cube256", NewPalette(Colors256), 1000},
+		{"basic", NewPalette(Colors16), 700},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bytes := driveBandwidth(t, viewW, viewH, ticks, tc.pal)
