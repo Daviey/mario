@@ -130,6 +130,7 @@ func NewPalette(colors int) *Palette {
 		GroundMid:    color(0xC84C0C, 1),
 		GroundDark:   color(0x7C2800, 1),
 		BrickLight:   color(0xD86818, 3), // 208%16 == 0 once slipped through here: black bricks in 16-color mode
+		BrickDark:    color(0x6B2B00, 1),
 		QuestionBG:   color(0xFC9838, 11),
 		QuestionDim:  color(0xE08018, 3),
 		QuestionHi:   color(0xFFD9A0, 11),
