@@ -41,8 +41,9 @@ func runVerifyPending() error {
 	// margin even fully JSON-escaped, and rows are consumed (verified or
 	// deleted) as we go, so the loop drains the queue. One bad row can
 	// never wedge the run — decode/replay failures delete just that row.
-	kept, dropped := 0, 0
-	for kept+dropped < 1000 {
+	kept, versionDrops := 0, 0
+	var detDrops []string // determinism failures: replay != claim
+	for kept+versionDrops+len(detDrops) < 1000 {
 		pending, err := c.Pending(ctx, 2)
 		if err != nil {
 			return fmt.Errorf("verify: fetch pending: %w", err)
@@ -52,8 +53,13 @@ func runVerifyPending() error {
 		}
 		for _, p := range pending {
 			why := ""
+			versioned := false
 			switch {
 			case p.EngineVersion != board.EngineVersion:
+				// Expected once per gameplay-change release: pending
+				// rows recorded on the previous build cannot replay
+				// against the new one. Not a bug signal.
+				versioned = true
 				why = fmt.Sprintf("engine version %q != %q", p.EngineVersion, board.EngineVersion)
 			default:
 				levels, err := replay.DayLevels(p.Mode, p.Day)
@@ -70,26 +76,53 @@ func runVerifyPending() error {
 				case res.Level != p.Level:
 					why = fmt.Sprintf("replay reached level %d, row claims %d", res.Level, p.Level)
 				}
-				if why == "" {
-					if err := c.SetVerified(ctx, p.ID); err != nil {
-						return fmt.Errorf("verify: mark %s: %w", p.ID, err)
-					}
-					kept++
-					fmt.Printf("KEEP   %-8s %6d  L%d %-7s %s\n", board.SanitizeDisplayName(p.Name), p.Score, p.Level, p.Mode, playContext(p))
-					continue
+			}
+			if why == "" {
+				if err := c.SetVerified(ctx, p.ID); err != nil {
+					return fmt.Errorf("verify: mark %s: %w", p.ID, err)
 				}
+				kept++
+				fmt.Printf("KEEP   %-8s %6d  L%d %-7s %s\n", board.SanitizeDisplayName(p.Name), p.Score, p.Level, p.Mode, playContext(p))
+				continue
 			}
 			if err := c.DeleteRow(ctx, p.ID); err != nil {
 				return fmt.Errorf("verify: delete %s: %w", p.ID, err)
 			}
-			dropped++
+			if versioned {
+				versionDrops++
+			} else {
+				detDrops = append(detDrops, fmt.Sprintf("%-8s %6d (%s)", board.SanitizeDisplayName(p.Name), p.Score, why))
+			}
 			fmt.Printf("DROP   %-8s %6d  (%s)\n", board.SanitizeDisplayName(p.Name), p.Score, why)
 		}
 		if len(pending) < 2 {
 			break
 		}
 	}
-	fmt.Printf("verified=%d dropped=%d\n", kept, dropped)
+	dropped := versionDrops + len(detDrops)
+	fmt.Printf("verified=%d dropped=%d (version=%d determinism=%d)\n", kept, dropped, versionDrops, len(detDrops))
+
+	// Step summary for the Action run: one glance shows the queue's
+	// health without reading the raw log.
+	if p := os.Getenv("GITHUB_STEP_SUMMARY"); p != "" {
+		if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintf(f, "## verify-pending\n\n- verified: %d\n- dropped: %d (version: %d, determinism: %d)\n", kept, dropped, versionDrops, len(detDrops))
+			for _, d := range detDrops {
+				fmt.Fprintf(f, "- determinism drop: %s\n", d)
+			}
+			f.Close()
+		}
+	}
+
+	// Two or more rows whose replays disagree with their claims is not
+	// one corrupted submission — it is a systematic determinism or
+	// recording bug deleting real players' scores (the recorder-wipe
+	// bug of 2026-08-30 dropped EVERY death-containing run this way,
+	// silently, for weeks). Fail the run so it shows red on the
+	// dashboard instead of dying quietly in a green log.
+	if len(detDrops) >= 2 {
+		return fmt.Errorf("verify: %d rows failed replay verification — systematic drop suspected (see DROP lines above)", len(detDrops))
+	}
 	return nil
 }
 
