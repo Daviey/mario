@@ -26,7 +26,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -36,7 +35,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/Daviey/mario"
 	"github.com/Daviey/mario/board"
@@ -122,20 +120,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		var rows []board.Row
-		var terr error
-		if *daily {
-			rows, terr = client.TopMode(ctx, *topN, "", "daily", time.Now().UTC().Format("2006-01-02"))
-		} else {
-			rows, terr = client.Top(ctx, *topN, "")
-		}
-		if terr != nil {
-			fmt.Fprintf(os.Stderr, "mario: %v\n", terr)
+		if err := runTopScores(client, *topN, *daily); err != nil {
+			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
-		printScores(os.Stdout, rows)
 		return
 	}
 
@@ -156,14 +144,9 @@ func main() {
 	if *serveAddr != "" {
 		// Color depth is per-session over SSH — the operator cannot know
 		// every client's terminal; -basic forces the 16-color palette.
-		mb := *moshBin
-		if mb == "auto" {
-			if p, err := exec.LookPath("mosh-server"); err == nil {
-				mb = p
-			} else {
-				fmt.Fprintf(os.Stderr, "mario: -mosh auto: mosh-server not found in PATH; mosh disabled\n")
-				mb = ""
-			}
+		mb, moshNote := resolveMoshBin(*moshBin)
+		if moshNote != "" {
+			fmt.Fprintf(os.Stderr, "mario: %s\n", moshNote)
 		}
 		if err := runServe(levels, *serveAddr, *hostKeyPath, *basic, mb, *moshPorts, *maxSessions, !*nobell); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
@@ -181,6 +164,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// resolveMoshBin turns the -mosh flag into the mosh-server binary to
+// launch per session: "" disables the mosh handshake, any other value is
+// an explicit path taken as given, and "auto" resolves mosh-server via
+// PATH — falling back to disabled, with an operator note, when absent.
+func resolveMoshBin(flag string) (bin, note string) {
+	if flag != "auto" {
+		return flag, ""
+	}
+	p, err := exec.LookPath("mosh-server")
+	if err != nil {
+		return "", "-mosh auto: mosh-server not found in PATH; mosh disabled"
+	}
+	return p, ""
 }
 
 // helpRequested reports whether any argument explicitly asks for help.
@@ -278,13 +276,11 @@ func run(levels []*engine.Level, width int, colors render.ColorMode, daily, chea
 		return 0, fmt.Errorf("cannot set raw mode: %w", err)
 	}
 	cleanup := sync.OnceFunc(func() {
-		// Reset every terminal mode we touched, then hand echo back.
-		// The kitty pop comes BEFORE the alt-screen exit (kitty spec,
-		// Quickstart): the keyboard stack is screen-scoped, so the pop
-		// must land while still on the alt screen whose stack holds our
-		// push — popping after the exit would target the main screen's
-		// stack instead.
-		os.Stdout.WriteString("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l\x1b[0m\r\n")
+		// Reset every terminal mode we touched — synchronized output
+		// off, kitty pop, cursor and title back, alt-screen exit, SGR
+		// reset — then hand echo back. termEpilogue pins the byte order
+		// (pop before the alt-screen exit) and its rationale.
+		os.Stdout.WriteString(termEpilogue)
 		os.Stdout.Sync()
 		restore()
 	})
@@ -292,7 +288,7 @@ func run(levels []*engine.Level, width int, colors render.ColorMode, daily, chea
 	go func() {
 		<-sig
 		cleanup()
-		os.Exit(0)
+		os.Exit(0) // deliberate: Ctrl+C/SIGTERM is a normal quit, not a failure
 	}()
 
 	// Best-effort: kitty keyboard protocol, alt screen, hidden cursor,
@@ -306,19 +302,19 @@ func run(levels []*engine.Level, width int, colors render.ColorMode, daily, chea
 	// The leaderboard UI decodes CSI-u back to plain bytes (the Router).
 	// The leading pop heals any mode left over by a previous run that was
 	// killed without cleanup, before we push our own entry. The push
-	// itself comes AFTER the alt-screen enter (and the pop, in cleanup,
-	// after its exit): a terminal that snapshots keyboard state with the
-	// screen would otherwise resurrect the pushed level on exit.
-	os.Stdout.WriteString("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a")
+	// comes AFTER the alt-screen enter and cleanup's pop BEFORE its exit
+	// (termPrologue/termEpilogue pin the order): a terminal that
+	// snapshots keyboard state with the screen would otherwise
+	// resurrect the pushed level on exit.
+	os.Stdout.WriteString(termPrologue)
 
-	// Fill the terminal: width in tiles, height minus HUD/status rows,
-	// Pix/2 terminal rows per tile. A taller window shows more sky/world,
-	// same sprite size.
-	viewW := width
-	if viewW <= 0 {
-		viewW = termWidth() / render.Pix // viewport is measured in tiles now
+	// Fill the terminal via the shared fit (viewFor): width in tiles,
+	// height minus HUD/status rows. A taller window shows more
+	// sky/world, same sprite size. An explicit -width keeps its width.
+	viewW, viewH := viewFor(termWidth(), termHeight())
+	if width > 0 {
+		viewW = width
 	}
-	viewH := (termHeight() - 2) * 2 / render.Pix
 
 	opts := &mario.Options{
 		Levels:    levels,
@@ -371,16 +367,14 @@ func run(levels []*engine.Level, width int, colors render.ColorMode, daily, chea
 		if rows <= 0 {
 			return // size probe failed; keep the current viewport
 		}
-		w := width
-		if w <= 0 {
-			if cols := termWidth(); cols > 0 {
-				w = cols / render.Pix
-			}
+		w, h := viewFor(termWidth(), rows)
+		if width > 0 {
+			w = width // an explicit -width keeps its width; only the height re-fits
 		}
 		if w <= 0 {
 			return
 		}
-		app.Resize(w, (rows-2)*2/render.Pix)
+		app.Resize(w, h)
 	})
 	defer stopResize()
 

@@ -58,7 +58,9 @@ func runServe(levels []*engine.Level, addr, hostKeyFile string, basic bool, mosh
 // every SSH connection starts a cold mapper, and the first hold of each
 // movement key stalls for the OS repeat delay (~0.5s) — every connect,
 // forever (the contract is modeled in input/feel_test.go,
-// TestCalibrationSurvivesRestart).
+// TestCalibrationSurvivesRestart). IPv6 privacy addresses fragment the
+// key: each rotating address is a fresh cold entry, relearned within
+// seconds of play like a cache reset.
 type calCache struct {
 	mu sync.Mutex
 	m  map[string]input.Calibration
@@ -114,12 +116,23 @@ func sessionMapper(cals *calCache, remote string) (*input.Mapper, func()) {
 	return m, func() { cals.put(key, m.Calibration()) }
 }
 
-// sessWriter adapts Session to io.Writer for render.Stream, translating a
-// dead connection into a session shutdown so the game loop exits instead
-// of spinning on failing writes.
-type sessWriter struct{ s *sshd.Session }
+// sessionConn is the *sshd.Session surface the frame writer depends on:
+// bytes out, plus the shutdown a dead connection must trigger. Kept
+// narrow so tests can stub a failing write.
+type sessionConn interface {
+	Write(p []byte) (int, error)
+	Close() error
+}
 
-func (w sessWriter) Write(p []byte) (int, error) {
+// sessWriter adapts an SSH session to io.Writer for render.Stream,
+// translating a dead connection into a session shutdown so the game
+// loop exits instead of spinning on failing writes.
+type sessWriter struct{ s sessionConn }
+
+// Write forwards p to the session. On error it closes the session —
+// that shutdown is what makes Session.Done fire and end the play loop,
+// so a broken pipe costs one tick, not an endless spin.
+func (w *sessWriter) Write(p []byte) (int, error) {
 	n, err := w.s.Write(p)
 	if err != nil {
 		w.s.Close()
@@ -132,7 +145,11 @@ func (w sessWriter) Write(p []byte) (int, error) {
 // never stall the tick loop on SSH flow control.
 type bellChanWriter struct{ c chan []byte }
 
-func (w bellChanWriter) Write(p []byte) (int, error) {
+// Write enqueues p for the writer goroutine and always reports p fully
+// written: when the channel is full (writer busy on flow control) the
+// bell is dropped rather than waited on — sound is best-effort, ticks
+// are not.
+func (w *bellChanWriter) Write(p []byte) (int, error) {
 	select {
 	case w.c <- p:
 	default: // writer busy: drop the bell, never block a tick
@@ -156,19 +173,21 @@ func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calC
 		colors = s.ColorDepth()
 	}
 
-	// Fill the terminal like the native runner does: width in tiles,
-	// height minus HUD/status rows, Pix/2 terminal rows per tile.
+	// Fill the terminal like the native runner does (viewFor): width in
+	// tiles, height minus the HUD/status rows.
 	cols, rows := s.Size()
-	viewW := cols / render.Pix
-	viewH := (rows - 2) * 2 / render.Pix
+	viewW, viewH := viewFor(cols, rows)
 
 	mapper, saveCal := sessionMapper(cals, s.RemoteAddr())
-	defer saveCal() // the session's learned repeat timing serves the next connect
+	// Deferred before the telemetry closure below, so it runs after it
+	// (LIFO) — the session's learned repeat timing serves the next
+	// connect once play has fully ended.
+	defer saveCal()
 
 	started := time.Now()
 	var maxScore, maxLevel int
 
-	out := sessWriter{s: s} // frame writer, and the bell sink below
+	out := &sessWriter{s: s} // frame writer, and the bell sink below
 	opts := &mario.Options{
 		Levels:    levels,
 		ViewW:     viewW,
@@ -187,7 +206,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calC
 	// that goroutine is busy, the bell is dropped (best-effort sound).
 	bells := make(chan []byte, 8)
 	if bellOn {
-		opts.Sound = newBell(bellChanWriter{c: bells}).ring
+		opts.Sound = newBell(&bellChanWriter{c: bells}).ring
 	}
 	app := mario.New(opts)
 
@@ -232,22 +251,18 @@ func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calC
 	// Client-side resizes follow like the native runner's SIGWINCH: new
 	// viewport on the next tick, full repaint at the new size.
 	s.OnResize(func(cols, rows int) {
-		app.Resize(cols/render.Pix, (rows-2)*2/render.Pix)
+		w, h := viewFor(cols, rows)
+		app.Resize(w, h)
 	})
 
-	// Terminal setup/teardown mirrors run()'s (kitty keyboard protocol,
-	// alt screen, hidden cursor, window title). Unsupported terminals
-	// ignore these. ORDER IS LOAD-BEARING (kitty spec, Quickstart): the
-	// keyboard stack is screen-scoped — push AFTER entering the alt
-	// screen, pop BEFORE leaving it. The old prologue pushed on the main
-	// screen's stack, so the epilogue's pop (on the alt screen) was a
-	// no-op and the pushed level survived the exit, leaving the player's
-	// shell emitting CSI-u garbage. Popping on the way out while still
-	// on the alt screen can only ever pop our own level. The epilogue
-	// waits for the writer below so it lands after any in-flight frame
-	// diff — a trailing partial frame after the alt-screen exit would
-	// print garbage on the player's shell.
-	s.Write([]byte("\x1b[<u\x1b[?1049h\x1b[>11u\x1b[?25l\x1b[2J\x1b[22t\x1b]0;SUPER CLI MARIO\a"))
+	// Terminal setup/teardown mirrors run()'s: termPrologue/termEpilogue
+	// hold the byte-exact strings and their load-bearing order (push
+	// after the alt-screen enter, pop before its exit — the screen-
+	// scoped kitty stack). Unsupported terminals ignore the sequences.
+	// The epilogue waits for the writer below so it lands after any
+	// in-flight frame diff — a trailing partial frame after the
+	// alt-screen exit would print garbage on the player's shell.
+	s.Write([]byte(termPrologue))
 
 	st := render.NewStream(out, render.NewPalette(colors))
 	drainBells := func() {
@@ -284,9 +299,11 @@ func playSession(levels []*engine.Level, s *sshd.Session, basic bool, cals *calC
 		case <-drained:
 		case <-time.After(500 * time.Millisecond): // wedged writer: leave anyway
 		}
-		// Kitty pop first (still on the alt screen — see the prologue
-		// note), then the alt-screen exit.
-		s.Write([]byte("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l\x1b[0m\r\n"))
+		// termEpilogue: kitty pop while still on the alt screen, then
+		// the exit. Any bell still queued here is dropped — the drain
+		// goroutine is gone, and a farewell BEL is not worth blocking
+		// teardown on.
+		s.Write([]byte(termEpilogue))
 	}()
 	tick := time.NewTicker(time.Second / engine.TicksPerSecond)
 	defer tick.Stop()

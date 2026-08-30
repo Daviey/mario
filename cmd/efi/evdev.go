@@ -18,15 +18,18 @@ const (
 	evKey = 0x01
 )
 
-// input_event matches the kernel's 64-bit layout (struct input_event with
-// __s64 time fields since 4.16): 24 bytes.
+// input_event matches the kernel's 64-bit layout (struct input_event
+// with __s64 time fields since 4.16): 16 bytes of timestamp, then
+// type/code/value. unsafe.Sizeof is exactly 24 — 24 % 8 == 0, so the
+// struct needs no tail padding to hit the kernel's record size (a
+// [4]byte tail would round it up to 32 and desync every record after
+// the first).
 type inputEvent struct {
 	Sec   int64
 	Usec  int64
 	Type  uint16
 	Code  uint16
 	Value int32
-	_     [4]byte // explicit tail padding; sizeof stays 24
 }
 
 // ioc computes an _IOC(dir, type, nr, size) request word.
@@ -57,6 +60,11 @@ type keyboard struct {
 	fd    int
 	shift bool
 	buf   [24 * 16]byte // a handful of events per drain
+	// pressedShift remembers shift state at press time per held key: a
+	// kitty release must echo its press's codepoint (the mapper keys
+	// holds by source), even when shift was released while the key
+	// stayed down.
+	pressedShift map[uint16]bool
 }
 
 // openKeyboards returns every /dev/input/eventN that produces the keys we
@@ -136,6 +144,10 @@ func (k *keyboard) drain(feed func([]byte)) {
 					k.shift = true
 					continue
 				}
+				if k.pressedShift == nil {
+					k.pressedShift = make(map[uint16]bool)
+				}
+				k.pressedShift[ev.Code] = k.shift
 				if press, _ := keySeqs(ev.Code, k.shift); press != "" {
 					feed([]byte(press))
 				}
@@ -144,7 +156,12 @@ func (k *keyboard) drain(feed func([]byte)) {
 					k.shift = false
 					continue
 				}
-				if _, release := keySeqs(ev.Code, k.shift); release != "" {
+				shift := k.shift
+				if held, ok := k.pressedShift[ev.Code]; ok {
+					shift = held // release echoes the press's codepoint
+					delete(k.pressedShift, ev.Code)
+				}
+				if _, release := keySeqs(ev.Code, shift); release != "" {
 					feed([]byte(release))
 				}
 			}

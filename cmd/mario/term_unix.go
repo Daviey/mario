@@ -13,7 +13,13 @@ import (
 )
 
 // rawMode puts the terminal into raw no-echo mode via stty and returns a
-// restore function.
+// restore function. stty rather than a hand-rolled TCGETS/TCSETS ioctl:
+// the shipped binary stays pure-stdlib (no golang.org/x/term, no unsafe
+// syscall struct layouts to keep aligned with the kernel's), and every
+// Unix a player is likely to sit at ships stty. The load test does
+// hand-roll the ioctl (serve_load_test.go openRawPTY) where a pty must
+// be set up without depending on external tools — the pattern was
+// considered and deliberately kept out of the runtime path.
 func rawMode() (func(), error) {
 	stty, err := exec.LookPath("stty")
 	if err != nil {

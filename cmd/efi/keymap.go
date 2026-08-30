@@ -18,7 +18,6 @@ const (
 	evMinus      = 12
 	evBackspace  = 14
 	evEnter      = 28
-	evLeftCtrl   = 29
 	evKey1       = 2
 	evKey0       = 11
 	evQ          = 16
@@ -50,7 +49,7 @@ const (
 var charForCode = map[uint16]byte{
 	evQ: 'q', evW: 'w', evE: 'e', evR: 'r', evY: 'y', evP: 'p', evA: 'a', evSpace: ' ',
 	evS: 's', evD: 'd', evL: 'l', evN: 'n', evX: 'x', evK: 'k',
-	2: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', evKey0: '0',
+	evKey1: '1', 3: '2', 4: '3', 5: '4', 6: '5', 7: '6', 8: '7', 9: '8', 10: '9', evKey0: '0',
 	evMinus: '-', evDot: '.',
 }
 

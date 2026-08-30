@@ -34,6 +34,9 @@ type bellRinger struct {
 	now  func() time.Time // injectable clock for tests
 }
 
+// newBell returns a ringer over w whose ring method value plugs straight
+// into mario.Options.Sound (func(ev string)): it receives every engine
+// sound event, curates and throttles them into BEL bytes on w.
 func newBell(w io.Writer) *bellRinger {
 	return &bellRinger{w: w, now: time.Now}
 }

@@ -71,16 +71,19 @@ func main() {
 	g := app.Game
 
 	// Live viewport: the page reports how many world pixels it can show;
-	// tiles = pixels/Pix. Never below the playable minimum.
+	// tiles = pixels/Pix. This callback runs on the browser event loop
+	// while the ticker goroutine Steps, so the write must go through
+	// App.Resize (mutex'd, applied on the next Step) — assigning
+	// g.ViewW/H here races the tick. Out-of-range sizes clamp to the
+	// nearest bound instead of being ignored (App.Resize: 16..60 wide,
+	// 4+ tall; the engine bounds by level).
 	js.Global().Set("marioSize", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		w := args[0].Int() / render.Pix
+		if w < 16 {
+			w = 16 // playable minimum, matching the pre-Resize behavior
+		}
 		h := (args[1].Int() - render.HudBandPx - render.StatusBandPx) / render.Pix
-		if w >= 16 && w <= 60 {
-			g.ViewW = w
-		}
-		if h >= 4 && h <= g.Level.Height {
-			g.ViewH = h
-		}
+		app.Resize(w, h)
 		jsFrameSink = jsRGB{} // frame size changes: reallocate on next deliver
 		return nil
 	}))
@@ -160,6 +163,11 @@ func newTicker(hz int) *ticker {
 
 func (t *ticker) wait() { <-t.ch }
 
+// timeAfter fires after ms on the browser event loop. Each call mints a
+// fresh one-shot js.FuncOf (its channel differs per call) rather than
+// reusing a single callback: the churn is bounded — one pending timer
+// per ticker wait, and each Func is released by its finalizer once the
+// fired callback becomes unreachable — so 60 Hz stays cheap.
 func timeAfter(ms int) chan struct{} {
 	ch := make(chan struct{})
 	js.Global().Call("setTimeout", js.FuncOf(func(_ js.Value, _ []js.Value) any {
