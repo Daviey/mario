@@ -9,14 +9,23 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/Daviey/mario/board"
+	"github.com/Daviey/mario/engine"
+	"github.com/Daviey/mario/replay"
 )
 
 func TestServeSSHClientE2E(t *testing.T) {
@@ -254,4 +263,195 @@ func TestServeSSHClientLatencyE2E(t *testing.T) {
 
 	stdinW.Close()
 	cmd.Wait()
+}
+
+// TestServeDeathRunRecordingE2E drives the real OpenSSH client through
+// a run that contains deaths, submits the score against a capture sink
+// standing in for Supabase, and replays the submitted recording — the
+// leaderboard's verification contract, end to end over the wire.
+//
+// Regression for the recorder-wipe bug (fixed 2026-08-30): every death
+// respawn used to reset the input recording, so the submission carried
+// only the final life's segment. The verifier then replayed it to a
+// different (smaller) game and deleted the row — live, every
+// death-containing run was silently dropped. The old-bug signature this
+// test refuses: a recording too short to span the deaths, or a replay
+// that does not reproduce the submitted score/level.
+//
+// Unlike the SSHE2E-gated tests above, this one runs in the default
+// suite (CI included): it needs only the ssh binary, which the runner
+// image carries, and its ~40s runtime is the price of the only
+// coverage that spans ssh transport → input mapper → recorder →
+// leaderboard submit → replay verification.
+func TestServeDeathRunRecordingE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("no ssh client available")
+	}
+
+	bin := t.TempDir() + "/mario"
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	// Capture sink: answers as PostgREST would and keeps every scores
+	// insert body for the replay assertions.
+	var mu sync.Mutex
+	var inserts []board.Entry
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rest/v1/scores") {
+			body, _ := io.ReadAll(r.Body)
+			var e board.Entry
+			if json.Unmarshal(body, &e) == nil {
+				mu.Lock()
+				inserts = append(inserts, e)
+				mu.Unlock()
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("[]"))
+	}))
+	defer sink.Close()
+
+	// One scripted session: title → run (with the demo input pattern,
+	// which scores) → suicide the remaining lives → submit → quit.
+	session := func() bool {
+		probe, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		probe.Close()
+
+		srv := exec.Command(bin, "-serve", fmt.Sprintf("127.0.0.1:%d", port),
+			"-hostkey", t.TempDir()+"/hk")
+		srv.Env = append(os.Environ(),
+			"SUPABASE_URL="+sink.URL, "SUPABASE_KEY=testkey")
+		srv.Stderr = os.Stderr
+		if err := srv.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			srv.Process.Kill()
+			srv.Wait()
+		}()
+
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+			if err == nil {
+				c.Close()
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		stdin, stdinW, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			defer stdinW.Close()
+			step := func(keys string, d time.Duration) {
+				stdinW.Write([]byte(keys))
+				time.Sleep(d)
+			}
+			time.Sleep(1200 * time.Millisecond)
+			step("\r", 2*time.Second) // title → world card
+			// Demo-script drive: right + run always, hop every ~1.6s.
+			// Raw repeats emulate OS autorepeat for the legacy mapper.
+			t0 := time.Now()
+			for time.Since(t0) < 11*time.Second {
+				keys := "dx"
+				if math.Mod(time.Since(t0).Seconds(), 1.617) < 0.37 {
+					keys = "dxw"
+				}
+				step(keys, 25*time.Millisecond)
+			}
+			// Suicide the remaining lives: three deaths end the run.
+			for i := 0; i < 6; i++ {
+				step("k", 2500*time.Millisecond)
+			}
+			// Ask → yes → name → accept (solve PoW, POST) → close → quit.
+			step("y", 1200*time.Millisecond)
+			step("zz", 400*time.Millisecond)
+			step("\r", 6000*time.Millisecond)
+			step("\x1b", 800*time.Millisecond)
+			step("q", 3*time.Second)
+		}()
+
+		var out bytes.Buffer
+		cmd := exec.Command(sshPath, "-tt", "-p", fmt.Sprint(port),
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+			"-o", "LogLevel=ERROR",
+			"player@127.0.0.1")
+		cmd.Stdin = stdin
+		cmd.Stdout = &out
+		cmd.Stderr = os.Stderr
+		done := make(chan error, 1)
+		go func() { done <- cmd.Run() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Logf("ssh exited with error: %v", err)
+			}
+		case <-time.After(75 * time.Second):
+			cmd.Process.Kill()
+			t.Fatal("ssh session did not finish")
+		}
+		if !strings.Contains(out.String(), "\x1b[<u\x1b[?25h\x1b[?23t\x1b[?1049l") {
+			t.Errorf("session output missing clean epilogue")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return len(inserts) > 0
+	}
+
+	// The blind drive scores on the coin blocks most of the time; retry
+	// once so a mistimed hop does not flake CI.
+	if !session() {
+		t.Log("first session submitted nothing (drive missed the coins); retrying")
+		if !session() {
+			t.Fatal("no scores insert reached the sink in two sessions")
+		}
+	}
+
+	mu.Lock()
+	e := inserts[len(inserts)-1]
+	mu.Unlock()
+	if e.EngineVersion != board.EngineVersion {
+		t.Errorf("submission engine version %q != build %q", e.EngineVersion, board.EngineVersion)
+	}
+	var wire struct {
+		Ticks int `json:"ticks"`
+	}
+	if err := json.Unmarshal([]byte(e.Replay), &wire); err != nil {
+		t.Fatalf("submitted replay is not recorder JSON: %v", err)
+	}
+	// The drive alone is >11s (~700 ticks); a final-life fragment (the
+	// recorder-wipe bug shipped ~310-tick recordings) cannot span it.
+	if wire.Ticks < 600 {
+		t.Errorf("recording too short to span the deaths: %d ticks", wire.Ticks)
+	}
+
+	// The verification contract: replaying the submitted recording must
+	// reproduce the submitted row exactly.
+	levels, err := replay.DayLevels(e.Mode, e.Day)
+	if err != nil {
+		t.Fatalf("DayLevels: %v", err)
+	}
+	res, err := replay.Run(levels, e.Mode, e.Replay)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if res.Score != e.Score || res.Level != e.Level || res.State != engine.StateGameOver {
+		t.Fatalf("replay mismatch (the verifier would DROP this row): replay scored=%d level=%d state=%s, row claims score=%d level=%d",
+			res.Score, res.Level, res.State, e.Score, e.Level)
+	}
+	t.Logf("submitted score=%d level=%d recording=%d ticks — replays clean", e.Score, e.Level, wire.Ticks)
 }

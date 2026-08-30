@@ -99,3 +99,67 @@ func jq(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+// TestVerifyPendingSystematicDropFails verifies the alerting contract:
+// ONE row whose replay disagrees with its claim can be a corrupted
+// submission, but TWO is a systematic determinism or recording bug
+// deleting real scores (the 2026-08-30 recorder-wipe bug dropped every
+// death-containing run silently, for weeks) — the run must fail red.
+// Version-stale rows (pending recordings from before an EngineVersion
+// bump) are expected and must never trigger the failure.
+func TestVerifyPendingSystematicDropFails(t *testing.T) {
+	levels := engine.DefaultLevels()
+	g := engine.NewGame(levels, 20, engine.LevelHeight)
+	var rec replay.Recorder
+	for i := 0; g.State != engine.StateGameOver && i < 6000; i++ {
+		in := engine.Input{Right: true, Run: i%3 != 0, Up: i%97 < 22, AnyKey: i == 0}
+		g.Update(in)
+		if i == 1 {
+			rec.Start()
+		}
+		if i >= 1 {
+			rec.Record(in)
+		}
+	}
+	rec.Finish()
+
+	row := func(id, name, score, level, ver string) string {
+		return `{"id":"` + id + `","name":"` + name + `","score":` + score +
+			`,"level":` + level + `,"mode":"classic","engine_version":"` + ver +
+			`","replay":` + jq(rec.JSON()) + `}`
+	}
+	honest := row("keep-1", "HONEST", itoa(g.Score), itoa(g.LevelIndex()+1), board.EngineVersion)
+	liar1 := row("drop-1", "LIAR1", "999999", "9", board.EngineVersion)
+	liar2 := row("drop-2", "LIAR2", "888888", "8", board.EngineVersion)
+	stale := row("drop-3", "STALE", itoa(g.Score), itoa(g.LevelIndex()+1), "0.0.0-old")
+
+	run := func(first string) error {
+		var fetched atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				if fetched.Add(1) == 1 {
+					w.Write([]byte(first))
+				} else {
+					w.Write([]byte("[]"))
+				}
+			case http.MethodPatch, http.MethodDelete:
+				w.WriteHeader(204)
+			}
+		}))
+		defer srv.Close()
+		t.Setenv("SUPABASE_URL", srv.URL)
+		t.Setenv("SUPABASE_SERVICE_KEY", "test-service-key")
+		return runVerifyPending()
+	}
+
+	// Two determinism failures: the run must fail.
+	if err := run("[" + honest + "," + liar1 + "," + liar2 + "]"); err == nil {
+		t.Error("two replay-mismatch drops must fail the verification run")
+	}
+	// One determinism failure plus a version-stale row: expected noise,
+	// the run stays green.
+	if err := run("[" + honest + "," + liar1 + "," + stale + "]"); err != nil {
+		t.Errorf("one determinism drop + one version drop must not fail: %v", err)
+	}
+}
