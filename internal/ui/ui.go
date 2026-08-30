@@ -43,7 +43,8 @@ type UI struct {
 	daily   bool // showing the daily-challenge board
 	dailyGo bool // title 'd': the App should start a daily run
 	day     string
-	rank    int // post-submit rank in the fetched rows, 0 = unknown
+	rank    int  // post-submit rank in the fetched rows, 0 = unknown
+	subOK   bool // a submission landed successfully (telemetry funnel flag)
 
 	replaySrc func() (string, bool) // the App's recording, for verification
 	submit    func(e board.Entry) error
@@ -426,6 +427,7 @@ func (u *UI) submitLocked() {
 			u.status = "SUBMIT FAILED"
 		} else {
 			u.status = "SUBMITTED!"
+			u.subOK = true
 			if u.saveName != nil {
 				u.saveName(name)
 			} else {
@@ -437,6 +439,14 @@ func (u *UI) submitLocked() {
 			u.fetchInto(fetch)
 		}
 	}()
+}
+
+// Submitted reports whether any score submission from this machine
+// succeeded — the played→submitted funnel flag for session telemetry.
+func (u *UI) Submitted() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.subOK
 }
 
 func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {

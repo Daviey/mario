@@ -5,12 +5,15 @@ package main
 // and its own render stream; the SSH session is just a terminal pipe.
 
 import (
+	"context"
 	"net"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Daviey/mario"
+	"github.com/Daviey/mario/board"
 	"github.com/Daviey/mario/engine"
 	"github.com/Daviey/mario/input"
 	"github.com/Daviey/mario/internal/persist"
@@ -24,10 +27,19 @@ func runServe(levels []*engine.Level, addr, hostKeyFile string, trueColor bool, 
 	// Calibration warm-start, keyed by client host (see calCache). One
 	// per server process, shared by every session handler.
 	cals := &calCache{}
+
+	// Session telemetry rides the same Supabase service as the scoreboard,
+	// write-only: one plays row per connection at disconnect. Offline env
+	// (no SUPABASE_URL/KEY) just disables it — the journald line remains.
+	var playLog *board.Client
+	if client, err := board.FromEnv(); err == nil {
+		playLog = client
+	}
+
 	srv := &sshd.Server{
 		Addr:          addr,
 		HostKeyFile:   hostKeyFile,
-		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals, bellOn) },
+		Handler:       func(s *sshd.Session) { playSession(levels, s, trueColor, cals, bellOn, playLog) },
 		MoshBin:       moshBin,
 		MoshPortRange: moshPorts,
 	}
@@ -131,7 +143,7 @@ func (w bellChanWriter) Write(p []byte) (int, error) {
 // playSession runs one game per SSH connection — the same wiring as the
 // native runner (cmd/mario/main.go run), pointed at the SSH channel
 // instead of stdout.
-func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache, bellOn bool) {
+func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *calCache, bellOn bool, bc *board.Client) {
 	// Per-session color depth, not the server process's own terminal:
 	// a forwarded COLORTERM env request, the client's TERM family, or
 	// the DA2/DA3 terminal probe decides (Session.TrueColor). The
@@ -149,6 +161,9 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 	mapper, saveCal := sessionMapper(cals, s.RemoteAddr())
 	defer saveCal() // the session's learned repeat timing serves the next connect
 
+	started := time.Now()
+	var maxScore, maxLevel int
+
 	out := sessWriter{s: s} // frame writer, and the bell sink below
 	opts := &mario.Options{
 		Levels:    levels,
@@ -160,6 +175,7 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		Term:      s.Term(),
 		ColorTerm: s.Env("COLORTERM"),
 	}
+
 	// BEL bytes must never be written from the tick goroutine: the
 	// channel write below can stall on SSH flow control, and a stalled
 	// tick loop drops ticks — mushy controls and late key releases.
@@ -170,6 +186,42 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		opts.Sound = newBell(bellChanWriter{c: bells}).ring
 	}
 	app := mario.New(opts)
+
+	// Complete the telemetry defer now that we have the app
+	// (registered LIFO, so it runs before the logger/writer teardown).
+	defer func() {
+		dur := int(time.Since(started).Seconds())
+		regime := "legacy"
+		if mapper.SawKitty() {
+			regime = "kitty"
+		}
+		p := board.PlaySession{
+			IP:            calKey(s.RemoteAddr()),
+			StartedAt:     started,
+			EndedAt:       time.Now(),
+			Level:         maxLevel,
+			Score:         maxScore,
+			Submitted:     app.Submitted(),
+			Runs:          app.Runs(),
+			Term:          s.Term(),
+			ColorTerm:     s.Env("COLORTERM"),
+			InputRegime:   regime,
+			Viewport:      strconv.Itoa(app.Game.ViewW) + "x" + strconv.Itoa(app.Game.ViewH),
+			EngineVersion: board.EngineVersion,
+		}
+		s.Logf("play ip=%s runs=%d level=%d score=%d submitted=%t dur=%ds term=%s",
+			p.IP, p.Runs, p.Level, p.Score, p.Submitted, dur, p.Term)
+		if bc == nil {
+			return
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := bc.RecordPlay(ctx, p); err != nil {
+				s.Logf("telemetry: %v", err)
+			}
+		}()
+	}()
 	s.OnFeed(app.Feed) // also flushes keystrokes the color probe buffered
 	// Client-side resizes follow like the native runner's SIGWINCH: new
 	// viewport on the next tick, full repaint at the new size.
@@ -239,6 +291,12 @@ func playSession(levels []*engine.Level, s *sshd.Session, trueColor bool, cals *
 		case <-tick.C:
 		}
 		app.Step()
+		if sc := app.Game.Score; sc > maxScore {
+			maxScore = sc
+		}
+		if lv := app.Game.LevelIndex() + 1; lv > maxLevel {
+			maxLevel = lv
+		}
 		var cur *render.Screen
 		if ui := app.UI(); ui != nil {
 			cur = st.Snapshot(app.Game, ui)

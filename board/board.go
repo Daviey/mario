@@ -89,6 +89,10 @@ type Entry struct {
 // viewportPat is the one shape the viewport diagnostic may take.
 var viewportPat = regexp.MustCompile(`^[0-9]+x[0-9]+$`)
 
+// ipPat accepts IPv4/IPv6 literals only — the plays table's ip column
+// carries the player's SSH origin host, never a hostname.
+var ipPat = regexp.MustCompile(`^[0-9a-fA-F.:]+$`)
+
 // ClampPlayContext bounds the client-supplied diagnostic fields so a hostile
 // client cannot stuff the operator's table (the DB CHECKs mirror this).
 func ClampPlayContext(e *Entry) {
@@ -249,6 +253,72 @@ func (c *Client) SetVerified(ctx context.Context, id string) error {
 func (c *Client) DeleteRow(ctx context.Context, id string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/rest/v1/scores",
 		url.Values{"id": {"eq." + id}}, nil)
+	return err
+}
+
+// PlaySession is one server-side play session's telemetry (the plays
+// table): written by the SSH game host at disconnect. The game only ever
+// inserts — anon has no read path on plays at all — and the rows
+// originate from our servers only (player machines never phone home).
+type PlaySession struct {
+	IP            string    `json:"ip"` // player's SSH origin host
+	StartedAt     time.Time `json:"started_at"`
+	EndedAt       time.Time `json:"ended_at"`
+	Level         int       `json:"level"`     // deepest level reached
+	Score         int       `json:"score"`     // best score in the session
+	Submitted     bool      `json:"submitted"` // a score row landed from this session
+	Runs          int       `json:"runs"`      // games started (recording-arming rule)
+	Term          string    `json:"term,omitempty"`
+	ColorTerm     string    `json:"colorterm,omitempty"`
+	InputRegime   string    `json:"input_regime,omitempty"`
+	Viewport      string    `json:"viewport,omitempty"`
+	EngineVersion string    `json:"engine_version"`
+}
+
+// ClampPlaySession bounds the telemetry fields the same way
+// ClampPlayContext bounds submissions (the plays CHECKs mirror this).
+func ClampPlaySession(p *PlaySession) {
+	p.IP = clampMeta(p.IP, 45)
+	if !ipPat.MatchString(p.IP) {
+		p.IP = ""
+	}
+	p.Term = clampMeta(p.Term, 64)
+	p.ColorTerm = clampMeta(p.ColorTerm, 32)
+	if p.InputRegime != "kitty" && p.InputRegime != "legacy" {
+		p.InputRegime = ""
+	}
+	if !viewportPat.MatchString(p.Viewport) {
+		p.Viewport = ""
+	}
+	p.EngineVersion = clampMeta(p.EngineVersion, 32)
+	p.Level = clampLevel(p.Level)
+	if p.Score < 0 {
+		p.Score = 0
+	}
+	if p.Score > 9999999 {
+		p.Score = 9999999
+	}
+	if p.Runs < 0 {
+		p.Runs = 0
+	}
+	if p.EndedAt.Before(p.StartedAt) {
+		p.EndedAt = p.StartedAt
+	}
+}
+
+// RecordPlay inserts one session-telemetry row. Fire-and-forget by
+// design: callers log errors, never surface them to gameplay.
+func (c *Client) RecordPlay(ctx context.Context, p PlaySession) error {
+	if p.EngineVersion == "" {
+		p.EngineVersion = EngineVersion
+	}
+	ClampPlaySession(&p)
+	body, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, http.MethodPost, "/rest/v1/plays", nil, body,
+		"Prefer", "return=minimal")
 	return err
 }
 
