@@ -24,6 +24,8 @@ import (
 // name entry and board.SanitizeDisplayName consume this const.
 const NameCharSet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-"
 
+// PlayerConfig is one player's leaderboard identity: a device UUID, a
+// display name and the local-only best score.
 type PlayerConfig struct {
 	DeviceID string `json:"device_id"`
 	Name     string `json:"name"`
@@ -94,8 +96,10 @@ func (pc *PlayerConfig) SaveName(name string) {
 func newDeviceID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand failure is effectively fatal for uniqueness; fall
-		// back to a time-derived id rather than a fixed one.
+		// crypto/rand failure is effectively fatal; return the fixed
+		// all-zeros v4-shaped UUID so the process still settles on ONE
+		// stable id — in-process agreement is the invariant submissions
+		// depend on, and only uniqueness is lost.
 		return "00000000-0000-4000-8000-000000000000"
 	}
 	b[6] = b[6]&0x0f | 0x40

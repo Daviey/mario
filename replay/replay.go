@@ -17,6 +17,13 @@ import (
 const MaxTicks = 130_000
 
 // maskOf packs an Input into a bitmask; inputOf is its inverse.
+//
+// The bit numbers are the frozen wire format: Left..Restart occupy 0..7
+// in struct order, but AnyKey=8 and Suicide=9 were assigned later and sit
+// OUT of numeric order against the Input fields. Never renumber or
+// re-order them — every stored recording decodes through these numbers,
+// so a change would rewrite history. New inputs take the next free bit
+// and the wire format "v" is bumped instead.
 func maskOf(in engine.Input) uint16 {
 	var m uint16
 	set := func(bit int, b bool) {
@@ -37,6 +44,8 @@ func maskOf(in engine.Input) uint16 {
 	return m
 }
 
+// inputOf is maskOf's inverse; its bit numbers are the same frozen wire
+// format — read maskOf's warning before touching them.
 func inputOf(m uint16) engine.Input {
 	bit := func(n int) bool { return m&(1<<n) != 0 }
 	return engine.Input{
@@ -47,6 +56,25 @@ func inputOf(m uint16) engine.Input {
 }
 
 // Recorder accumulates one run's input stream, run-length compressed.
+//
+// Arming contract — the caller (App.Step in mario.go) owns the game
+// state machine and must drive the recorder exactly as a live run
+// unfolds, or the replay scores differently from the run the player
+// actually played:
+//
+//   - Start on the FIRST tick of a world card that begins a NEW run —
+//     a card reached from Dying (death respawn) or ScoreTick (level
+//     clear) CONTINUES the same run and the same recording.
+//   - Record on every tick after Start; the recording's first tick is
+//     the card tick itself (the title-dismiss tick stays outside).
+//   - Reset on the title screen (a run ended without game over).
+//   - Finish at game over / win / quit.
+//
+// The card-continuation rule is load-bearing: when every card re-armed
+// the recorder (prevState assigned after Update, live bug 2026-08-30),
+// each death wiped the recording down to the final life's segment and
+// the verifier deleted every death-containing submission.
+// mario_test.go TestRecorderSurvivesDeaths is the regression tripwire.
 type Recorder struct {
 	runs  [][2]uint32 // {mask, count}
 	last  uint16
@@ -56,27 +84,36 @@ type Recorder struct {
 	dirty bool // any tick was recorded
 }
 
-// Start arms the recorder for a fresh run.
+// Start arms the recorder for a fresh run — on the new run's first
+// world-card tick only; see the arming contract on the Recorder type.
+// Run() replays classic recordings from the matching state
+// (Game.Reset), which is what makes the stream reproducible.
 func (r *Recorder) Start() {
 	r.runs = nil
 	r.n, r.full, r.dirty = 0, false, false
 	r.live = true
 }
 
-// Reset disarms and forgets everything (title screen, session start).
+// Reset disarms and forgets everything (title screen, session start);
+// the next run needs a fresh Start. Fields are set directly because
+// Start() would arm the recorder.
 func (r *Recorder) Reset() {
-	r.live = false
-	r.Start()
+	r.runs = nil
+	r.n, r.full, r.dirty = 0, false, false
 	r.live = false
 }
 
 // Live reports whether a run is currently being recorded.
 func (r *Recorder) Live() bool { return r.live }
 
-// Finish freezes the recording at run end (game over, win, quit).
+// Finish freezes the recording at run end (game over, win, quit). The
+// frozen stream is the submission; Record is ignored until the next
+// Start.
 func (r *Recorder) Finish() { r.live = false }
 
-// Record appends one tick's input.
+// Record appends one tick's input. Called for every tick of the run,
+// card included (see the arming contract); ticks after Finish or Reset
+// are dropped.
 func (r *Recorder) Record(in engine.Input) {
 	if !r.live {
 		return
@@ -102,6 +139,8 @@ func (r *Recorder) Record(in engine.Input) {
 func (r *Recorder) Shippable() bool { return r.dirty && !r.full && r.n > 0 && r.n <= MaxTicks }
 
 // JSON encodes the wire format: {"v":1,"ticks":N,"runs":[[mask,count],...]}.
+// It returns "" when nothing was recorded (dirty=false) — callers read
+// that as "no recording" and the UI refuses to submit without one.
 func (r *Recorder) JSON() string {
 	if !r.dirty {
 		return ""
@@ -160,11 +199,10 @@ func decode(data string) ([]engine.Input, error) {
 			inputs = append(inputs, in)
 		}
 	}
+	// The per-run budget checks above already pin len(inputs) ≤ MaxTicks,
+	// so the sum against the (already-capped) header is the last bound.
 	if len(inputs) != s.Ticks {
 		return nil, fmt.Errorf("replay: runs sum to %d ticks, header says %d", len(inputs), s.Ticks)
-	}
-	if len(inputs) > MaxTicks {
-		return nil, fmt.Errorf("replay: %d ticks exceeds cap %d", len(inputs), MaxTicks)
 	}
 	return inputs, nil
 }
@@ -180,6 +218,27 @@ type Result struct {
 // levels and reports what it scored. mode must match the submitted run
 // ("classic" or "daily"); for daily the caller swaps in the challenge
 // level for the recorded day beforehand.
+func Run(levels []*engine.Level, mode string, data string) (Result, error) {
+	inputs, err := decode(data)
+	if err != nil {
+		return Result{}, err
+	}
+	g, err := newReplayGame(levels, mode)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, in := range inputs {
+		g.Update(in)
+	}
+	return Result{Score: g.Score, Level: g.LevelIndex() + 1, State: g.State}, nil
+}
+
+// newReplayGame builds the game a recording replays against, bootstrapped
+// into the run's mode: classic resets exactly like a live run start
+// (title → world card — the state the recorder's Start arms at, see the
+// Recorder arming contract), daily arms BeginDaily. Run and Trace must
+// share this bootstrap; a recording made for one mode silently replayed
+// through the other scores nonsense.
 //
 // The viewport is hardcoded to 40xLevelHeight on purpose: the simulation
 // never reads the viewport (the camera is write-only state — nothing in
@@ -188,11 +247,7 @@ type Result struct {
 // is the tripwire: if gameplay ever couples to ViewW/CameraX (e.g. classic
 // off-screen enemy freezing), that test breaks first — fix the engine or
 // persist the viewport in the wire format before shipping.
-func Run(levels []*engine.Level, mode string, data string) (Result, error) {
-	inputs, err := decode(data)
-	if err != nil {
-		return Result{}, err
-	}
+func newReplayGame(levels []*engine.Level, mode string) (*engine.Game, error) {
 	g := engine.NewGame(levels, 40, engine.LevelHeight)
 	switch mode {
 	case "", "classic":
@@ -201,12 +256,9 @@ func Run(levels []*engine.Level, mode string, data string) (Result, error) {
 		g.Daily = true
 		g.BeginDaily()
 	default:
-		return Result{}, fmt.Errorf("replay: unknown mode %q", mode)
+		return nil, fmt.Errorf("replay: unknown mode %q", mode)
 	}
-	for _, in := range inputs {
-		g.Update(in)
-	}
-	return Result{Score: g.Score, Level: g.LevelIndex() + 1, State: g.State}, nil
+	return g, nil
 }
 
 // DayLevels rebuilds the level set for a run of the given mode and day.

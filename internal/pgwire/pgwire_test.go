@@ -296,6 +296,26 @@ func (fs *fakeServer) authenticate(conn net.Conn, br *bufio.Reader, user string)
 		}
 	case "scram":
 		return fs.scramAuth(conn, br)
+	case "sasl-no-scram":
+		// Offers only mechanisms the client does not speak; the client
+		// errors out without writing, so just wait for its close.
+		fs.writes(conn, authMsg(10, []byte("SCRAM-SHA-512\x00\x00")))
+		readFrame(br)
+		return false
+	case "sasl-continue-first":
+		// SASLContinue with no preceding SASL (client sc is nil).
+		fs.writes(conn, authMsg(11, []byte("r=x,s=pgw,i=4096")))
+		readFrame(br)
+		return false
+	case "oversized":
+		// Announces a message length past the 256 MiB sanity cap; the
+		// client must reject the frame without trying to buffer it.
+		var hdr [5]byte
+		hdr[0] = 'S'
+		binary.BigEndian.PutUint32(hdr[1:], 1<<30)
+		_, _ = conn.Write(hdr[:])
+		readFrame(br)
+		return false
 	default:
 		fs.errf(conn, "XX000", "unknown auth mode "+fs.auth)
 		return false
@@ -727,5 +747,27 @@ func TestQueryContextCancel(t *testing.T) {
 	}
 	if _, err := c.Query(context.Background(), "SELECT 1"); err == nil {
 		t.Fatal("conn must be dead after ctx cancellation")
+	}
+}
+
+// --- 9. negative auth paths -----------------------------------------------------
+
+// TestAuthNegativePaths: hostile or broken server auth behavior must
+// fail closed — an unusable SASL mechanism list, SASLContinue before
+// SASL, and an oversized message length all error instead of hanging or
+// allocating.
+func TestAuthNegativePaths(t *testing.T) {
+	for _, tc := range []struct{ auth, want string }{
+		{"sasl-no-scram", "does not support SCRAM-SHA-256"},
+		{"sasl-continue-first", "unexpected sasl continue"},
+		{"oversized", "bad message length"},
+	} {
+		fs := newFake(t, tc.auth)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := Connect(ctx, fs.cfg())
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.auth, err, tc.want)
+		}
 	}
 }

@@ -48,8 +48,7 @@ func hmacSHA256(key, data []byte) []byte {
 }
 
 // scramClient runs one SCRAM-SHA-256 exchange (RFC 5802 with SHA-256 per
-// RFC 7677). The nonce is injected so tests can pin it to the RFC 7677
-// test vector; production callers pass fresh crypto/rand bytes.
+// RFC 7677).
 type scramClient struct {
 	user        string
 	password    string
@@ -65,6 +64,9 @@ type scramClient struct {
 	serverSig []byte
 }
 
+// newScramClient builds the client side of one exchange. The nonce is a
+// parameter rather than generated here so tests can pin the RFC 7677
+// test vector; production callers pass fresh crypto/rand bytes.
 func newScramClient(user, password, nonce string) *scramClient {
 	return &scramClient{user: user, password: password, nonce: nonce}
 }

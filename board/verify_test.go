@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func TestVerifierClientRound(t *testing.T) {
 		t.Error("pending fetch missing filters")
 	} else {
 		for _, want := range []string{"verified=eq.false", "replay=not.is.null"} {
-			if !contains(q, want) {
+			if !strings.Contains(q, want) {
 				t.Errorf("pending query %q missing %q", q, want)
 			}
 		}
@@ -56,13 +57,4 @@ func TestVerifierClientRound(t *testing.T) {
 	if method != http.MethodDelete || path != "/rest/v1/scores" {
 		t.Errorf("DeleteRow = %s %s", method, path)
 	}
-}
-
-func contains(hay, needle string) bool {
-	for i := 0; i+len(needle) <= len(hay); i++ {
-		if hay[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

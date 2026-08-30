@@ -2,6 +2,7 @@ package replay
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -199,12 +200,13 @@ func TestDecodeRejects(t *testing.T) {
 		// Bounds must be enforced BEFORE any allocation (audit fix: a
 		// hostile header once drove make()/expansion to OOM on the
 		// verifier). These cases must error cheaply.
-		`{"v":1,"ticks":4000000000,"runs":[[0,1]]}`,                                          // header ticks over cap
-		`{"v":1,"ticks":-1,"runs":[]}`,                                                       // negative ticks
-		`{"v":1,"ticks":1,"runs":[[0,4000000000]]}`,                                          // single run over cap
-		`{"v":1,"ticks":` + itoa(MaxTicks-1) + `,"runs":[[0,1],[0,` + itoa(MaxTicks) + `]]}`, // runs overflow cap mid-stream
-		// run count over cap (each run covers >=1 tick)
-		`{"v":1,"ticks":1,"runs":` + runsOverCap() + `}`,
+		`{"v":1,"ticks":4000000000,"runs":[[0,1]]}`, // header ticks over cap
+		`{"v":1,"ticks":-1,"runs":[]}`,              // negative ticks
+		`{"v":1,"ticks":1,"runs":[[0,4000000000]]}`, // single run over cap
+		`{"v":1,"ticks":` + strconv.Itoa(MaxTicks-1) + `,"runs":[[0,1],[0,` + strconv.Itoa(MaxTicks) + `]]}`, // runs overflow cap mid-stream
+		// run count over cap (each run covers >=1 tick): rejected by the
+		// run-count bound before any expansion.
+		`{"v":1,"ticks":1,"runs":` + runsOf(MaxTicks+1) + `}`,
 	}
 	for _, s := range bad {
 		if _, err := decode(s); err == nil {
@@ -213,24 +215,11 @@ func TestDecodeRejects(t *testing.T) {
 	}
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
-}
-
-// runsOverCap builds a runs array with MaxTicks+1 entries (each [0,1]),
-// which must be rejected by the run-count bound before any expansion.
-func runsOverCap() string {
+// runsOf builds a runs array of n entries (each [0,1]).
+func runsOf(n int) string {
 	var b strings.Builder
 	b.WriteByte('[')
-	for i := 0; i <= MaxTicks; i++ {
+	for i := range n {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -238,4 +227,80 @@ func runsOverCap() string {
 	}
 	b.WriteByte(']')
 	return b.String()
+}
+
+// TestDecodeAcceptsCapBoundaries pins the inclusive edges of the decode
+// bounds: exactly MaxTicks ticks (one run) and exactly MaxTicks runs
+// (one tick each) are both legal — the reject cases above fire only
+// past the cap.
+func TestDecodeAcceptsCapBoundaries(t *testing.T) {
+	in, err := decode(`{"v":1,"ticks":` + strconv.Itoa(MaxTicks) + `,"runs":[[0,` + strconv.Itoa(MaxTicks) + `]]}`)
+	if err != nil {
+		t.Fatalf("single run covering the cap: %v", err)
+	}
+	if len(in) != MaxTicks {
+		t.Fatalf("single-run stream decoded %d ticks, want %d", len(in), MaxTicks)
+	}
+	in, err = decode(`{"v":1,"ticks":` + strconv.Itoa(MaxTicks) + `,"runs":` + runsOf(MaxTicks) + `}`)
+	if err != nil {
+		t.Fatalf("run count at the cap: %v", err)
+	}
+	if len(in) != MaxTicks {
+		t.Fatalf("max-run stream decoded %d ticks, want %d", len(in), MaxTicks)
+	}
+}
+
+// TestDecodeMultiRunStream: several runs summing to the header's tick
+// count decode in order.
+func TestDecodeMultiRunStream(t *testing.T) {
+	in, err := decode(`{"v":1,"ticks":5,"runs":[[2,3],[0,2]]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []engine.Input{{Right: true}, {Right: true}, {Right: true}, {}, {}}
+	if len(in) != len(want) {
+		t.Fatalf("decoded %d inputs, want %d", len(in), len(want))
+	}
+	for i := range want {
+		if in[i] != want[i] {
+			t.Errorf("input %d = %+v, want %+v", i, in[i], want[i])
+		}
+	}
+}
+
+// TestRecorderRLEMerge: consecutive identical inputs compress into ONE
+// [mask,count] run — the RLE is what keeps a 130k-tick recording small
+// enough to ship.
+func TestRecorderRLEMerge(t *testing.T) {
+	var r Recorder
+	r.Start()
+	r.Record(engine.Input{Right: true})
+	r.Record(engine.Input{Right: true})
+	var s stream
+	if err := json.Unmarshal([]byte(r.JSON()), &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Runs) != 1 || s.Runs[0] != [2]int64{int64(maskOf(engine.Input{Right: true})), 2} {
+		t.Errorf("runs = %v, want one merged [mask,2] run", s.Runs)
+	}
+}
+
+// TestRecorderResetForgets: Reset wipes the recording and disarms it —
+// JSON stays "" even when stray Record calls follow, so a title-screen
+// blip can never ship a stale fragment.
+func TestRecorderResetForgets(t *testing.T) {
+	var r Recorder
+	r.Start()
+	r.Record(engine.Input{Right: true})
+	r.Reset()
+	if s := r.JSON(); s != "" {
+		t.Errorf("JSON after Reset = %q, want empty", s)
+	}
+	if r.Live() || r.Shippable() {
+		t.Error("Reset must disarm and unship the recorder")
+	}
+	r.Record(engine.Input{Left: true})
+	if s := r.JSON(); s != "" {
+		t.Errorf("Record after Reset produced %q, want nothing", s)
+	}
 }
