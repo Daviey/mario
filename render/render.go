@@ -12,6 +12,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Daviey/mario/engine"
 )
@@ -520,7 +521,7 @@ func Render(g *engine.Game, p *Palette, ui ...*ScoreUI) *Screen {
 	s := NewScreen(g.ViewW*Pix, 2+vh*Pix/2)
 	s.TrueColor = p.TrueColor
 	drawHUD(s, g, p)
-	drawStatus(s, p)
+	drawStatus(s, g, p)
 	if u := firstUI(ui); u != nil && u.Mode != UIOff {
 		drawScoreUIText(s, u, p, g.Tick)
 	} else {
@@ -534,13 +535,50 @@ func FrameANSI(g *engine.Game, p *Palette, ui ...*ScoreUI) string {
 	return Render(g, p, ui...).String()
 }
 
-// blit packs two pixel rows per screen cell using the half block.
-func drawStatus(s *Screen, p *Palette) {
+// drawStatus paints the bottom real-text line: the fan-game about banner
+// while the title screen is up (the one surface every viewport height
+// shows — the in-frame arcade banner needs ~12 visible tiles), the
+// controls everywhere else.
+func drawStatus(s *Screen, g *engine.Game, p *Palette) {
 	y := s.H - 1
-	for x := 0; x < s.W; x++ {
+	for x := range s.W {
 		s.SetStyled(x, y, ' ', p.TextDim, p.StatusBG, false)
 	}
-	s.Center(y, "a/d move · w/space jump · x run · p pause · q quit", p.TextDim, p.StatusBG, false)
+	s.Center(y, statusText(s.W-2, g), p.TextDim, p.StatusBG, false)
+}
+
+// statusText picks the status line for a screen maxCols wide: about
+// banner at the title (laddered like the arcade text), controls in play.
+func statusText(maxCols int, g *engine.Game) string {
+	if g.State == engine.StateTitle {
+		t := pickText([]string{
+			"unofficial fan game · not affiliated with nintendo · runs in your terminal",
+			"unofficial fan game · not affiliated with nintendo",
+			"unofficial fan game · not nintendo",
+			"fan game",
+		}, maxCols)
+		if t != "" {
+			return t
+		}
+		return "fan game"
+	}
+	return pickText([]string{
+		"a/d move · w/space jump · x run · p pause · q quit",
+		"a/d move · w/space jump · x run",
+		"q quit",
+		"",
+	}, maxCols)
+}
+
+// pickText returns the first candidate that fits maxCols terminal columns,
+// preferring earlier (richer) entries.
+func pickText(candidates []string, maxCols int) string {
+	for _, c := range candidates {
+		if utf8.RuneCountInString(c) <= maxCols {
+			return c
+		}
+	}
+	return ""
 }
 
 // blit packs two pixel rows per screen cell: differing halves ride the
@@ -1067,11 +1105,23 @@ func titleTextEls(f *Frame, g *engine.Game) []titleText {
 		add("MARIO", logoY, 2, inkFlag, false, false)
 		if subY := logoY + 15; subY+5 <= castY { // clear gap below the logo
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1, inkWhite, false, false)
+			tailY := subY + 5 // bottom of the sky stack so far
 			if vc := versionCandidates(Version); len(vc) > 0 {
 				if v := pickTextPx(vc, f.W-2); v != "" {
 					if verY := subY + 7; verY+5 <= castY { // build tag under the subtitle
 						add(v, verY, 1, inkDim, false, false)
+						tailY = verY + 5
 					}
+				}
+			}
+			// About banner: fan-game disclaimer under the version tag.
+			// Needs ~12 visible tiles of height, so the terminal status
+			// line carries the full disclaimer on every viewport instead
+			// (drawStatus swaps it in at the title).
+			if fanY := tailY + 2; fanY+5 <= castY {
+				add(pickTextPx([]string{"UNOFFICIAL FAN GAME", "FAN GAME"}, f.W-2), fanY, 1, inkWhite, false, false)
+				if nY := fanY + 6; nY+5 <= castY {
+					add(pickTextPx([]string{"NOT AFFILIATED WITH NINTENDO", "NO NINTENDO AFFILIATION", "NOT NINTENDO"}, f.W-2), nY, 1, inkDim, false, false)
 				}
 			}
 		}

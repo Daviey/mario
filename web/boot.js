@@ -421,10 +421,17 @@
     if (document.fullscreenElement) lockLandscape();
   });
 
-  // Title-screen hook: the DAILY pad button only exists at the title.
+  // Title-screen hook: the DAILY pad button only exists at the title,
+  // and the top-bar hint line carries the fan-game disclaimer there
+  // instead of the controls (mirrors the terminal status line swap in
+  // render.drawStatus).
+  const BAR_CONTROLS = document.querySelector('#bar .dim');
+  if (BAR_CONTROLS) BAR_CONTROLS.dataset.controls = BAR_CONTROLS.textContent;
+  const BAR_ABOUT = 'unofficial fan game · not affiliated with nintendo';
   window.marioTitle = (at) => {
     const b = document.getElementById('daily-btn');
     if (b) b.hidden = !at;
+    if (BAR_CONTROLS) BAR_CONTROLS.textContent = at ? BAR_ABOUT : BAR_CONTROLS.dataset.controls;
   };
 
   // Rotate hint: portrait touch only, dismissible for the session.
