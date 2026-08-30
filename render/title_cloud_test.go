@@ -31,20 +31,31 @@ func titleBands(f *Frame) [][4]int {
 		h := 5 * scale
 		bands = append(bands, [4]int{x, y, min(x+w, f.W), min(y+h, f.H)})
 	}
+
 	if castY >= 13 {
 		logoY := max(2, min(f.H/12, castY-10))
 		add("MARIO", logoY, 2)
 		if subY := logoY + 15; subY+5 <= castY {
 			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1)
+			tailY := subY + 5
 			if vc := versionCandidates(Version); len(vc) > 0 {
 				if v := pickTextPx(vc, f.W-2); v != "" {
 					if verY := subY + 7; verY+5 <= castY {
 						add(v, verY, 1)
+						tailY = verY + 5
 					}
+				}
+			}
+			// about banner (mirrors titleTextEls)
+			if fanY := tailY + 2; fanY+5 <= castY {
+				add(pickTextPx([]string{"UNOFFICIAL FAN GAME", "FAN GAME"}, f.W-2), fanY, 1)
+				if nY := fanY + 6; nY+5 <= castY {
+					add(pickTextPx([]string{"NOT AFFILIATED WITH NINTENDO", "NO NINTENDO AFFILIATION", "NOT NINTENDO"}, f.W-2), nY, 1)
 				}
 			}
 		}
 	}
+
 	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
 	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1)
 	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom

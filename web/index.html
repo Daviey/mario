@@ -69,6 +69,7 @@
   .meta .pct { min-width: 4ch; text-align: right; color: #fff; font-weight: 700; }
   .phase::after { content: "_"; animation: blink 1.1s steps(1) infinite; }
   .phase.err::after { content: none; }
+  #loader .about { font-size: 11px; color: #7e93b5; }
   @keyframes blink { 50% { opacity: 0; } }
   /* ---- leaderboard: real DOM text over the canvas (the game pushes
      JSON snapshots via window.marioBoard) ---- */
@@ -309,6 +310,7 @@
       <span class="phase" id="phase">downloading</span>
       <span class="pct" id="pct">0%</span>
     </div>
+    <div class="about">unofficial fan game · not affiliated with nintendo</div>
   </div>
   <div id="board" class="off"></div>
 </div>
