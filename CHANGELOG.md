@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.7.1 — 2026-08-30
+
+A small maintenance release: a new per-tick replay tracing tool for diagnosing runs, and a web-deploy fix so the browser build reports its real version.
+
+## Highlights
+
+- New `-trace-window` replay option traces every tick of a recording — jump timing, deaths and transitions — making run postmortems far easier.
+
+## Added
+
+- Per-tick `-trace-window` mode for `mario -replay`, with tests covering the trace output.
+- The in-game about screen now documents the x-to-run control.
+
+## Changed
+
+- Replay tracing internals reworked into `replay/trace.go` to support per-tick windows.
+
+## Fixed
+
+- Web deploys now fetch full git history, so `make web` stamps the shipped WASM with the real version instead of a placeholder.
+
+## Packaging
+
+- `web-deploy.yml` updated to clone with full history for correct version stamping.
+
+
 ## v0.7.0 — 2026-08-30
 
 An internals-and-polish release: buffer recycling and render perf, a corrected 2-4 checkpoint with an engine version bump, EFI input fixes, and a broad internal cleanup across sshd, board, and input.
