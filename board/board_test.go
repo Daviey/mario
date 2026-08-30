@@ -375,3 +375,23 @@ func TestRecordPlay(t *testing.T) {
 		t.Fatal("500 must error")
 	}
 }
+
+// TestClampPlaySessionColors pins the three-tier colors clamp: 24 and
+// 256 pass through, junk folds to 16.
+func TestClampPlaySessionColors(t *testing.T) {
+	for _, tc := range []struct {
+		in, want int
+	}{
+		{24, 24},
+		{256, 256},
+		{16, 16},
+		{31, 16}, // junk folds to 16
+		{0, 16},
+	} {
+		p := PlaySession{Colors: tc.in}
+		ClampPlaySession(&p)
+		if p.Colors != tc.want {
+			t.Errorf("ClampPlaySession colors %d = %d, want %d", tc.in, p.Colors, tc.want)
+		}
+	}
+}

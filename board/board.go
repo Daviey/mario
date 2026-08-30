@@ -270,7 +270,7 @@ type PlaySession struct {
 	Runs          int       `json:"runs"`      // games started (recording-arming rule)
 	Term          string    `json:"term,omitempty"`
 	ColorTerm     string    `json:"colorterm,omitempty"` // the DECIDED depth signal, not the raw env
-	Colors        int       `json:"colors"`              // 24 (truecolor) or 16 (ANSI fallback)
+	Colors        int       `json:"colors"`              // 24 (truecolor), 256 (fixed xterm cube) or 16 (ANSI fallback)
 	Client        string    `json:"client,omitempty"`    // SSH identification string (ssh-surface UA)
 	InputRegime   string    `json:"input_regime,omitempty"`
 	Viewport      string    `json:"viewport,omitempty"`
@@ -287,7 +287,7 @@ func ClampPlaySession(p *PlaySession) {
 	p.Term = clampMeta(p.Term, 64)
 	p.ColorTerm = clampMeta(p.ColorTerm, 32)
 	p.Client = clampMeta(p.Client, 128)
-	if p.Colors != 24 {
+	if p.Colors != 24 && p.Colors != 256 {
 		p.Colors = 16
 	}
 	if p.InputRegime != "kitty" && p.InputRegime != "legacy" {

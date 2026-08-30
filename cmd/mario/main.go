@@ -10,7 +10,7 @@
 //	-demoticks N  demo length in ticks (with -demo)
 //	-level FILE   play a custom ASCII level instead of the built-ins
 //	-width N      viewport width in tiles (0 = terminal width)
-//	-basic        force 16-color ANSI output instead of truecolor
+//	-basic        force the 16-color palette instead of auto color depth
 //	-nobell       disable terminal-bell sound feedback (on by default)
 //	-scores N     print the top N leaderboard scores and exit
 //	-daily        with -scores: the daily board; alone: play today's challenge
@@ -58,7 +58,7 @@ func main() {
 	demoTicks := flag.Int("demoticks", 6000, "run demo for `N` ticks (with -demo)")
 	levelPath := flag.String("level", "", "play a custom ASCII level `FILE`")
 	width := flag.Int("width", 0, "viewport `WIDTH` in tiles (0 = terminal width)")
-	basic := flag.Bool("basic", false, "force 16-color ANSI output instead of truecolor")
+	basic := flag.Bool("basic", false, "force the 16-color palette instead of auto color depth")
 	topN := flag.Int("scores", 0, "print the top `N` leaderboard scores and exit")
 	daily := flag.Bool("daily", false, "play today's daily challenge (or with -scores, print the daily board)")
 	uiPreview := flag.String("ui-preview", "", "render a leaderboard UI screen headless (`MODE`: ask, entry, board, title-board)")
@@ -71,7 +71,16 @@ func main() {
 	cheats := flag.Bool("cheats", false, "cheat mode: unlimited fireballs; the run is not recorded and cannot be submitted to the leaderboard")
 	nobell := flag.Bool("nobell", false, "disable terminal-bell sound feedback (coins, stomps, power-ups...)")
 	flag.Parse()
-	trueColor := !*basic && trueColorSupported()
+	// Auto color depth (render.ColorDepthFor — the rule shared with the
+	// SSH host and the mosh child): 24-bit when the terminal is known
+	// truecolor (a COLORTERM hint or a TrueColorTerm TERM family), the
+	// fixed 256-color cube when TERM advertises 256 colors (every
+	// -256color terminal, tmux, and mosh's cell model), base-16 only
+	// for terminals that claim neither. -basic forces 16.
+	colors := render.Colors16
+	if !*basic {
+		colors = render.ColorDepthFor(os.Getenv("TERM"), os.Getenv("COLORTERM"))
+	}
 
 	// The verifier holds the service key: it must not honor a CWD-relative
 	// .env before its own guarded load (see runVerifyPending).
@@ -109,7 +118,7 @@ func main() {
 	}
 
 	if *uiPreview != "" {
-		if err := mario.UIPreview(os.Stdout, *uiPreview, trueColor); err != nil {
+		if err := mario.UIPreview(os.Stdout, *uiPreview, colors); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
@@ -123,7 +132,7 @@ func main() {
 	}
 
 	if *serveAddr != "" {
-		// Truecolor is the default over SSH — the operator cannot know
+		// Color depth is per-session over SSH — the operator cannot know
 		// every client's terminal; -basic forces the 16-color palette.
 		mb := *moshBin
 		if mb == "auto" {
@@ -134,7 +143,7 @@ func main() {
 				mb = ""
 			}
 		}
-		if err := runServe(levels, *serveAddr, *hostKeyPath, !*basic, mb, *moshPorts, *maxSessions, !*nobell); err != nil {
+		if err := runServe(levels, *serveAddr, *hostKeyPath, *basic, mb, *moshPorts, *maxSessions, !*nobell); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
@@ -142,11 +151,11 @@ func main() {
 	}
 
 	if *demo {
-		mario.RunDemo(os.Stdout, levels, trueColor, *demoTicks)
+		mario.RunDemo(os.Stdout, levels, colors, *demoTicks)
 		return
 	}
 
-	if _, err := run(levels, *width, trueColor, *daily, *cheats, !*nobell); err != nil {
+	if _, err := run(levels, *width, colors, *daily, *cheats, !*nobell); err != nil {
 		fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 		os.Exit(1)
 	}
@@ -230,7 +239,7 @@ func usage(w io.Writer) {
 }
 
 // run plays the game on the real terminal and returns the final score.
-func run(levels []*engine.Level, width int, trueColor, daily, cheats, bellOn bool) (int, error) {
+func run(levels []*engine.Level, width int, colors int, daily, cheats, bellOn bool) (int, error) {
 	// Catch termination from the very first line: a Ctrl+C racing our raw
 	// mode setup must still restore the terminal. SIGHUP covers an SSH
 	// session drop; without it the process dies with the kitty keyboard
@@ -355,7 +364,7 @@ func run(levels []*engine.Level, width int, trueColor, daily, cheats, bellOn boo
 	// Differential rendering: each frame only the changed cells are sent,
 	// wrapped in synchronized-output mode so updates never tear. This keeps
 	// 60 fps responsive even over an SSH link.
-	app.Run(render.NewStream(os.Stdout, render.NewPalette(trueColor)))
+	app.Run(render.NewStream(os.Stdout, render.NewPalette(colors)))
 	return app.Game.Score, nil
 }
 
@@ -365,15 +374,4 @@ func isTTY(f *os.File) bool {
 		return false
 	}
 	return st.Mode()&os.ModeCharDevice != 0
-}
-
-// trueColorSupported sniffs the environment for terminals that render
-// 24-bit color sequences.
-func trueColorSupported() bool {
-	// TERM-only rule shared with the SSH/mosh hosts (render.TrueColorTerm);
-	// COLORTERM covers terminals like VTE that only hint via env.
-	if render.TrueColorTerm(os.Getenv("TERM")) {
-		return true
-	}
-	return os.Getenv("COLORTERM") != ""
 }

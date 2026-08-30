@@ -9,7 +9,7 @@ import (
 
 func mkScreen(w, h int, fill rune) *Screen {
 	s := NewScreen(w, h)
-	s.TrueColor = true
+	s.Colors = Colors24
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			s.Set(x, y, fill, testPal.Text)
@@ -108,7 +108,7 @@ func TestDiffSizeOrModeChangeFallsBackToFull(t *testing.T) {
 		t.Error("height change must trigger full repaint")
 	}
 	basic := mkScreen(8, 3, 'x')
-	basic.TrueColor = false
+	basic.Colors = Colors16
 	if d := Diff(a, basic); !strings.Contains(d, "\x1b[H") {
 		t.Error("color-mode change must trigger full repaint")
 	}
@@ -208,7 +208,7 @@ func TestDiffSizeChangeClearsStaleCells(t *testing.T) {
 
 	// A pure color-mode change keeps the same bounds: no clear wanted.
 	prev := mkScreen(8, 3, 'x')
-	prev.TrueColor = false
+	prev.Colors = Colors16
 	if d := Diff(prev, mkScreen(8, 3, 'x')); strings.Contains(d, "\x1b[2J") {
 		t.Error("mode-only change must not clear the screen")
 	}

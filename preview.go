@@ -16,7 +16,7 @@ import (
 	"github.com/Daviey/mario/render"
 )
 
-func UIPreview(w io.Writer, mode string, trueColor bool) error {
+func UIPreview(w io.Writer, mode string, colors int) error {
 	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 	for t := range 6000 {
 		g.Update(ui.ScriptInput(t))
@@ -51,14 +51,14 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 		ui.Tick(g2)
 		ui.ShowAbout()
-		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.Tick(g2)))
+		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(colors), ui.Tick(g2)))
 		return nil
 	case "title-board":
 		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 		ui.Tick(g2)
 		ui.ShowBoard()
 		time.Sleep(100 * time.Millisecond)
-		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.Tick(g2)))
+		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(colors), ui.Tick(g2)))
 		return nil
 	default:
 		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board, about)", mode)
@@ -66,6 +66,6 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 	if frameG == nil {
 		frameG = g
 	}
-	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(trueColor), ui.Tick(frameG)))
+	fmt.Fprint(w, render.FrameANSI(frameG, render.NewPalette(colors), ui.Tick(frameG)))
 	return nil
 }

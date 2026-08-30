@@ -135,6 +135,12 @@ func (tm *termModel) sgr(p []int) {
 			tm.fg, tm.bg, tm.bold = Color{}, Color{}, false
 		case v == 1:
 			tm.bold = true
+		case v == 38 && i+2 < len(p) && p[i+1] == 5:
+			tm.fg = Color{Idx256: p[i+2]}
+			i += 2
+		case v == 48 && i+2 < len(p) && p[i+1] == 5:
+			tm.bg = Color{Idx256: p[i+2]}
+			i += 2
 		case v == 38 && i+4 < len(p) && p[i+1] == 2:
 			tm.fg = rgbColor(p[i+2], p[i+3], p[i+4])
 			i += 4
@@ -161,11 +167,14 @@ func rgbColor(r, g, b int) Color {
 // compared on non-space cells (the encoder leaves a space's foreground
 // unset: it is invisible), and colors are compared only in the component
 // the palette's mode actually encodes — a 16-color frame cannot carry RGB.
-func (tm *termModel) compare(t *testing.T, want *Screen, trueColor bool) {
+func (tm *termModel) compare(t *testing.T, want *Screen, mode int) {
 	t.Helper()
 	sameColor := func(a, b Color) bool {
-		if trueColor {
+		switch mode {
+		case Colors24:
 			return a.RGB == b.RGB
+		case Colors256:
+			return a.Idx256 == b.Idx256
 		}
 		return a.ANSI == b.ANSI
 	}
@@ -191,8 +200,9 @@ func TestDiffStreamRoundTrip(t *testing.T) {
 		name string
 		pal  *Palette
 	}{
-		{"truecolor", NewPalette(true)},
-		{"basic", NewPalette(false)},
+		{"truecolor", NewPalette(Colors24)},
+		{"cube256", NewPalette(Colors256)},
+		{"basic", NewPalette(Colors16)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const viewW, viewH = 20, 9
@@ -205,10 +215,10 @@ func TestDiffStreamRoundTrip(t *testing.T) {
 				tm.feed(Diff(prev, cur))
 				prev = cur
 				if i%97 == 0 {
-					tm.compare(t, cur, tc.pal.TrueColor)
+					tm.compare(t, cur, tc.pal.Colors)
 				}
 			}
-			tm.compare(t, prev, tc.pal.TrueColor)
+			tm.compare(t, prev, tc.pal.Colors)
 		})
 	}
 }

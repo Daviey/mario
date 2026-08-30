@@ -32,7 +32,7 @@ Play a custom ASCII level instead of the built-ins.
 Viewport width in tiles (0 = terminal width).
 .TP
 .BR \-basic
-Force 16-color ANSI output instead of truecolor.
+Force the 16-color palette instead of auto-detected color depth (truecolor or the fixed 256-color cube).
 .TP
 .BI \-scores\ N
 Print the top
@@ -133,7 +133,7 @@ their claimed score. Verified rows show a check mark.
 accepts any username with the
 .B none
 authentication method and serves one game session per connection over a
-pty. Output is truecolor by default
+pty. Output color depth is auto-detected per session
 .RB ( \-basic
 for 16 colors); the viewport is sized from the client's pty. Keystrokes
 arrive as raw terminal bytes, so the kitty keyboard protocol and legacy

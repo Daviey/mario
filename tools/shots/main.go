@@ -116,8 +116,8 @@ func writeFrame(path string, g *engine.Game, overlay *render.ScoreUI) {
 	}
 	defer f.Close()
 	if overlay != nil {
-		fmt.Fprint(f, render.FrameANSI(g, render.NewPalette(true), overlay))
+		fmt.Fprint(f, render.FrameANSI(g, render.NewPalette(render.Colors24), overlay))
 	} else {
-		fmt.Fprint(f, render.FrameANSI(g, render.NewPalette(true)))
+		fmt.Fprint(f, render.FrameANSI(g, render.NewPalette(render.Colors24)))
 	}
 }

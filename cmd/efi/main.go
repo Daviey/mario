@@ -47,7 +47,7 @@ func main() {
 
 	app := mario.New(nil)
 	g := app.Game
-	pal := render.NewPalette(true)
+	pal := render.NewPalette(render.Colors24)
 	fb.layout(g.ViewW*render.Pix, render.HudBandPx+g.ViewH*render.Pix+render.StatusBandPx)
 	logf("mario-efi: world %dx%d px, scale %d, origin (%d,%d)",
 		g.ViewW*render.Pix, g.ViewH*render.Pix, fb.scale, fb.ox, fb.oy)

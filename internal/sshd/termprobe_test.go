@@ -2,6 +2,8 @@ package sshd
 
 import (
 	"testing"
+
+	"github.com/Daviey/mario/render"
 	"time"
 )
 
@@ -159,5 +161,48 @@ func TestTrueColorProbeSilentFallsBackToTerm(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no decision for silent terminal")
+	}
+}
+
+// ColorDepth layers the 256-color cube under the truecolor decision: a
+// silent terminal whose TERM advertises 256 colors gets the fixed cube
+// (not the profile-dependent base 16 — the gnome-terminal-over-mosh
+// case), a TERM with no color claim stays base-16, and a forwarded
+// COLORTERM or a truecolor TERM family wins outright.
+func TestSessionColorDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		term string
+		env  [2]string
+		want int
+	}{
+		{"silent 256color", "xterm-256color", [2]string{"", ""}, render.Colors256},
+		{"plain xterm", "xterm", [2]string{"", ""}, render.Colors16},
+		{"forwarded colorterm", "xterm-256color", [2]string{"COLORTERM", "truecolor"}, render.Colors24},
+		{"ghostty family", "xterm-ghostty", [2]string{"", ""}, render.Colors24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := make(chan int, 1)
+			srv := startServer(t, func(s *Session) {
+				got <- s.ColorDepth()
+				<-s.Done()
+			}, func(s *Server) { s.ProbeWait = 20 * time.Millisecond })
+			tclient := dial(t, srv.Addr)
+			tclient.authNone()
+			tclient.openSession(1<<20, 32768)
+			tclient.ptyReqTerm(80, 24, tc.term)
+			if tc.env[0] != "" {
+				tclient.envReq(tc.env[0], tc.env[1])
+			}
+			tclient.shell()
+			select {
+			case d := <-got:
+				if d != tc.want {
+					t.Fatalf("ColorDepth = %d, want %d", d, tc.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("no ColorDepth decision")
+			}
+		})
 	}
 }
