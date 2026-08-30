@@ -47,6 +47,12 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 		ui.ShowBoard()
 		time.Sleep(100 * time.Millisecond) // let the fake fetch land
 		ui.Tick(g)
+	case "about":
+		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
+		ui.Tick(g2)
+		ui.ShowAbout()
+		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.Tick(g2)))
+		return nil
 	case "title-board":
 		g2 := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
 		ui.Tick(g2)
@@ -55,7 +61,7 @@ func UIPreview(w io.Writer, mode string, trueColor bool) error {
 		fmt.Fprint(w, render.FrameANSI(g2, render.NewPalette(trueColor), ui.Tick(g2)))
 		return nil
 	default:
-		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board)", mode)
+		return fmt.Errorf("unknown preview %q (want ask, entry, board, title-board, about)", mode)
 	}
 	if frameG == nil {
 		frameG = g

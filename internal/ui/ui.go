@@ -221,6 +221,13 @@ func (u *UI) ShowBoard() {
 	go u.fetchInto(fetch)
 }
 
+// ShowAbout switches to the about screen (title 'i').
+func (u *UI) ShowAbout() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.mode = render.UIAbout
+}
+
 func (u *UI) fetchInto(fetch func() ([]board.Row, error)) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -283,8 +290,8 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// Title-screen 'l'/'L' opens the board. Both cases: the hint renders
-	// as "L LEADERBOARD" and shift/caps-lock make case unpredictable.
+	// Title-screen 'l'/'L' opens the board, 'i'/'I' the about screen.
+	// Both cases each: shift/caps-lock make case unpredictable.
 	if u.mode == render.UIOff && g.State == engine.StateTitle && len(u.noted) > 0 {
 		if bytesContain(u.noted, 'l') || bytesContain(u.noted, 'L') {
 			u.noted = nil
@@ -299,6 +306,11 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 				fetch := u.fetch
 				go u.fetchInto(fetch)
 			}
+			return u.snapshotLocked(g)
+		}
+		if bytesContain(u.noted, 'i') || bytesContain(u.noted, 'I') {
+			u.noted = nil
+			u.mode = render.UIAbout
 			return u.snapshotLocked(g)
 		}
 		u.noted = nil
@@ -370,6 +382,12 @@ func (u *UI) keyLocked(b byte) {
 			u.asked = false
 			u.done = false
 			u.restart = true
+		}
+	case render.UIAbout:
+		// 'i' toggles, ESC/Q back out. About never follows a run, so no
+		// done/quit bookkeeping is needed.
+		if b == 'i' || b == 'I' || b == 'q' || b == 'Q' || b == 0x1b {
+			u.mode = render.UIOff
 		}
 	}
 }
