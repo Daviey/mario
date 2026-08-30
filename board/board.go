@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.08.30b"
+const EngineVersion = "2026.08.30c" // c: 2-4 checkpoint 86→90 (fire-bar guard now covers the bar's true reach); pre-c 2-4 recordings diverge
 
 // Client is a configured PostgREST endpoint.
 type Client struct {
@@ -58,16 +58,28 @@ func FromEnv() (*Client, error) {
 	if k == "" {
 		k = DefaultKey
 	}
-	if u == "" || k == "" {
-		return nil, fmt.Errorf("SUPABASE_URL and SUPABASE_KEY must be set (see .env)")
+	var missing []string
+	if u == "" {
+		missing = append(missing, "SUPABASE_URL")
+	}
+	if k == "" {
+		missing = append(missing, "SUPABASE_KEY")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%s must be set (see .env)", strings.Join(missing, " and "))
 	}
 	return New(u, k), nil
 }
 
 // Entry is a score submission from a player. PowNonce is filled in by
 // Submit (the server's proof-of-work gate rejects rows without a valid one);
-// so is EngineVersion. Replay is the run's input log (replay package wire
-// format) — the server requires it on every new row.
+// so is EngineVersion.
+//
+// Replay is the run's input log in the replay package's wire format
+// ({"v":1,"ticks":N,"runs":[[mask,count],...]}): the server's
+// require_replay trigger rejects new rows without one, and recordings
+// longer than replay.MaxTicks are unshippable client-side — the UI
+// reports UNRECORDED instead of submitting.
 type Entry struct {
 	Name          string `json:"name"`
 	Score         int    `json:"score"`
@@ -115,7 +127,9 @@ func ClampPlayContext(e *Entry) {
 	}
 }
 
-// clampMeta drops control characters and caps the length.
+// clampMeta drops control characters and caps the length in bytes,
+// backing off to a rune boundary: a cut mid-rune would ship invalid
+// UTF-8, which Postgres rejects outright.
 func clampMeta(s string, n int) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
@@ -124,6 +138,13 @@ func clampMeta(s string, n int) string {
 		return r
 	}, s)
 	if len(s) > n {
+		// Back the cut off to a rune boundary: s[n] being a
+		// continuation byte means the rune straddling n lost its tail
+		// (and a lead byte left as the last byte loses its head), and
+		// either half is invalid UTF-8 that Postgres rejects outright.
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
 		s = s[:n]
 	}
 	return s
@@ -157,8 +178,8 @@ func (c *Client) Submit(ctx context.Context, e Entry) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.do(ctx, http.MethodPost, "/rest/v1/scores", nil, body,
-		"Prefer", "return=minimal")
+	_, err = c.doCap(ctx, http.MethodPost, "/rest/v1/scores", nil, body, 1<<20,
+		map[string]string{"Prefer": "return=minimal"})
 	return err
 }
 
@@ -231,7 +252,7 @@ func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 		"order":    {"created_at.asc"},
 		"limit":    {strconv.Itoa(n)},
 	}
-	out, err := c.doCap(ctx, http.MethodGet, "/rest/v1/scores", q, nil, 8<<20)
+	out, err := c.doCap(ctx, http.MethodGet, "/rest/v1/scores", q, nil, 8<<20, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -244,12 +265,8 @@ func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 
 // SetVerified marks a row's replay as confirmed. Service-role only.
 func (c *Client) SetVerified(ctx context.Context, id string) error {
-	body, err := json.Marshal(map[string]bool{"verified": true})
-	if err != nil {
-		return err
-	}
-	_, err = c.do(ctx, http.MethodPatch, "/rest/v1/scores",
-		url.Values{"id": {"eq." + id}}, body)
+	_, err := c.do(ctx, http.MethodPatch, "/rest/v1/scores",
+		url.Values{"id": {"eq." + id}}, []byte(`{"verified":true}`))
 	return err
 }
 
@@ -327,8 +344,8 @@ func (c *Client) RecordPlay(ctx context.Context, p PlaySession) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.do(ctx, http.MethodPost, "/rest/v1/plays", nil, body,
-		"Prefer", "return=minimal")
+	_, err = c.doCap(ctx, http.MethodPost, "/rest/v1/plays", nil, body, 1<<20,
+		map[string]string{"Prefer": "return=minimal"})
 	return err
 }
 
@@ -397,16 +414,18 @@ func SanitizeDisplayName(s string) string {
 	return string(b)
 }
 
-// do performs a request with the default 1 MiB response cap.
-func (c *Client) do(ctx context.Context, method, path string, q url.Values, body []byte, hdr ...string) ([]byte, error) {
-	return c.doCap(ctx, method, path, q, body, 1<<20, hdr...)
+// do performs a request with the default 1 MiB response cap and no
+// extra headers.
+func (c *Client) do(ctx context.Context, method, path string, q url.Values, body []byte) ([]byte, error) {
+	return c.doCap(ctx, method, path, q, body, 1<<20, nil)
 }
 
-// doCap is do with an explicit response-size cap. Endpoints that legitimately
-// return more (Pending carries 256 KB replay strings per row) must pass a cap
-// strictly larger than the worst case, or a big row silently truncates the
-// body and the JSON decode fails with a confusing error.
-func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, body []byte, cap int64, hdr ...string) ([]byte, error) {
+// doCap is do with an explicit response-size cap and extra headers.
+// Endpoints that legitimately return more (Pending carries 256 KB replay
+// strings per row) must pass a cap strictly larger than the worst case,
+// or a big row silently truncates the body and the JSON decode fails
+// with a confusing error.
+func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, body []byte, limit int64, headers map[string]string) ([]byte, error) {
 	u := c.BaseURL + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -429,15 +448,15 @@ func (c *Client) doCap(ctx context.Context, method, path string, q url.Values, b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	for i := 0; i+1 < len(hdr); i += 2 {
-		req.Header.Set(hdr[i], hdr[i+1])
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, cap))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		return nil, err
 	}
