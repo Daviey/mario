@@ -227,6 +227,7 @@ func drawAboutText(s *Screen, p *Palette, tick int) {
 		{"mario is a trademark of nintendo", p.TextDim, false, false},
 		{"", p.White, false, false},
 		{"plays in your terminal · over ssh · in the browser", p.White, false, false},
+		{"arrows/wasd move · space jumps · hold x to run", p.GoldLight, false, false},
 		{"", p.White, false, false},
 		{"I CLOSE", p.TextDim, false, true},
 	})

@@ -917,7 +917,7 @@ func (c *conn) sendBanner() {
 	w := &buf{}
 	w.u8(msgUserauthBanner)
 	w.cstr("\r\n  SUPER CLI MARIO — the unauthenticated game server.\r\n" +
-		"  Any username works. Arrows/WASD move, space jumps, q quits.\r\n" +
+		"  Any username works. Arrows/WASD move, space jumps, hold X to run, q quits.\r\n" +
 		"  There is no shell here: the game is the whole host.\r\n")
 	w.cstr("")
 	c.t.writePacket(w.b)

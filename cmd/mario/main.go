@@ -70,6 +70,7 @@ func main() {
 	nobell := flag.Bool("nobell", false, "disable terminal-bell sound feedback (coins, stomps, power-ups...)")
 	dumpReplays := flag.Int("dump-replays", 0, "dump the latest N replay recordings as replay-<id>.json and exit (direct DB, needs SUPABASE_DB_PASSWORD)")
 	replayFile := flag.String("replay", "", "trace a recorded replay `FILE` (from -dump-replays) tick by tick and exit")
+	traceWindow := flag.String("trace-window", "", "with -replay: also log per-tick input and physics while the player's X is within `X0:X1` tiles")
 	showVersion := flag.Bool("version", false, "print build and engine versions and exit")
 	dayFlag := flag.String("day", "", "with -replay -daily: the challenge `DAY` to rebuild (default today)")
 	flag.Parse()
@@ -108,7 +109,7 @@ func main() {
 		return
 	}
 	if *replayFile != "" {
-		if err := runReplayTrace(*replayFile, *daily, *dayFlag); err != nil {
+		if err := runReplayTrace(*replayFile, *daily, *dayFlag, *traceWindow); err != nil {
 			fmt.Fprintf(os.Stderr, "mario: %v\n", err)
 			os.Exit(1)
 		}
@@ -250,7 +251,7 @@ func usage(w io.Writer) {
 	row("mario -demo", "headless scripted demo (no TTY needed)")
 	row("mario -scores 10", "print the online top 10")
 	row("mario -dump-replays 5", "service tool: dump recent submissions' recordings")
-	row("mario -replay replay-<id>.json", "service tool: trace a recording tick by tick")
+	row("mario -replay replay-<id>.json", "service tool: trace a recording (add -trace-window 59:72 for per-tick)")
 	row("mario -ui-preview board", "render a leaderboard screen")
 
 	fmt.Fprintln(w, "")
