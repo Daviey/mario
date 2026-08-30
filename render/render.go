@@ -563,6 +563,7 @@ func statusText(maxCols int, g *engine.Game) string {
 		return "fan game"
 	}
 	return pickText([]string{
+		"a/d move · w/space jump · s duck · x run · p pause · k die · r restart · q quit",
 		"a/d move · w/space jump · x run · p pause · q quit",
 		"a/d move · w/space jump · x run",
 		"q quit",

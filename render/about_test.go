@@ -127,7 +127,7 @@ func TestStatusAboutBannerOnTitle(t *testing.T) {
 	}
 	g.Update(engine.Input{AnyKey: true}) // start a run
 	g.Update(engine.Input{})
-	if s := statusText(999, g); s != "a/d move · w/space jump · x run · p pause · q quit" {
+	if s := statusText(999, g); s != "a/d move · w/space jump · s duck · x run · p pause · k die · r restart · q quit" {
 		t.Errorf("in-play status = %q; want controls", s)
 	}
 }
