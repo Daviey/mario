@@ -739,35 +739,53 @@ type hudSeg struct {
 	ink hudInk
 }
 
-// hudLadder builds the HUD content as data — the single source both the
-// terminal HUD (drawHUD, widths in terminal columns) and the canvas HUD
-// band (drawHudPx, widths in pixels) render. Variants run richest →
-// bare score: the second drops WORLD, the third drops the labels, the
-// last is the score alone (always drawn, like pickTextPx's tail).
+// hudLadder builds every HUD content variant, richest first — the test
+// and parity surface. The hot paths use hudPick/hudPickPx, which build
+// only the variant they land on.
 func hudLadder(g *engine.Game) [][]hudSeg {
+	return [][]hudSeg{hudSegs(g, 0), hudSegs(g, 1), hudSegs(g, 2), hudSegs(g, 3)}
+}
+
+// hudSegs builds one HUD content variant: 0 richest (SCORE, COINS,
+// WORLD, TIME, LIVES, CHEATS), 1 drops WORLD, 2 drops the labels, 3 is
+// the bare score (always drawn). The terminal HUD (drawHUD, widths in
+// columns) and the canvas HUD band (drawHudPx, widths in pixels) render
+// the same variants, so the two surfaces cannot drift apart.
+func hudSegs(g *engine.Game, variant int) []hudSeg {
 	seg := func(s string, ink hudInk) hudSeg { return hudSeg{s: s, ink: ink} }
-	score := fmt.Sprintf("SCORE %06d", g.Score)
-	coins := fmt.Sprintf("COINS x%02d", g.CoinCount)
-	world := fmt.Sprintf("WORLD %s", g.LevelName())
-	hurry := seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash)
-	lives := seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain)
-	rich := []hudSeg{seg(score, hudPlain), seg(coins, hudPlain), seg(world, hudPlain), hurry, lives}
-	mid := []hudSeg{seg(score, hudPlain), seg(coins, hudPlain), hurry, lives}
-	if g.Cheats {
-		rich = append(rich, seg("CHEATS", hudRed))
-		mid = append(mid, seg("CHEATS", hudRed))
-	}
-	return [][]hudSeg{
-		rich,
-		mid,
-		{
+	switch variant {
+	case 1:
+		segs := []hudSeg{
+			seg(fmt.Sprintf("SCORE %06d", g.Score), hudPlain),
+			seg(fmt.Sprintf("COINS x%02d", g.CoinCount), hudPlain),
+			seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash),
+			seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain),
+		}
+		if g.Cheats {
+			segs = append(segs, seg("CHEATS", hudRed))
+		}
+		return segs
+	case 2:
+		return []hudSeg{
 			seg(fmt.Sprintf("%06d", g.Score), hudPlain),
 			seg(fmt.Sprintf("x%02d", g.CoinCount), hudPlain),
 			seg(fmt.Sprintf("%03d", g.Time), hudFlash),
 			seg(fmt.Sprintf("x%d", g.Lives), hudPlain),
-		},
-		{seg(fmt.Sprintf("%06d", g.Score), hudPlain)},
+		}
+	case 3:
+		return []hudSeg{seg(fmt.Sprintf("%06d", g.Score), hudPlain)}
 	}
+	segs := []hudSeg{
+		seg(fmt.Sprintf("SCORE %06d", g.Score), hudPlain),
+		seg(fmt.Sprintf("COINS x%02d", g.CoinCount), hudPlain),
+		seg(fmt.Sprintf("WORLD %s", g.LevelName()), hudPlain),
+		seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash),
+		seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain),
+	}
+	if g.Cheats {
+		segs = append(segs, seg("CHEATS", hudRed))
+	}
+	return segs
 }
 
 // hurryFlash reports whether the TIME readout is in its red phase this
@@ -815,25 +833,30 @@ func hudWidthPx(segs []hudSeg) int {
 	return w
 }
 
-// hudPick returns the widest variant that fits maxCols terminal columns,
-// falling back to the bare score.
-func hudPick(ladder [][]hudSeg, maxCols int) []hudSeg {
-	for _, segs := range ladder {
-		if hudWidth(segs) <= maxCols {
-			return segs
+// hudPick returns the richest variant that fits maxCols terminal
+// columns, falling back to the bare score. It builds only the variant
+// it lands on — the HUD runs every frame.
+func hudPick(g *engine.Game, maxCols int) []hudSeg {
+	var last []hudSeg
+	for i := range 4 {
+		last = hudSegs(g, i)
+		if hudWidth(last) <= maxCols {
+			return last
 		}
 	}
-	return ladder[len(ladder)-1]
+	return last
 }
 
 // hudPickPx is hudPick for the pixel font, measuring in pixels.
-func hudPickPx(ladder [][]hudSeg, maxPx int) []hudSeg {
-	for _, segs := range ladder {
-		if hudWidthPx(segs) <= maxPx {
-			return segs
+func hudPickPx(g *engine.Game, maxPx int) []hudSeg {
+	var last []hudSeg
+	for i := range 4 {
+		last = hudSegs(g, i)
+		if hudWidthPx(last) <= maxPx {
+			return last
 		}
 	}
-	return ladder[len(ladder)-1]
+	return last
 }
 
 func drawHUD(s *Screen, g *engine.Game, p *Palette) {
@@ -841,7 +864,7 @@ func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 		s.SetStyled(x, 0, ' ', p.Text, p.HUDBG, false)
 	}
 	x := 1
-	for _, seg := range hudPick(hudLadder(g), s.W-2) {
+	for _, seg := range hudPick(g, s.W-2) {
 		s.TextStyled(x, 0, seg.s, hudSegColor(seg, g, p), p.HUDBG, true)
 		x += utf8.RuneCountInString(seg.s) + 2
 	}

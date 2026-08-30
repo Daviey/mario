@@ -705,7 +705,7 @@ func TestHudStatusContentParity(t *testing.T) {
 			// Native surface: the HUD row is exactly the chosen variant,
 			// the status row exactly the chosen rung.
 			s := Render(g, testPal)
-			if want := " " + joined(hudPick(ladder, s.W-2)); !strings.HasPrefix(rowText(s, 0), want) {
+			if want := " " + joined(hudPick(g, s.W-2)); !strings.HasPrefix(rowText(s, 0), want) {
 				t.Errorf("native HUD row %q does not match builder output %q", rowText(s, 0), want)
 			}
 			if want := statusText(s.W-2, g); want != "" {
@@ -726,7 +726,7 @@ func TestHudStatusContentParity(t *testing.T) {
 			f := RenderPixels(g, testPal)
 			expHud := NewFrame(f.W, HudBandPx, testPal.HUDBG)
 			x := 2
-			for _, seg := range hudPickPx(ladder, f.W-4) {
+			for _, seg := range hudPickPx(g, f.W-4) {
 				drawTextPx(expHud, x, 1, seg.s, hudSegColor(seg, g, testPal), 1)
 				x += textWidthPx(seg.s, 1) + 8
 			}

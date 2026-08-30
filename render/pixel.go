@@ -59,7 +59,7 @@ func (f *Frame) RGBBytes() []byte {
 func drawHudPx(f *Frame, g *engine.Game, p *Palette) {
 	f.Fill(0, 0, f.W, HudBandPx, p.HUDBG)
 	x := 2
-	for _, seg := range hudPickPx(hudLadder(g), f.W-4) {
+	for _, seg := range hudPickPx(g, f.W-4) {
 		drawTextPx(f, x, 1, seg.s, hudSegColor(seg, g, p), 1)
 		x += textWidthPx(seg.s, 1) + 8
 	}
