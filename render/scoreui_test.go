@@ -129,8 +129,11 @@ func TestBoardStatusAndFooters(t *testing.T) {
 	g := uiGame(t)
 	pal := NewPalette(Colors24)
 	s := Render(g, pal, &ScoreUI{Mode: UIBoard, Rows: bigRows(3), Status: "OFFLINE"})
-	if !strings.Contains(rowText(s, s.H-2), "OFFLINE") {
-		t.Errorf("status footer = %q", rowText(s, s.H-2))
+	if !strings.Contains(rowText(s, s.H-3), "OFFLINE") {
+		t.Errorf("status above footer = %q", rowText(s, s.H-3))
+	}
+	if !strings.Contains(rowText(s, s.H-2), "RESTART") {
+		t.Errorf("footer missing restart hint = %q", rowText(s, s.H-2))
 	}
 	s = Render(g, pal, &ScoreUI{Mode: UIBoard, Title: true})
 	if !strings.Contains(rowText(s, s.H-2), "L CLOSE") {

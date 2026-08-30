@@ -132,7 +132,7 @@ func main() {
 			}
 		}
 		if app.Quit() {
-			break
+			app.ResetToTitle()
 		}
 	}
 	select {} // hold the last frame; the page offers a restart

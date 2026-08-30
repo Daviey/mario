@@ -348,6 +348,18 @@ func (a *App) UI() *render.ScoreUI { return a.ui }
 // leaderboard-screen close).
 func (a *App) Quit() bool { return a.quit }
 
+// ResetToTitle aborts any active run, resets the game to the title screen,
+// and clears leaderboard UI state so the next run prompts again. Used by
+// hosts that cannot exit (the browser build) when a quit is requested.
+func (a *App) ResetToTitle() {
+	a.Game.EndDemo()
+	a.Game.Score, a.Game.CoinCount = 0, 0
+	a.Game.Daily = false
+	a.rec.Reset()
+	a.lbui.ResetForNewRun()
+	a.quit = false
+}
+
 // Runs returns the number of runs started in this session (a card
 // following death or a level clear continues a run; anything else
 // starts one — the same rule the replay recording uses).

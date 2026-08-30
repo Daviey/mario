@@ -190,11 +190,12 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 			s.Center(bodyY+n, fmt.Sprintf("YOU ARE #%d", ui.Rank), p.GoldLight, bg, false)
 		}
 	}
+	// Status (and the post-submit rank line) sits just above the footer so
+	// the footer always carries the close/restart invitation.
+	if ui.Status != "" && footY-1 >= 2 {
+		s.Center(footY-1, ui.Status, p.GoldLight, bg, false)
+	}
 	switch {
-	case ui.Rank > 0 && ui.Status == "":
-		s.Center(footY, fmt.Sprintf("YOU ARE #%d", ui.Rank), p.GoldLight, bg, false)
-	case ui.Status != "":
-		s.Center(footY, ui.Status, p.GoldLight, bg, false)
 	case ui.Title:
 		if blinkVisible(tick) {
 			s.Center(footY, "L CLOSE", p.White, bg, false)

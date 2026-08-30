@@ -472,6 +472,19 @@ func (u *UI) Submitted() bool {
 	return u.subOK
 }
 
+// ResetForNewRun clears the machine's state (including once-per-run flags
+// and pending quit requests) so a fresh run can prompt for submission again.
+func (u *UI) ResetForNewRun() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.mode = render.UIOff
+	u.asked = false
+	u.done = false
+	u.quit = false
+	u.restart = false
+	u.status = ""
+}
+
 func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {
 	best := g.Best
 	rank := 0

@@ -297,9 +297,8 @@
         + '</td><td class="nm">' + escHtml(r.name) + (r.verified ? ' <span class="vfy">✓</span>' : '')
         + '</td><td class="sc">' + escHtml(r.score)
         + '</td><td class="lv">L' + escHtml(r.level || 1) + '</td></tr>').join('') + '</table>';
-      const foot = st.status
-        ? '<p class="gold">' + escHtml(st.status) + '</p>'
-        : (st.title ? (IS_TOUCH() ? '' : '<p class="hint blink">L CLOSE</p>')
+      const foot = (st.status ? '<p class="gold">' + escHtml(st.status) + '</p>' : '')
+        + (st.title ? (IS_TOUCH() ? '' : '<p class="hint blink">L CLOSE</p>')
                     : (IS_TOUCH() ? '' : '<p class="hint blink">R RESTART&nbsp;&nbsp;&nbsp;Q QUIT</p>'));
       html = '<h3>' + (st.daily ? 'DAILY LEADERBOARD' : 'LEADERBOARD') + '</h3>' + body
         + (st.rank > 0 ? '<p class="gold">YOU ARE #' + escHtml(st.rank) + '</p>' : '')
