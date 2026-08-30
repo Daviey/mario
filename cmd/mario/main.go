@@ -70,7 +70,12 @@ func main() {
 	maxSessions := flag.Int("maxsessions", 0, "with -serve: concurrent session cap (0 = 16); excess connections are refused pre-handshake")
 	cheats := flag.Bool("cheats", false, "cheat mode: unlimited fireballs; the run is not recorded and cannot be submitted to the leaderboard")
 	nobell := flag.Bool("nobell", false, "disable terminal-bell sound feedback (coins, stomps, power-ups...)")
+	showVersion := flag.Bool("version", false, "print build and engine versions and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("mario %s (engine %s)\n", render.Version, board.EngineVersion)
+		return
+	}
 	// Auto color depth (render.ColorDepthFor — the rule shared with the
 	// SSH host and the mosh child): 24-bit when the terminal is known
 	// truecolor (a COLORTERM hint or a TrueColorTerm TERM family), the
