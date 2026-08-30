@@ -23,6 +23,7 @@ func TestAboutScreenText(t *testing.T) {
 		"fan-made terminal platformer",
 		"unofficial fan art · not affiliated with nintendo",
 		"mario is a trademark of nintendo",
+		"hold x to run",
 		"I CLOSE",
 	} {
 		if !strings.Contains(all, want) {

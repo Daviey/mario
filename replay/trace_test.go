@@ -2,6 +2,7 @@ package replay
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -127,5 +128,104 @@ func TestTraceDeathCauseNoneFound(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "cause: none found") {
 		t.Errorf("clean suicide lacks the none-found fallback:\n%s", buf.String())
+	}
+}
+
+// TestTraceWindow pins the per-tick window log behind -trace-window: the
+// input bits/velocity around a jump takeoff (the "impossible jump" tool —
+// the answer is usually the RUN bit decaying airspeed one tick after
+// takeoff), strict containment in [x0,x1), and the transition/END lines
+// Trace itself prints staying intact.
+func TestTraceWindow(t *testing.T) {
+	levels := engine.DefaultLevels()
+	g := engine.NewGame(levels, 40, engine.LevelHeight)
+	g.Reset()
+	var r Recorder
+	r.Start()
+	jumped := false
+	prevUp := false
+	for ticks := 0; g.State != engine.StateGameOver && g.State != engine.StateWin && ticks < 3000; ticks++ {
+		in := botInput(ticks) // progresses through 1-1 (jumps its pipes)
+		in.Run = true
+		if g.State == engine.StatePlaying && g.Player.Grounded && g.Player.Pos.X >= 30 && g.Player.Pos.X < 40 && !prevUp {
+			in.Up = true // force one jump takeoff inside the window
+			jumped = true
+		}
+		g.Update(in)
+		r.Record(in)
+		prevUp = in.Up
+	}
+	if !jumped {
+		t.Fatal("script never jumped inside the window")
+	}
+	var buf bytes.Buffer
+	res, err := TraceWindow(levels, "classic", r.JSON(), &buf, 30, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Score != g.Score || res.State != g.State {
+		t.Errorf("window trace result %+v, live score=%d state=%v", res, g.Score, g.State)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "JUMP PRESS") {
+		t.Errorf("window log lacks the jump-press marker:\n%s", out)
+	}
+	if !strings.Contains(out, "RUN=1)") {
+		t.Errorf("window log lacks the run-bit column:\n%s", out)
+	}
+	if !strings.Contains(out, "END: score=") || !strings.Contains(out, "world-card  -> playing") {
+		t.Errorf("window trace dropped the plain-Trace output contract:\n%s", out)
+	}
+	windowLines := 0
+	for _, ln := range strings.Split(out, "\n") {
+		if !strings.Contains(ln, "in(L=") {
+			continue
+		}
+		windowLines++
+		i := strings.Index(ln, "pos=(")
+		j := strings.Index(ln[i:], ",")
+		x, err := strconv.ParseFloat(strings.TrimSpace(ln[i+5:i+j]), 64)
+		if err != nil {
+			t.Fatalf("window line not parseable: %q", ln)
+		}
+		if x < 30 || x >= 40 {
+			t.Errorf("window line outside [30,40): %q", ln)
+		}
+	}
+	if windowLines == 0 {
+		t.Errorf("window log is empty:\n%s", out)
+	}
+}
+
+// TestParseWindow: the -trace-window argument grammar.
+func TestParseWindow(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		x0, x1  float64
+		wantErr bool
+	}{
+		{"59:72", 59, 72, false},
+		{"0.5:4", 0.5, 4, false},
+		{"59", 0, 0, true},
+		{"59:", 0, 0, true},
+		{":72", 0, 0, true},
+		{"a:b", 0, 0, true},
+		{"72:59", 0, 0, true},
+		{"59:59", 0, 0, true},
+	} {
+		x0, x1, err := ParseWindow(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseWindow(%q) = %v,%v,%v; want error", tc.in, x0, x1, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseWindow(%q): %v", tc.in, err)
+			continue
+		}
+		if x0 != tc.x0 || x1 != tc.x1 {
+			t.Errorf("ParseWindow(%q) = %v,%v; want %v,%v", tc.in, x0, x1, tc.x0, tc.x1)
+		}
 	}
 }

@@ -46,13 +46,23 @@ func runDumpReplays(n int) error {
 }
 
 // runReplayTrace prints a recording's tick trace: state transitions with
-// lives/score/position and a cause dump at every death. A recording from
-// an older EngineVersion may trace differently than its claimed score —
-// that is version skew; the verifier drops such rows as `version`.
-func runReplayTrace(path string, daily bool, day string) error {
+// lives/score/position and a cause dump at every death. A non-empty
+// window ("X0:X1" player-X tiles) adds the per-tick input/physics log
+// while the player is inside it — the close-up view for jump postmortems.
+// A recording from an older EngineVersion may trace differently than its
+// claimed score — that is version skew; the verifier drops such rows as
+// `version`.
+func runReplayTrace(path string, daily bool, day, window string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("replay: %w", err)
+	}
+	var x0, x1 float64
+	if window != "" {
+		x0, x1, err = replay.ParseWindow(window)
+		if err != nil {
+			return fmt.Errorf("replay: %w", err)
+		}
 	}
 	mode := "classic"
 	if daily {
@@ -65,8 +75,17 @@ func runReplayTrace(path string, daily bool, day string) error {
 	if err != nil {
 		return fmt.Errorf("replay: %w", err)
 	}
-	fmt.Printf("replay: file=%s mode=%s engine=%s\n", path, mode, board.EngineVersion)
-	res, err := replay.Trace(levels, mode, string(data), os.Stdout)
+	fmt.Printf("replay: file=%s mode=%s engine=%s", path, mode, board.EngineVersion)
+	if window != "" {
+		fmt.Printf(" window=[%g,%g)", x0, x1)
+	}
+	fmt.Println()
+	var res replay.Result
+	if window != "" {
+		res, err = replay.TraceWindow(levels, mode, string(data), os.Stdout, x0, x1)
+	} else {
+		res, err = replay.Trace(levels, mode, string(data), os.Stdout)
+	}
 	if err != nil {
 		return fmt.Errorf("replay: %w", err)
 	}
