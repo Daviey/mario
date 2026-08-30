@@ -1,10 +1,9 @@
 package ui
 
-// ScriptInput is the deterministic demo script: hold right, run most
-// ticks, hop regularly, dismiss the title screen on tick 0.
-
 import "github.com/Daviey/mario/engine"
 
+// ScriptInput is the deterministic demo script: hold right, run most
+// ticks, hop regularly, dismiss the title screen on tick 0.
 func ScriptInput(t int) engine.Input {
 	return engine.Input{
 		Right:  true,

@@ -88,7 +88,6 @@ const (
 // blink cadence shared by every surface — terminal text, the WASM canvas
 // and the EFI framebuffer UI); on ~28 of every 40 ticks (0.47s on, 0.2s
 // off at 60 Hz).
-
 func BlinkVisible(tick int) bool { return tick%40 < 28 }
 
 // drawScoreUIText paints the active leaderboard screen as real text cells
