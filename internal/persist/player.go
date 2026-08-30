@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -31,13 +32,21 @@ type PlayerConfig struct {
 
 // processPlayer caches this process's identity: with no native disk
 // store, it is the only thing keeping one run on a single device id.
-var processPlayer *PlayerConfig
+// processMu guards it — the leaderboard UI reads the cache from the tick
+// goroutine while a completed submission's goroutine writes the saved
+// name (a real data race, caught by -race in the ui tests).
+var (
+	processMu     sync.Mutex
+	processPlayer *PlayerConfig
+)
 
 // LoadPlayer returns the player identity. On first call it loads the
 // store (browser localStorage) or generates a fresh UUID (native, which
 // stores nothing); the result is cached for the process lifetime so the
 // game, the leaderboard UI and submissions all agree on one device id.
 func LoadPlayer() (PlayerConfig, error) {
+	processMu.Lock()
+	defer processMu.Unlock()
 	if processPlayer != nil {
 		return *processPlayer, nil
 	}
@@ -69,11 +78,13 @@ func SaveBest(score int) {
 // SaveName sets the display name on both the receiver and the process
 // cache, then best-effort stores it (a no-op natively).
 func (pc *PlayerConfig) SaveName(name string) {
+	processMu.Lock()
 	pc.Name = name
 	if processPlayer != nil {
 		processPlayer.Name = name
 		processPlayer.Best = pc.Best
 	}
+	processMu.Unlock()
 	if data, err := json.MarshalIndent(*pc, "", "  "); err == nil {
 		storePlayerBytes(data)
 	}
