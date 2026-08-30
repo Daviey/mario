@@ -231,6 +231,8 @@ func normalizeZipMode(perms fs.FileMode) fs.FileMode {
 	return 0o644
 }
 
+// alignUp rounds n up to the next multiple of a, which must be a
+// power of two (the fat-binary slice alignments always are).
 func alignUp(n, a int) int {
 	return (n + a - 1) &^ (a - 1)
 }
@@ -269,6 +271,11 @@ func main() {
 	}
 	if *universal != "" {
 		if err := os.WriteFile(*universal, fat.Bytes(), 0o755); err != nil {
+			fatal(err)
+		}
+		// Same umask trap as assemble(): WriteFile's mode is masked
+		// (077 on the CI runner) and would strip the exec bit.
+		if err := os.Chmod(*universal, 0o755); err != nil {
 			fatal(err)
 		}
 		fmt.Println("wrote", *universal)

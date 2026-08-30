@@ -47,7 +47,6 @@ type build struct {
 	Version string // git describe (v0.3.3-6-g84d833b)
 	SrcDir  string // packaging/ios
 	WebDir  string // dist/web → bundled as www/
-	Out     string // .ipa path
 }
 
 func main() {
@@ -73,7 +72,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	b := build{Version: *version, SrcDir: *src, WebDir: *web, Out: *out}
+	b := build{Version: *version, SrcDir: *src, WebDir: *web}
 	staging, err := os.MkdirTemp("", "mkipa-")
 	if err != nil {
 		fatal(err)
@@ -94,11 +93,11 @@ func main() {
 		"-fuse-ld=lld",
 		"-o", bin,
 	}
-	if out, err := run(*clang, args...); err != nil {
+	if out, err := runCmd(*clang, args...); err != nil {
 		fmt.Fprintln(os.Stderr, out)
 		fatal(fmt.Errorf("clang: %w", err))
 	}
-	if out, err := run(*ldid, "-S", bin); err != nil {
+	if out, err := runCmd(*ldid, "-S", bin); err != nil {
 		fmt.Fprintln(os.Stderr, out)
 		fatal(fmt.Errorf("ldid: %w", err))
 	}
@@ -157,7 +156,10 @@ func writePNG(path string, img *image.RGBA) error {
 	return png.Encode(f, img)
 }
 
-func run(name string, args ...string) (string, error) {
+// runCmd runs an external command and returns its combined output.
+// Named runCmd, not run: mkdeb/mkrpm reserve `run` for the whole tool
+// pipeline returning error.
+func runCmd(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
@@ -188,6 +190,9 @@ func copyTree(dst, src string) error {
 		if err != nil {
 			return err
 		}
+		// WriteFile's mode is umask-masked (077 on the CI runner);
+		// harmless here — the modes are discarded when ZipDir
+		// re-normalizes them via modeFor.
 		return os.WriteFile(target, data, info.Mode().Perm())
 	})
 }

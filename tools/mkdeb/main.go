@@ -162,7 +162,12 @@ func md5sums(files []file) []byte {
 
 // tarball packs files (plus their parent directories, deduped, dirs first
 // by lexicographic order — a dir path is always a strict prefix of its
-// children) into a deterministic gzipped tar.
+// children) into a deterministic gzipped tar. Format is pinned to
+// tar.FormatUSTAR: Go's fallback, PAX, emits extended records whose
+// presence and bytes depend on path lengths and toolchain version, so
+// USTAR keeps rebuilds byte-identical across Go upgrades — and makes a
+// header USTAR cannot express fail loudly instead of silently changing
+// the archive format.
 func tarball(files []file) ([]byte, error) {
 	seen := map[string]bool{}
 	var all []file

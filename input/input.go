@@ -44,18 +44,32 @@ const (
 	spAny
 )
 
-const holdWindow = 12    // ~0.2s of key-repeat silence before a legacy key expires
-const maxHoldWindow = 52 // upper bound for calibrated grace and cadence windows (~0.9s)
+// holdWindow is the key-repeat silence (~0.2s) after which a legacy key
+// expires. It is the floor every calibrated grace and cadence window is
+// clamped to (clampWindow).
+const holdWindow = 12
+
+// maxHoldWindow is the upper bound (~0.9s) for calibrated grace and
+// cadence windows: no learned terminal timing may keep a key live
+// longer than this after its last byte.
+const maxHoldWindow = 52
+
 // defaultOSDelay is the assumed keydown→repeat delay on a terminal whose
 // real delay has not been measured yet (500-660ms covers the common
 // GNOME/niri/macOS/Windows defaults).
 const defaultOSDelay = 36
-const staleSeqPolls = 3 // quiet polls before an incomplete escape sequence is dropped
+
+// staleSeqPolls is the number of quiet polls an incomplete escape
+// sequence may sit in the buffer before it is dropped (a truncated
+// sequence would otherwise swallow every later key).
+const staleSeqPolls = 3
+
 // upExtendTicks bounds the demotion extension for the jump key: past the
 // full rise of a jump a held jump key no longer changes physics (the jump
 // cut is over), and it must be expired again well before landing (~2x the
 // rise) so the retap edge still exists.
-const upExtendTicks = 24 // full jump rise ≈ -JumpVel/Gravity ≈ 20.5 ticks; slack after, still < landing (~41)
+const upExtendTicks = 24 // rise ≈ -engine.JumpVel/engine.Gravity ≈ 20.5 ticks; slack after, still < the ≈41-tick landing
+
 // resurrectWindow is how long after a demoted hold finally expires a byte
 // for another key may resurrect it: while a direction is held and jump is
 // tapped, the direction is dead for roughly the airborne time (~41 ticks)
@@ -72,32 +86,51 @@ type keyEvent struct {
 	kittyU  bool // CSI-u final: only the kitty protocol ever sends these
 }
 
+// keyState is one mapped key's hold lifecycle. The per-key invariants
+// (the owning transition named in parens; the prose lives in Poll's
+// sweeps, demotedHeld and apply):
+//   - live → demoted ⇒ wasLive: the demotion sweep only demotes a
+//     proven hold, and the expiry sweep that follows it in the same
+//     Poll marks it wasLive (resurrection in apply sets both too).
+//   - deadAt is set exactly at the live→dead transition of a DEMOTED
+//     hold (Poll's silent-expiry sweep) and cleared by the three paths
+//     that settle the release question: an explicit release (apply),
+//     resurrection (apply) and ReleaseAll.
+//   - win is meaningful only while lastSeen ≠ 0: a fresh press
+//     re-derives it (apply) before lastSeen is stamped, and ReleaseAll
+//     clears both together.
+type keyState struct {
+	lastSeen   int  // tick of the key's most recent byte; 0 = never seen
+	pressedAt  int  // tick of the newest PRESS (repeats don't refresh it)
+	sticky     bool // kitty press held until its explicit release byte
+	latched    bool // press edges awaiting their first Poll
+	win        int  // per-key expiry window; 0 = holdWindow
+	sawRepeat  bool // this keypress received repeat bytes
+	heldHabit  bool // last keypress of this key was a hold (repeats seen)
+	demoted    bool // proven hold silenced by a newer key press (see demotedHeld)
+	wasLive    bool // live at the previous Poll; drives one-shot expiry
+	deadAt     int  // tick a demoted hold finally expired; 0 = none
+}
+
 // Mapper converts a byte stream into per-tick engine.Input values.
 type Mapper struct {
-	mu           sync.Mutex
-	now          int
-	lastSeen     [keyCount]int
-	pressedAt    [keyCount]int // tick of the newest PRESS (repeats don't refresh it)
-	sticky       [keyCount]bool
-	latched      [keyCount]bool // press edges awaiting their first Poll
-	win          [keyCount]int  // per-key expiry window; 0 = holdWindow
-	sawRepeat    [keyCount]bool // this keypress received repeat bytes
-	heldHabit    [keyCount]bool // last keypress of this key was a hold (repeats seen)
-	osDelay      int            // measured keydown→first-repeat delay, in ticks (0 = uncalibrated)
-	pendingDelay int            // delay candidate from the newest resumed keypress
-	sources      map[int]key    // kitty press sources still held, for exact releases
-	demoted      [keyCount]bool // proven hold silenced by a newer key press (see demotedHeld)
-	wasLive      [keyCount]bool // live at the previous Poll; drives one-shot expiry
-	deadAt       [keyCount]int  // tick a demoted hold finally expired; 0 = none
-	lastByte     int            // tick of the most recent decoded event, any key
+	mu  sync.Mutex
+	now int
+	ks  [keyCount]keyState // per-key hold lifecycle (see keyState)
+
+	osDelay      int         // measured keydown→first-repeat delay, in ticks (0 = uncalibrated)
+	pendingDelay int         // delay candidate from the newest resumed keypress
+	sources      map[int]key // kitty press sources still held, for exact releases
+	lastByte     int         // tick of the most recent decoded event, any key
 	buf          []byte
 	feedAge      int  // polls since the last Feed delivered bytes
 	sawKitty     bool // kitty protocol detected (CSI-u final or explicit event type)
-	pendQuit     bool
-	pendPause    bool
-	pendRestart  bool
-	pendKill     bool
-	pendAny      bool
+
+	pendQuit    bool
+	pendPause   bool
+	pendRestart bool
+	pendKill    bool
+	pendAny     bool
 }
 
 // NewMapper returns a mapper with no keys held.

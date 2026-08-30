@@ -547,27 +547,6 @@ func TestDeterministic(t *testing.T) {
 	}
 }
 
-func TestVersionSanitize(t *testing.T) {
-	ok := map[string]string{
-		"v0.3.0":                  "0.3.0",
-		"0.3.0":                   "0.3.0",
-		"0.3.0-dirty":             "0.3.0+dirty",
-		"0.3.0-14-g1a2b3c4":       "0.3.0+14.g1a2b3c4",
-		"0.3.0-14-g1a2b3c4-dirty": "0.3.0+14.g1a2b3c4+dirty",
-	}
-	for in, want := range ok {
-		got, err := pack.SanitizeVersion(in, "RPM")
-		if err != nil || got != want {
-			t.Errorf("sanitizeVersion(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-	for _, bad := range []string{"", "abc", "v", "1 2", "1:2.0", "1.2-3"} {
-		if _, err := pack.SanitizeVersion(bad, "RPM"); err == nil {
-			t.Errorf("sanitizeVersion(%q) accepted", bad)
-		}
-	}
-}
-
 func TestArchRejected(t *testing.T) {
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "x.rpm")

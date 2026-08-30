@@ -12,22 +12,6 @@ import (
 	"github.com/Daviey/mario/tools/internal/pack"
 )
 
-func TestShortVersion(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"v0.3.3", "0.3.3"},
-		{"v0.3.3-6-g84d833b-dirty", "0.3.3"},
-		{"0.3.3", "0.3.3"},
-		{"v1.2", "0.0.0"}, // not X.Y.Z
-		{"dev", "0.0.0"},  // git describe fallback
-		{"", "0.0.0"},
-	}
-	for _, c := range cases {
-		if got := pack.ShortVersion(c.in); got != c.want {
-			t.Errorf("shortVersion(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 // assemble is testable without clang: the binary is a placeholder file
 // that main() would have compiled+signed beforehand.
 func TestAssembleBundle(t *testing.T) {
