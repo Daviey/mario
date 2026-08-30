@@ -1036,7 +1036,7 @@ func drawCastleAt(f *Frame, g *engine.Game, p *Palette, ox, oy int) {
 	c0, cy, _, _ := castleRect(g)
 	x, y := c0*Pix-ox, cy*Pix-oy
 	drawCastle(f, p, x, y)
-	drawCastleFlag(f, p, x, y-2, g.CastleFlag)
+	drawCastleFlag(f, p, x, y, g.CastleFlag)
 }
 
 // drawGroundOnly paints just the terrain strip (title-screen backdrop).

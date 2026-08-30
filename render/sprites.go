@@ -616,7 +616,10 @@ func drawFlagTop(f *Frame, p *Palette, x, y int, drop float64) {
 }
 
 // drawCastleFlag raises the little victory pennant on a mast above the
-// castle door after the player walks in (rise 0..1).
+// castle door after the player walks in (rise 0..1). y0 is the castle's
+// top row: the mast fills from y0-h up to the roof (no sky gap), and the
+// pennant rises from `h-3` below the mast top — just clear of the
+// crenellations — to the mast top itself.
 func drawCastleFlag(f *Frame, p *Palette, x0, y0 int, rise float64) {
 	if rise <= 0 {
 		return
@@ -624,7 +627,7 @@ func drawCastleFlag(f *Frame, p *Palette, x0, y0 int, rise float64) {
 	const h = 8
 	mx := x0 + 2*Pix + 2
 	f.Fill(mx, y0-h, 1, h, p.Pole)
-	fy := y0 - 1 - int(math.Round(float64(h-3)*rise))
+	fy := y0 - 3 - int(math.Round(float64(h-3)*rise))
 	f.Fill(mx+1, fy, 3, 3, p.FlagRed)
 }
 
