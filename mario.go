@@ -100,6 +100,8 @@ type App struct {
 	bestSaved    int             // score already persisted this session
 	rec          replay.Recorder // this run's input log (leaderboard proof)
 	prevState    engine.State    // state before the last Update
+	lbui         *ui.UI          // the leaderboard machine (Submitted funnel flag)
+	runs         int             // runs started (recording-arming rule); telemetry
 	levelsTrust  bool            // built-in level set: runs are verifiable
 	dailyTrusted bool            // default daily generator: daily runs verifiable
 	saveBest     func(score int) // records the session best (persist or per-connection)
@@ -167,6 +169,7 @@ func New(opts *Options) *App {
 		sound:        opts.Sound,
 	}
 	mach := ui.NewUI(nil, nil)
+	app.lbui = mach
 	if opts.Session != nil {
 		// One player identity per connection: submissions, name entry and
 		// best-score bookkeeping all read the session, never the process
@@ -271,6 +274,7 @@ func (a *App) Step() {
 			case engine.StateDying, engine.StateScoreTick:
 			default:
 				a.rec.Start()
+				a.runs++
 			}
 		case engine.StateTitle:
 			a.rec.Reset()
@@ -330,6 +334,15 @@ func (a *App) UI() *render.ScoreUI { return a.ui }
 // Quit reports whether the last Step saw a quit request (mapped 'q' or a
 // leaderboard-screen close).
 func (a *App) Quit() bool { return a.quit }
+
+// Runs returns the number of runs started in this session (a card
+// following death or a level clear continues a run; anything else
+// starts one — the same rule the replay recording uses).
+func (a *App) Runs() int { return a.runs }
+
+// Submitted reports whether this session landed a verified-path score
+// submission (the UI confirmed success).
+func (a *App) Submitted() bool { return a.lbui.Submitted() }
 
 // Run plays the game at engine.TicksPerSecond, drawing differential
 // frames to st, until quit. This is the blocking entry the terminal

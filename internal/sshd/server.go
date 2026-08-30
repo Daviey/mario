@@ -85,6 +85,12 @@ type Session struct {
 // control window; blocks until the client drains).
 func (s *Session) Write(p []byte) (int, error) { return s.ch.write(p) }
 
+// Logf emits an operator line on the server's logger (stderr by
+// default): session lifecycle telemetry from handlers.
+func (s *Session) Logf(format string, args ...any) {
+	s.ch.srv.Log.Printf(format, args...)
+}
+
 // RemoteAddr returns the connected client's address (host:port) — for
 // hosts that key per-player state such as input-calibration warm-start
 // by origin.
@@ -171,6 +177,7 @@ var errChannelClosed = errors.New("sshd: channel closed")
 
 type channel struct {
 	t    *transport
+	srv  *Server
 	conn net.Conn
 
 	mu          sync.Mutex
@@ -837,6 +844,7 @@ func (c *conn) openChannel(p []byte) error {
 	}
 	c.ch = &channel{
 		t:      c.t,
+		srv:    c.srv,
 		conn:   c.t.conn,
 		peerID: peerID,
 		window: int(window),

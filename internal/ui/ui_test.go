@@ -337,6 +337,43 @@ func TestSubmitCarriesPlayContext(t *testing.T) {
 	}
 }
 
+// The played→submitted funnel flag: Submitted() turns true only after a
+// submission actually lands, and stays false when the backend errors.
+func TestSubmittedFlag(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	ok := NewUI(func(board.Entry) error { return nil }, nil)
+	ok.SetReplaySource(func() (string, bool) { return `{"v":1,"ticks":2,"runs":[[0,2]]}`, true })
+	g := gameOverGame(t)
+	tickUntil(t, ok, g, 1)
+	ok.FeedKeys([]byte("y"))
+	tickUntil(t, ok, g, 1)
+	ok.FeedKeys([]byte("\r"))
+	tickUntil(t, ok, g, 1)
+	waitFor(t, 2*time.Second, ok.Submitted)
+	if !ok.Submitted() {
+		t.Fatal("successful submit must set Submitted")
+	}
+
+	fail := NewUI(func(board.Entry) error { return errors.New("down") }, nil)
+	fail.SetReplaySource(func() (string, bool) { return `{"v":1,"ticks":2,"runs":[[0,2]]}`, true })
+	g2 := gameOverGame(t)
+	tickUntil(t, fail, g2, 1)
+	fail.FeedKeys([]byte("y"))
+	tickUntil(t, fail, g2, 1)
+	fail.FeedKeys([]byte("\r"))
+	tickUntil(t, fail, g2, 1)
+	waitFor(t, 2*time.Second, func() bool {
+		fail.mu.Lock()
+		defer fail.mu.Unlock()
+		return fail.status == "SUBMIT FAILED"
+	})
+	if fail.Submitted() {
+		t.Fatal("failed submit must not set Submitted")
+	}
+}
+
 func TestOfflineStillShowsPrompt(t *testing.T) {
 	// No backend configured: game over still asks, submitting reports
 	// OFFLINE instead of crashing.

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePostgREST records requests and answers with canned JSON bodies.
@@ -314,5 +315,59 @@ func TestLevelClamped(t *testing.T) {
 	}
 	if rows[0].Level != 1 || rows[1].Level != 99 {
 		t.Fatalf("read-back levels = %d, %d; want 1, 99", rows[0].Level, rows[1].Level)
+	}
+}
+
+// RecordPlay inserts into the plays table with the write-only shape:
+// POST /rest/v1/plays, Prefer return=minimal, clamped fields, and the
+// engine version defaulted.
+func TestRecordPlay(t *testing.T) {
+	client, f := testClient(t, func(*http.Request, string) (int, string) { return 201, "" })
+	start := time.Date(2026, 8, 30, 1, 0, 0, 0, time.UTC)
+	err := client.RecordPlay(context.Background(), PlaySession{
+		IP:          "203.0.113.9\x1b[evil",
+		StartedAt:   start,
+		EndedAt:     start.Add(time.Minute),
+		Level:       3,
+		Score:       4200,
+		Submitted:   true,
+		Runs:        2,
+		Term:        "xterm-ghostty",
+		Viewport:    "40x14",
+		InputRegime: "kitty",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := f.last(t)
+	if r.Method != "POST" || r.URL.Path != "/rest/v1/plays" {
+		t.Fatalf("%s %s, want POST /rest/v1/plays", r.Method, r.URL.Path)
+	}
+	if got := r.Header.Get("Prefer"); got != "return=minimal" {
+		t.Fatalf("Prefer = %q", got)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(f.bodies[0]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	// The control character in ip fails the literal-only pattern: the
+	// field clamps to empty rather than shipping operator-hostile bytes.
+	if sent["ip"] != "" {
+		t.Errorf("ip = %v, want empty (clamped)", sent["ip"])
+	}
+	for k, want := range map[string]any{
+		"level": float64(3), "score": float64(4200), "submitted": true,
+		"runs": float64(2), "term": "xterm-ghostty", "viewport": "40x14",
+		"input_regime": "kitty", "engine_version": EngineVersion,
+	} {
+		if sent[k] != want {
+			t.Errorf("%s = %v, want %v", k, sent[k], want)
+		}
+	}
+
+	// A server error must surface as an error (the caller logs it).
+	client, _ = testClient(t, func(*http.Request, string) (int, string) { return 500, "boom" })
+	if err := client.RecordPlay(context.Background(), PlaySession{StartedAt: start, EndedAt: start}); err == nil {
+		t.Fatal("500 must error")
 	}
 }
