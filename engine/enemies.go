@@ -5,6 +5,7 @@ import "math"
 // updateEnemies advances every enemy one tick and resolves shell kills.
 func (g *Game) updateEnemies() {
 	bottom := float64(g.Level.Height) + 2
+	shellSliding := false // set when any live enemy is a sliding shell
 	for _, e := range g.Enemies {
 		if e.Gone {
 			continue
@@ -29,6 +30,7 @@ func (g *Game) updateEnemies() {
 				vx = float64(e.Dir) * EnemyWalk
 			case EnemyShellMoving:
 				vx = float64(e.Dir) * ShellSpeed
+				shellSliding = true
 			}
 			e.Vel.Y += Gravity
 			if e.Vel.Y > MaxFall {
@@ -59,7 +61,12 @@ func (g *Game) updateEnemies() {
 	}
 
 	// Moving shells mow down every other enemy they touch, climbing the
-	// combo ladder with each consecutive kill.
+	// combo ladder with each consecutive kill. Skipped outright on ticks
+	// with no sliding shell: the outer loop would visit no acting shell,
+	// so the sweep is dead weight — identical visits and outcomes.
+	if !shellSliding {
+		return
+	}
 	for i := 0; i < len(g.Enemies); i++ {
 		a := g.Enemies[i]
 		if a.Gone || a.State != EnemyShellMoving {
