@@ -9,6 +9,13 @@ func (g *Game) solidAt(tx, ty int) bool {
 	return g.Level.At(tx, ty).Solid()
 }
 
+// applyGravity advances a falling body's vertical velocity by g and
+// clamps it to MaxFall, the terminal velocity every clamped body shares.
+// (The player and flipped enemies are deliberately unclamped.)
+func applyGravity(vy, g float64) float64 {
+	return min(vy+g, MaxFall)
+}
+
 // moveX shifts a body horizontally by dx, stopping at the first solid tile.
 // It reports whether a wall was hit and leaves the body flush against it.
 func (g *Game) moveX(pos *Vec, w, h, dx float64) bool {

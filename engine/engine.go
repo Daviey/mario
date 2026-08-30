@@ -16,6 +16,10 @@ type Input struct {
 // State is the high level game state.
 type State int
 
+// The run lifecycle: Title → WorldCard → Playing, then on level clear
+// FlagSlide → WalkCastle → ScoreTick → the next level's WorldCard (or
+// Win after the last); a death detours through Dying → WorldCard
+// respawn, or GameOver when the lives run out.
 const (
 	StateTitle State = iota
 	StateWorldCard
@@ -28,6 +32,8 @@ const (
 	StateWin
 )
 
+// String returns the state's kebab-case name, as used in logs and debug
+// overlays.
 func (s State) String() string {
 	switch s {
 	case StateTitle:
@@ -52,6 +58,8 @@ func (s State) String() string {
 	return "unknown"
 }
 
+// Run pacing: tick rate, clock and lives, plus the fixed beat lengths of
+// the non-playing interstitials.
 const (
 	TicksPerSecond   = 60
 	TicksPerTimeUnit = 24 // one game-time unit ticks down every 24 frames
@@ -62,6 +70,7 @@ const (
 	WorldCardTicks   = 90  // "WORLD 1-2 x3" interstitial
 	CastleDwellTicks = 45  // door-entry pause before the score countdown
 	HurryTime        = 100 // HUD turns red below this
+	HurryFlashTicks  = 120 // "HURRY!" flash duration once time crosses HurryTime
 	ExtraLifeCoins   = 100
 )
 
@@ -108,8 +117,8 @@ type Game struct {
 	flagTopY   float64 // pole-slide start height (drives FlagDrop)
 	bumps      map[int]int
 	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
-	prevIn     Input
-	curIn      Input
+	prevIn     Input // previous tick's input, for rising/falling edges
+	curIn      Input // current tick's input (stomp bounce reads held jump)
 }
 
 // NewGame creates a game over the given levels. viewW/viewH is the camera
@@ -171,6 +180,12 @@ func (g *Game) CardName() string {
 
 // Reset starts a brand new game (used by the restart key).
 func (g *Game) Reset() {
+	g.newRun()
+}
+
+// newRun resets the counters and kicks off a fresh run from the world
+// card; Reset, startRun and BeginDaily all funnel through here.
+func (g *Game) newRun() {
 	g.Score = 0
 	g.CoinCount = 0
 	g.Lives = StartLives
@@ -259,12 +274,7 @@ func (g *Game) Update(in Input) {
 
 // startRun kicks off a fresh run from the title screen.
 func (g *Game) startRun() {
-	g.Score = 0
-	g.CoinCount = 0
-	g.Lives = StartLives
-	g.loadLevel(0, PowerSmall)
-	g.State = StateWorldCard
-	g.stateTimer = WorldCardTicks
+	g.newRun()
 }
 
 // BeginDaily resets into a daily-challenge run: the host has already
@@ -272,10 +282,7 @@ func (g *Game) startRun() {
 // the run and starts from the world card.
 func (g *Game) BeginDaily() {
 	g.Daily = true
-	g.Score, g.CoinCount, g.Lives = 0, 0, StartLives
-	g.loadLevel(0, PowerSmall)
-	g.State = StateWorldCard
-	g.stateTimer = WorldCardTicks
+	g.newRun()
 }
 
 // BeginDemo starts the attract-mode demo from the title screen.
@@ -338,7 +345,7 @@ func (g *Game) updatePlaying(in Input) {
 		}
 		if !g.Hurry && g.Time <= HurryTime {
 			g.Hurry = true
-			g.HurryT = 120
+			g.HurryT = HurryFlashTicks
 			g.emit("hurry")
 		}
 	}
@@ -409,6 +416,7 @@ func (g *Game) grabFlag() {
 	// feet at the base the minimum — so every tier sits on the pole the
 	// player can actually see and reach.
 	feet := p.Pos.Y + p.H
+	// Height-2: the ground surface — every level stands on two ground rows.
 	bonus := flagGrabBonus(feet, float64(g.Level.Height-2), float64(g.Level.poleTopRow()))
 	g.Score += bonus
 	g.spawnScorePop(p.Pos.X, p.Pos.Y, bonus, false)
@@ -441,6 +449,7 @@ func flagGrabBonus(feet, groundRow, topRow float64) int {
 
 func (g *Game) updateFlagSlide() {
 	p := g.Player
+	// Height-2: the ground surface — every level stands on two ground rows.
 	bottom := float64(g.Level.Height-2) - p.H
 	if p.Pos.Y < bottom {
 		p.Pos.Y = math.Min(p.Pos.Y+FlagSlideSpeed, bottom)
@@ -461,7 +470,7 @@ func (g *Game) updateWalkCastle() {
 	p := g.Player
 	if g.InCastle {
 		if g.CastleFlag < 1 {
-			g.CastleFlag = math.Min(1, g.CastleFlag+1.0/60)
+			g.CastleFlag = math.Min(1, g.CastleFlag+CastleFlagRise)
 		}
 		g.stateTimer--
 		if g.stateTimer <= 0 {
@@ -470,10 +479,7 @@ func (g *Game) updateWalkCastle() {
 		}
 		return
 	}
-	p.Vel.Y += Gravity
-	if p.Vel.Y > MaxFall {
-		p.Vel.Y = MaxFall
-	}
+	p.Vel.Y = applyGravity(p.Vel.Y, Gravity)
 	g.moveX(&p.Pos, p.W, p.H, CastleWalkSpeed)
 	landed, _, _ := g.moveY(&p.Pos, p.W, p.H, p.Vel.Y)
 	if landed {
@@ -491,7 +497,7 @@ func (g *Game) updateWalkCastle() {
 
 func (g *Game) updateScoreTick() {
 	if g.CastleFlag < 1 {
-		g.CastleFlag = math.Min(1, g.CastleFlag+1.0/60)
+		g.CastleFlag = math.Min(1, g.CastleFlag+CastleFlagRise)
 	}
 	if g.Time > 0 {
 		d := min(2, g.Time)
@@ -514,10 +520,7 @@ func (g *Game) updateScoreTick() {
 
 func (g *Game) updateDying() {
 	p := g.Player
-	p.Vel.Y += Gravity
-	if p.Vel.Y > MaxFall {
-		p.Vel.Y = MaxFall
-	}
+	p.Vel.Y = applyGravity(p.Vel.Y, Gravity)
 	p.Pos.Y += p.Vel.Y
 }
 
@@ -529,7 +532,7 @@ func (g *Game) kill() {
 	g.State = StateDying
 	g.stateTimer = DyingTicks
 	g.Player.Vel.X = 0
-	g.Player.Vel.Y = -0.38
+	g.Player.Vel.Y = DeathBounceVel
 	g.emit("die")
 }
 
@@ -691,5 +694,3 @@ func horizontalOverlap(px, pw, tx float64) float64 {
 	}
 	return r - l
 }
-
-func approx(a, b float64) bool { return math.Abs(a-b) < 1e-6 }

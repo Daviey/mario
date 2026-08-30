@@ -38,7 +38,7 @@ func TestWalkRightMovesAndCaps(t *testing.T) {
 func TestRunFasterThanWalk(t *testing.T) {
 	gw := newGame(t, buildLevel(t, 200))
 	gr := newGame(t, buildLevel(t, 200))
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		gw.Update(Input{Right: true})
 		gr.Update(Input{Right: true, Run: true})
 	}
@@ -75,7 +75,7 @@ func TestFacingFlips(t *testing.T) {
 func TestJumpLeavesGroundAndLands(t *testing.T) {
 	g := newGame(t, buildLevel(t, 60))
 	airborne := false
-	for i := 0; i < 80; i++ {
+	for range 80 {
 		g.Update(Input{Up: true})
 		if !g.Player.Grounded {
 			airborne = true
@@ -95,7 +95,7 @@ func TestJumpLeavesGroundAndLands(t *testing.T) {
 func TestJumpHeight(t *testing.T) {
 	g := newGame(t, buildLevel(t, 60))
 	minY := g.Player.Pos.Y
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		g.Update(Input{Up: true})
 		minY = math.Min(minY, g.Player.Pos.Y)
 	}
@@ -112,7 +112,7 @@ func TestVariableJumpTapIsLower(t *testing.T) {
 	tap := newGame(t, buildLevel(t, 60))
 	hold := newGame(t, buildLevel(t, 60))
 	minTap, minHold := 13.0, 13.0
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		tap.Update(Input{Up: i == 0})
 		hold.Update(Input{Up: true})
 		minTap = math.Min(minTap, tap.Player.Pos.Y)
@@ -160,14 +160,17 @@ func TestJumpBuffer(t *testing.T) {
 	if g.Player.Vel.Y == JumpVel {
 		t.Fatal("jump fired mid-air (buffer should wait for landing)")
 	}
-	for i := 0; i < 5 && !g.Player.Grounded; i++ {
+	for range 5 {
+		if g.Player.Grounded {
+			break
+		}
 		g.Update(Input{})
 	}
 	if !g.Player.Grounded {
 		t.Fatalf("player should have landed; y=%f", g.Player.Pos.Y)
 	}
 	// Landing this very tick consumes the buffered jump.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		g.Update(Input{})
 		if g.Player.Vel.Y < -0.1 {
 			return // buffered jump fired
@@ -214,7 +217,10 @@ func TestLeftEdgeIsSolid(t *testing.T) {
 func TestPitFallKills(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Fill(12, GroundTop, 59, LevelHeight-1, ' ') })
 	g := newGame(t, l)
-	for i := 0; i < 400 && g.State == StatePlaying; i++ {
+	for range 400 {
+		if g.State != StatePlaying {
+			break
+		}
 		g.Update(Input{Right: true, Run: true})
 	}
 	if g.State != StateDying {
@@ -229,7 +235,7 @@ func TestCeilingStopsAscent(t *testing.T) {
 	// Brick directly above the player's head at row 11.
 	l := buildLevel(t, 60, func(b *Builder) { b.Fill(0, 11, 20, 11, 'B') })
 	g := newGame(t, l)
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		g.Update(Input{Up: true})
 	}
 	if g.Player.Pos.Y < 11 {

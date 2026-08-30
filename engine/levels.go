@@ -1,14 +1,23 @@
 package engine
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // Level geometry conventions: levels are 15 rows tall with two rows of
 // ground at the bottom (rows 13-14). X grows right, Y grows down.
-
 const (
 	LevelHeight = 15
 	GroundTop   = 13
 	FlagTopRow  = 7 // row of the flagpole finial placed by Builder.Flag
+
+	// PlantCenterOffset is the X offset from a pipe's left edge that
+	// centres a plant in its two-tile pipe mouth: pipe centre (x+1)
+	// minus half a plant (1 - PlantW/2 == 0.65). Builder.Plant stores
+	// it, ParseLevel re-derives it and Rows reverses it — all three
+	// must agree exactly or the marker lands a column off its pipe.
+	PlantCenterOffset = 0.65
 )
 
 // Builder assembles ASCII level rows programmatically.
@@ -55,8 +64,12 @@ func (b *Builder) Ground(x0, x1 int) {
 }
 
 // Pipe places a two-tile-wide pipe of the given height on the ground.
-// Height must be <= 3 to stay clearable with a normal jump.
+// It panics above height 3: taller pipes cannot be cleared with a
+// normal jump, so no well-formed level may contain one.
 func (b *Builder) Pipe(x, height int) {
+	if height > 3 {
+		panic(fmt.Sprintf("Pipe(x=%d, height=%d): taller than 3 is not jump-clearable", x, height))
+	}
 	b.Fill(x, GroundTop-height, x+1, GroundTop-1, 'P')
 }
 
@@ -96,7 +109,9 @@ func (b *Builder) Flag(x int) {
 	b.Fill(x, FlagTopRow+1, x, GroundTop-1, 'F')
 }
 
-// Rows returns the assembled ASCII rows.
+// Rows returns the assembled ASCII rows. It panics when a plant marker
+// cannot be placed — a dropped plant is always an authoring bug that
+// must fail loudly, never a silent level change.
 func (b *Builder) Rows() []string {
 	rows := make([]string, b.h)
 	for y := range b.cells {
@@ -105,15 +120,19 @@ func (b *Builder) Rows() []string {
 	for _, p := range b.plants {
 		// The marker lives in the air cell above the pipe mouth (the
 		// mouth itself is pipe tiles).
-		// Round: p.X-0.65 can be 15.999... for a pipe at 16 (float
-		// subtraction), and truncation would shift the marker a column
-		// left of its pipe.
-		x, y := int(math.Round(p.X-0.65)), int(p.Y)-1
-		if y >= 0 && y < b.h && x >= 0 && x < b.w && rows[y][x] == ' ' {
-			row := []byte(rows[y])
-			row[x] = 'V'
-			rows[y] = string(row)
+		// Round: p.X-PlantCenterOffset can be 15.999... for a pipe at
+		// 16 (float subtraction), and truncation would shift the
+		// marker a column left of its pipe.
+		x, y := int(math.Round(p.X-PlantCenterOffset)), int(p.Y)-1
+		if y < 0 || y >= b.h || x < 0 || x >= b.w {
+			panic(fmt.Sprintf("plant at %v: marker (%d,%d) falls outside the level grid", p, x, y))
 		}
+		if rows[y][x] != ' ' {
+			panic(fmt.Sprintf("plant at %v: marker cell (%d,%d) already holds %q; the plant would be silently dropped", p, x, y, rows[y][x]))
+		}
+		row := []byte(rows[y])
+		row[x] = 'V'
+		rows[y] = string(row)
 	}
 	return rows
 }

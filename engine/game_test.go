@@ -218,7 +218,10 @@ func TestDeathRespawnsLevel(t *testing.T) {
 	// Stomp the goomba for score.
 	e := g.Enemies[0]
 	dropPlayer(g, 20, 8)
-	for i := 0; i < 60 && e.State == EnemyWalking; i++ {
+	for range 60 {
+		if e.State != EnemyWalking {
+			break
+		}
 		g.Update(Input{})
 	}
 	run(g, 40, Input{})
@@ -390,5 +393,41 @@ func TestPitDeathDuringPlayingOnly(t *testing.T) {
 	g.Update(Input{})
 	if g.Lives != StartLives {
 		t.Error("pit check re-killed a dying player")
+	}
+}
+
+func TestFlagSlideGrabAtBaseSkipsSlide(t *testing.T) {
+	// Grabbing the pole with the feet already at the base leaves no
+	// slide span (bottom == flagTopY); the guard must keep FlagDrop at
+	// a finite value instead of dividing by zero and hand the player
+	// straight to the castle walk.
+	l := buildLevel(t, 60)
+	g := newGame(t, l)
+	g.Player.Pos = Vec{float64(l.FlagX) - 0.5, float64(GroundTop) - SmallH}
+	g.grabFlag()
+	g.updateFlagSlide()
+	if g.FlagDrop != 1 {
+		t.Fatalf("FlagDrop = %f, want 1 (a 0/0 slide ratio would give NaN)", g.FlagDrop)
+	}
+	if g.State != StateWalkCastle {
+		t.Fatalf("state = %v, want castle walk", g.State)
+	}
+}
+
+func TestEmitCollapsesImmediateRepeats(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	g.Events = g.Events[:0]
+	g.emit("coin")
+	g.emit("coin") // immediate repeat collapses
+	g.emit("bump")
+	g.emit("coin") // a non-adjacent repeat survives
+	want := []string{"coin", "bump", "coin"}
+	if len(g.Events) != len(want) {
+		t.Fatalf("events = %v, want %v", g.Events, want)
+	}
+	for i := range want {
+		if g.Events[i] != want[i] {
+			t.Fatalf("events = %v, want %v", g.Events, want)
+		}
 	}
 }

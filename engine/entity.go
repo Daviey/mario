@@ -55,20 +55,32 @@ const (
 	InvincibleTicks     = 120
 	EnemyFrameLen       = 0.16  // tiles travelled per enemy walk-cycle frame
 	ParaHopVel          = -0.34 // flying-koopa hop impulse (~2.7-tile apex)
-	ParaHopEvery        = 48    // grounded ticks between hops
+	ParaHopEvery        = 48    // grounded ticks between flying-koopa hops
+
+	// Interaction feel: the contact tolerances that decide stomp vs.
+	// hurt, kick direction and landing feedback.
+	StompBodyFrac      = 0.7   // feet above this fraction of an enemy's body counts as a stomp
+	HiddenGrazeOverlap = 0.15  // hidden blocks trigger only past this much tile overlap; corner grazes pass through
+	KickDeadzone       = 0.1   // centre distance within which a kick keeps the shell's last direction
+	HardLandFall       = 0.12  // landing fall speed that plays the squash pose and twin dust puffs
+	BumpFlipTol        = 0.2   // how far an enemy's feet may sit off the block top to still ride a bump
+	FlipVel            = -0.28 // pop-up impulse when an enemy is knocked on its back
+	DeathBounceVel     = -0.38 // death-arc launch impulse at the freeze-frame beat
 
 	FireBarBallGap  = 0.55  // tiles between fire-bar balls
 	FireBarBallSize = 0.45  // collision box of one ball
 	FireBarLen      = 6     // balls per bar
 	FireBarSpeed    = 0.026 // radians per tick (~4s per revolution)
+	FireBarHubClear = 0.45  // hub centre to the first ball's centre; the ball clears the hub
 
 	StarTicks  = 600 // star power: ~10s of kill-on-touch
 	StarScore  = 1000
 	StarWalk   = 0.055
 	StarBounce = -0.22
 
-	FlagSlideSpeed  = 0.05 // tiles per tick down the pole
-	CastleWalkSpeed = 0.07 // auto-walk to the castle door
+	FlagSlideSpeed  = 0.05     // tiles per tick down the pole
+	CastleWalkSpeed = 0.07     // auto-walk to the castle door
+	CastleFlagRise  = 1.0 / 60 // victory-flag rise per tick: full hoist in one second
 )
 
 // Scoring.
@@ -88,6 +100,8 @@ var stompLadder = [...]int{100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000
 // PowerLevel is the player's power-up state.
 type PowerLevel uint8
 
+// Power levels, weakest first; the order matters — PowerSuper and above
+// stand two tiles tall.
 const (
 	PowerSmall PowerLevel = iota
 	PowerSuper
@@ -152,6 +166,8 @@ func (p *Player) shrink() {
 // EnemyKind discriminates enemy species.
 type EnemyKind uint8
 
+// Enemy species. KindPara hops as it walks and demotes to KindKoopa when
+// stomped.
 const (
 	KindGoomba EnemyKind = iota
 	KindKoopa
@@ -161,6 +177,9 @@ const (
 // EnemyState is the lifecycle state of an enemy.
 type EnemyState uint8
 
+// Enemy lifecycle: walking alive, squashed (goomba death pose, counts
+// down to Gone), idle shell, player-slid shell, flipped onto its back
+// (already dead, falling out of the world).
 const (
 	EnemyWalking EnemyState = iota
 	EnemySquashed
@@ -177,7 +196,7 @@ type Enemy struct {
 	Kind     EnemyKind
 	State    EnemyState
 	Dir      int
-	Timer    int     // squashed-pose countdown
+	Timer    int     // squashed-pose countdown; grounded paratroopas reuse it as hop charge
 	WalkDist float64 // drives the walk cycle
 	Chain    int     // consecutive kills by this sliding shell (combo ladder)
 	Gone     bool
@@ -204,6 +223,7 @@ type CoinItem struct {
 // MushroomKind discriminates block power-ups that walk like a mushroom.
 type MushroomKind uint8
 
+// Block power-ups that emerge from a bumped block and then walk off.
 const (
 	MushSuper MushroomKind = iota // grow to super
 	MushLife                      // 1-UP
@@ -239,6 +259,7 @@ type Fireball struct {
 // PlantState is the piranha-plant lifecycle.
 type PlantState uint8
 
+// The piranha-plant cycle, starting hidden in its pipe.
 const (
 	PlantHidden PlantState = iota
 	PlantRising
@@ -279,16 +300,19 @@ func NewFireBar(x, y float64) FireBar {
 }
 
 // BallPos returns the centre of ball i (0-based, nearest the hub first)
-// at the given tick.
+// at the given tick. The radius law here — hub clearance plus one ball
+// gap per ball — is what spawnThreatNear (level.go) mirrors to keep
+// checkpoints out of a bar's sweep; change them together.
 func (fb FireBar) BallPos(i, tick int) Vec {
 	angle := fb.Speed * float64(tick)
-	r := 0.45 + float64(i+1)*FireBarBallGap
+	r := FireBarHubClear + float64(i+1)*FireBarBallGap
 	return Vec{fb.X + r*math.Cos(angle), fb.Y + r*math.Sin(angle)}
 }
 
 // ParticleKind discriminates visual particles.
 type ParticleKind uint8
 
+// Visual particle kinds; purely decorative, never gameplay state.
 const (
 	ParticleCoin ParticleKind = iota
 	ParticleDebris

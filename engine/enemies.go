@@ -17,6 +17,8 @@ func (g *Game) updateEnemies() {
 				e.Gone = true
 			}
 		case EnemyFlipped:
+			// Already dead: falls at 1.4x gravity, deliberately
+			// unclamped so the corpse accelerates out of the world.
 			e.Vel.Y += Gravity * 1.4
 			e.Pos.X += e.Vel.X
 			e.Pos.Y += e.Vel.Y
@@ -32,10 +34,7 @@ func (g *Game) updateEnemies() {
 				vx = float64(e.Dir) * ShellSpeed
 				shellSliding = true
 			}
-			e.Vel.Y += Gravity
-			if e.Vel.Y > MaxFall {
-				e.Vel.Y = MaxFall
-			}
+			e.Vel.Y = applyGravity(e.Vel.Y, Gravity)
 			if vx != 0 && g.moveX(&e.Pos, e.W, e.H, vx) {
 				e.Dir = -e.Dir
 			}
@@ -96,7 +95,7 @@ func (g *Game) flipEnemy(e *Enemy) {
 		return
 	}
 	e.State = EnemyFlipped
-	e.Vel = Vec{0, -0.28}
+	e.Vel = Vec{0, FlipVel}
 }
 
 // playerEnemyInteractions resolves stomps, kicks and damage.
@@ -117,7 +116,7 @@ func (g *Game) playerEnemyInteractions() {
 			g.emit("stomp")
 			continue
 		}
-		stomping := p.Vel.Y > 0.02 && (p.Pos.Y+p.H) < (e.Pos.Y+e.H*0.7)
+		stomping := p.Vel.Y > 0.02 && (p.Pos.Y+p.H) < (e.Pos.Y+e.H*StompBodyFrac)
 		switch {
 		case stomping && e.State == EnemyWalking:
 			switch e.Kind {
@@ -129,6 +128,8 @@ func (g *Game) playerEnemyInteractions() {
 				// koopa (a second stomp makes the shell, as usual).
 				e.Kind = KindKoopa
 			default:
+				// Koopa: the shell keeps the koopa's feet planted (the
+				// shell box is goomba-sized).
 				e.State = EnemyShell
 				e.Pos.Y += e.H - GoombaH
 				e.H = GoombaH
@@ -167,10 +168,12 @@ func (g *Game) kickShell(e *Enemy) {
 	e.State = EnemyShellMoving
 	e.Chain = 0
 	d := (e.Pos.X + e.W/2) - (g.Player.Pos.X + g.Player.W/2)
+	// Inside the deadzone the kick leaves Dir alone: the shell keeps
+	// sliding the way it last faced instead of teleporting away.
 	switch {
-	case d > 0.1:
+	case d > KickDeadzone:
 		e.Dir = 1
-	case d < -0.1:
+	case d < -KickDeadzone:
 		e.Dir = -1
 	}
 	g.emit("kick")

@@ -31,7 +31,7 @@ func TestGoombaTurnsAtWall(t *testing.T) {
 	})
 	g := newGame(t, l)
 	e := g.Enemies[0]
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		g.Update(Input{})
 		if e.Dir == 1 {
 			break
@@ -62,7 +62,10 @@ func TestStompGoomba(t *testing.T) {
 	g := newGame(t, l)
 	e := g.Enemies[0]
 	dropPlayer(g, 20, 8) // above the goomba
-	for i := 0; i < 60 && e.State == EnemyWalking; i++ {
+	for range 60 {
+		if e.State != EnemyWalking {
+			break
+		}
 		g.Update(Input{})
 	}
 	if e.State != EnemySquashed {
@@ -85,7 +88,7 @@ func TestStompBounceHigherWithJumpHeld(t *testing.T) {
 	g := newGame(t, l)
 	dropPlayer(g, 20, 8)
 	minVy := 0.0
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		g.Update(Input{Up: true})
 		if vy := g.Player.Vel.Y; vy < minVy {
 			minVy = vy
@@ -152,7 +155,10 @@ func TestKoopaStompMakesShell(t *testing.T) {
 	g := newGame(t, l)
 	e := g.Enemies[0]
 	dropPlayer(g, 20, 8)
-	for i := 0; i < 60 && e.State == EnemyWalking; i++ {
+	for range 60 {
+		if e.State != EnemyWalking {
+			break
+		}
 		g.Update(Input{})
 	}
 	if e.State != EnemyShell {
@@ -186,6 +192,32 @@ func TestKickShellFromSide(t *testing.T) {
 	}
 }
 
+func TestKickShellDeadzoneKeepsDirection(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'K') }))
+	e := g.Enemies[0]
+	e.State = EnemyShell
+	e.H = GoombaH
+	e.Pos = Vec{20, 13 - GoombaH}
+	e.Dir = -1
+	// Centres within KickDeadzone: the kick sends the shell sliding but
+	// keeps its stale facing instead of flipping it.
+	g.Player.Pos = Vec{20, 13 - SmallH}
+	g.kickShell(e)
+	if e.State != EnemyShellMoving {
+		t.Fatalf("state = %v, want moving shell", e.State)
+	}
+	if e.Dir != -1 {
+		t.Errorf("deadzone kick flipped dir to %d, want stale -1", e.Dir)
+	}
+	// Centres clearly apart: the kick aims the shell away from the player.
+	e.State = EnemyShell
+	g.Player.Pos = Vec{18, 13 - SmallH}
+	g.kickShell(e)
+	if e.Dir != 1 {
+		t.Errorf("kick from the left should aim the shell right, dir=%d", e.Dir)
+	}
+}
+
 func TestStompMovingShellStopsIt(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'K') })
 	g := newGame(t, l)
@@ -195,7 +227,10 @@ func TestStompMovingShellStopsIt(t *testing.T) {
 	e.Dir = -1
 	e.Pos.Y = 13 - GoombaH
 	dropPlayer(g, 20, 11.2) // close enough to catch the moving shell
-	for i := 0; i < 60 && e.State == EnemyShellMoving; i++ {
+	for range 60 {
+		if e.State != EnemyShellMoving {
+			break
+		}
 		g.Update(Input{})
 	}
 	if e.State != EnemyShell {
@@ -254,7 +289,10 @@ func TestShellBouncesOffWall(t *testing.T) {
 	e.H = GoombaH
 	e.Dir = 1
 	e.Pos.Y = 13 - GoombaH
-	for i := 0; i < 600 && e.Dir == 1; i++ {
+	for range 600 {
+		if e.Dir != 1 {
+			break
+		}
 		g.Update(Input{})
 	}
 	if e.Dir != -1 {
@@ -290,6 +328,55 @@ func TestFlipEnemyIsIdempotent(t *testing.T) {
 	}
 	if g.Score != 0 {
 		t.Errorf("flip scored without a caller awarding it: %d", g.Score)
+	}
+}
+
+func TestShellMowDownReachesOneUp(t *testing.T) {
+	// Eleven goombas in the shell's path: the combo ladder has ten
+	// rungs, so the eleventh consecutive kill must pay a 1-UP.
+	l := buildLevel(t, 200, func(b *Builder) {
+		b.Set(10, 12, 'K')
+		for i := range 11 {
+			b.Set(34+3*i, 12, 'G')
+		}
+	})
+	g := newGame(t, l)
+	// Goombas load before koopas, so find the shell by species.
+	var shell *Enemy
+	for _, e := range g.Enemies {
+		if e.Kind == KindKoopa {
+			shell = e
+		}
+	}
+	shell.State = EnemyShellMoving
+	shell.Dir = 1
+	shell.H = GoombaH
+	shell.Pos.Y = 13 - GoombaH
+	// Flipped victims fall out of the world and are filtered out of
+	// g.Enemies, so the mow count is the missing victims.
+	mowed := func() int {
+		alive := 0
+		for _, e := range g.Enemies {
+			if e != shell {
+				alive++
+			}
+		}
+		return 11 - alive
+	}
+	// The shell meets the farthest goomba well inside 400 ticks; running
+	// longer would let it bounce off the right wall and come back for
+	// the player, whose death respawns the level and resets the count.
+	for range 400 {
+		if mowed() == 11 {
+			break
+		}
+		g.Update(Input{})
+	}
+	if got := mowed(); got != 11 {
+		t.Fatalf("shell mowed %d of 11 goombas", got)
+	}
+	if g.Lives != StartLives+1 {
+		t.Errorf("lives = %d, want %d (past the ladder end pays a 1-UP)", g.Lives, StartLives+1)
 	}
 }
 
