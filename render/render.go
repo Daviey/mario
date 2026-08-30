@@ -59,12 +59,8 @@ type Palette struct {
 	QuestionBG   Color
 	QuestionDim  Color // flash partner of QuestionBG; the mark never dims
 	QuestionHi   Color
-	QuestionFG   Color
 	QuestionMark Color
 	UsedBG       Color
-	PipeLight    Color // lit side of pipes
-	PipeMid      Color
-	PipeDark     Color // shaded side / interior
 	Pole         Color
 	FlagRed      Color
 	Coin         Color
@@ -79,7 +75,6 @@ type Palette struct {
 	GreenLight   Color
 	GreenDark    Color
 	KoopaSkin    Color
-	Mushroom     Color
 	Cloud        Color
 	Door         Color
 	Window       Color
@@ -109,19 +104,31 @@ func TrueColorTerm(term string) bool {
 // ColorDepthFor picks the SGR color mode for a terminal described only
 // by its TERM (and a COLORTERM the environment carried, if any):
 // 24-bit when the terminal is known to render it (TrueColorTerm
-// families or a COLORTERM hint), otherwise the fixed xterm cube
+// families or a COLORTERM truecolor hint), otherwise the fixed xterm
 // whenever TERM advertises 256 colors — the convention every
 // -256color terminal and mosh's cell model honors — and base-16 only
 // for terminals that claim neither. Shared decision rule for the
 // native runner, the SSH host's sessions and the mosh child alike.
 func ColorDepthFor(term, colorterm string) ColorMode {
-	if colorterm != "" || TrueColorTerm(term) {
+	if trueColorHint(colorterm) || TrueColorTerm(term) {
 		return Colors24
 	}
 	if strings.Contains(term, "256") {
 		return Colors256
 	}
 	return Colors16
+}
+
+// trueColorHint reports whether a COLORTERM value advertises 24-bit
+// color. The spellings are the set terminals and launchers actually
+// write ("yes"/"true" included); any other value — e.g. "256color" —
+// is not a truecolor claim and falls through to the TERM check.
+func trueColorHint(colorterm string) bool {
+	switch strings.ToLower(colorterm) {
+	case "truecolor", "24bit", "24-bit", "yes", "true":
+		return true
+	}
+	return false
 }
 
 // NewPalette returns the game palette. colors picks the SGR encoding:
@@ -139,11 +146,7 @@ func NewPalette(mode ColorMode) *Palette {
 		QuestionBG:   color(0xFC9838, 11),
 		QuestionDim:  color(0xE08018, 3),
 		QuestionHi:   color(0xFFD9A0, 11),
-		QuestionFG:   color(0x4A1C00, 0),
 		QuestionMark: color(0xFFF8E0, 15),
-		PipeLight:    color(0x80D010, 10),
-		PipeMid:      color(0x00A800, 2),
-		PipeDark:     color(0x004400, 2),
 		Pole:         color(0x98E858, 10),
 		FlagRed:      color(0xE4221B, 9),
 		Coin:         color(0xFCD000, 11),
@@ -159,7 +162,6 @@ func NewPalette(mode ColorMode) *Palette {
 		GreenLight:   color(0x80D010, 10),
 		GreenDark:    color(0x004000, 2),
 		KoopaSkin:    color(0xF8D878, 3),
-		Mushroom:     color(0xFF9F0A, 11),
 		Cloud:        color(0xFFFFFF, 15),
 		Door:         color(0x2B1A0A, 0),
 		Window:       color(0x101820, 0),
@@ -213,21 +215,22 @@ func castleTheme(p *Palette) *Palette {
 }
 
 // themedCache memoizes themed palettes per (base palette, theme): the
-// theme used to be rebuilt — a full Palette copy — every frame. Values
-// are deterministic; a process draws with a handful of palettes.
+// theme used to be rebuilt — a full Palette copy — every frame. Keys
+// are palette contents, not pointers: NewPalette output depends only on
+// the color mode, so production holds at most three entries however
+// many sessions build palettes, while test-crafted variants stay
+// distinct.
 var themedCache sync.Map // themeKey -> *Palette
 
 type themeKey struct {
-	p     *Palette
+	p     Palette
 	theme engine.Theme
 }
 
 // paletteFor returns the palette for the current level's theme, built
-// once per (base palette, theme).
+// once per (base palette, theme). Every caller renders a game with a
+// loaded level — the viewport math dereferences g.Level regardless.
 func paletteFor(g *engine.Game, p *Palette) *Palette {
-	if g.Level == nil {
-		return p
-	}
 	var build func(*Palette) *Palette
 	switch g.Level.Theme {
 	case engine.ThemeUnderground:
@@ -239,7 +242,7 @@ func paletteFor(g *engine.Game, p *Palette) *Palette {
 	default:
 		return p
 	}
-	k := themeKey{p, g.Level.Theme}
+	k := themeKey{*p, g.Level.Theme}
 	if v, ok := themedCache.Load(k); ok {
 		return v.(*Palette)
 	}
@@ -249,12 +252,13 @@ func paletteFor(g *engine.Game, p *Palette) *Palette {
 }
 
 // runeColors maps sprite-art runes to palette swatches. Cached per
-// palette — callers must treat the map as read-only (fire/star variants
-// are separately cached, never built by mutating this one).
-var runeColorsCache sync.Map // *Palette -> map[rune]Color
+// palette contents (see themedCache for why contents, not pointers) —
+// callers must treat the map as read-only (fire/star variants are
+// separately cached, never built by mutating this one).
+var runeColorsCache sync.Map // Palette -> map[rune]Color
 
 func runeColors(p *Palette) map[rune]Color {
-	if v, ok := runeColorsCache.Load(p); ok {
+	if v, ok := runeColorsCache.Load(*p); ok {
 		return v.(map[rune]Color)
 	}
 	rc := map[rune]Color{
@@ -264,7 +268,7 @@ func runeColors(p *Palette) map[rune]Color {
 		'G': p.Green, 'E': p.GreenLight, 'g': p.GreenDark,
 		'K': p.KoopaSkin, 'n': p.Goomba,
 	}
-	runeColorsCache.Store(p, rc)
+	runeColorsCache.Store(*p, rc)
 	return rc
 }
 
@@ -336,15 +340,15 @@ func (s *Screen) TextStyled(x, y int, text string, fg, bg Color, bold bool) {
 
 // Center writes text centered on row y.
 func (s *Screen) Center(y int, text string, fg, bg Color, bold bool) {
-	x := (s.W - len([]rune(text))) / 2
+	x := (s.W - utf8.RuneCountInString(text)) / 2
 	if x < 0 {
 		x = 0
 	}
 	s.TextStyled(x, y, text, fg, bg, bold)
 }
 
-// RowString returns the runes of one row (test helper).
-func (s *Screen) RowString(y int) string {
+// rowString returns the runes of one row (test helper).
+func (s *Screen) rowString(y int) string {
 	if y < 0 || y >= s.H {
 		return ""
 	}
@@ -419,11 +423,10 @@ func colorParams(mode ColorMode, c Color, bg bool) string {
 		sgrMem.Store(sgrKey{c: c, mode: mode, bg: bg}, str)
 		return str
 	}
-	i := c.ANSI
-	if i < 0 || i > 15 {
-		i = 0
-	}
-	return basicSGR[i][b2i(bg)]
+	// Basic mode: every Color's ANSI index is 0-15 (color() assigns
+	// each swatch one; the zero Color is 0), so this is a plain table
+	// read with no clamping.
+	return basicSGR[c.ANSI][b2i(bg)]
 }
 
 // basicSGR holds every ANSI-16 SGR parameter string (fg and bg) so basic
@@ -507,7 +510,7 @@ func (st *sgrState) transition(b *strings.Builder, c Cell) {
 // sameColor reports whether two colors are indistinguishable on the wire
 // in this color mode — the comparison must match what is actually
 // emitted. Basic mode sends only the ANSI index, so same-index colors
-// (GroundMid/GroundDark both 1, PipeDark/GreenDark both 2) are the same
+// (GroundMid/GroundDark both 1, Goomba/BrickLight both 3) are the same
 // terminal color and must not re-emit SGR every frame; 256-cube mode
 // sends only the cube index; truecolor compares the full pair. The
 // terminal default is its own wire state (no SGR at all), so a default
@@ -538,7 +541,7 @@ func ansiCode(idx int, bg bool) string {
 	return fmt.Sprintf("%d", base+idx)
 }
 
-// determinstic column hash for sky decorations (no RNG state).
+// hashX is a deterministic column hash for sky decorations (no RNG state).
 func hashX(x int) uint32 {
 	h := uint32(x) * 2654435761
 	h ^= h >> 13
@@ -547,14 +550,15 @@ func hashX(x int) uint32 {
 	return h
 }
 
-// CloudAt reports a cloud anchored at world column tx: its sky row and
-// width in columns. Clouds appear roughly every 9 columns.
-func CloudAt(tx int) (row, width int, ok bool) {
+// CloudAt reports a cloud anchored at world column tx: its sky row.
+// Clouds appear roughly every 9 columns; all of them stamp the same
+// sprCloud sprite (see BushAt), so there is no width to report.
+func CloudAt(tx int) (row int, ok bool) {
 	h := hashX(tx)
 	if h%9 != 0 {
-		return 0, 0, false
+		return 0, false
 	}
-	return 4 + int(h>>8)%7, 2 + int(h>>12)%2, true
+	return 4 + int(h>>8)%7, true
 }
 
 // castleRect is the goal castle's tile footprint: anchored 3 tiles right
@@ -632,17 +636,17 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	camY := CameraY(g)
 	ox := int(math.Round(camX * Pix))
 	oy := int(math.Round(camY * Pix))
-	txOf := func(px int) int { return px - ox }
-	tyOf := func(py int) int { return py - oy }
 
 	// Title text is laid out once per frame: the cloud keep-clear bands
-	// and the title painter consume the same elements.
+	// and the title painter consume the same elements. The demo draws
+	// the same full title overlay over live play, so it needs the same
+	// bands — without them its clouds slice through the demo title.
 	var titleEls []titleText
 	title := g.State == engine.StateTitle && !g.Demo
-	if title {
+	if title || g.Demo {
 		titleEls = titleTextEls(f, g)
 	}
-	drawDecorations(f, g, p, rc, txOf, tyOf, bandsFromEls(f, titleEls))
+	drawDecorations(f, g, p, rc, ox, oy, bandsFromEls(f, titleEls))
 	if title {
 		// Title screen: clean sky, decorations and the ground strip only,
 		// so the logo and cast stay unobstructed.
@@ -651,7 +655,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 		return f
 	}
 	drawPlants(f, g, p, rc, camX, camY) // under the pipes: the pipe occludes
-	drawCastleAt(f, g, p, txOf, tyOf)
+	drawCastleAt(f, g, p, ox, oy)
 	drawMushrooms(f, g, p, rc, camX, camY)
 	drawFlowers(f, g, p, rc, camX, camY)
 	drawTilesPx(f, g, p, camX, camY, ox, oy)
@@ -661,7 +665,7 @@ func worldFrame(g *engine.Game, p *Palette) *Frame {
 	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
 	drawPlayerPx(f, g, p, rc, camX, camY)
-	drawOverlayPx(f, g, p, nil)
+	drawOverlayPx(f, g, p, titleEls)
 	return f
 }
 
@@ -747,7 +751,9 @@ func statusText(maxCols int, g *engine.Game) string {
 }
 
 // pickText returns the first candidate that fits maxCols terminal columns,
-// preferring earlier (richer) entries.
+// preferring earlier (richer) entries; "" when nothing fits (callers
+// substitute their own floor or drop the line — pickTextPx, by
+// contrast, never returns empty).
 func pickText(candidates []string, maxCols int) string {
 	for _, c := range candidates {
 		if utf8.RuneCountInString(c) <= maxCols {
@@ -792,11 +798,34 @@ type hudSeg struct {
 }
 
 // hudLadder builds every HUD content variant, richest first — the test
-// and parity surface. The hot paths use hudPick/hudPickPx, which build
-// only the variant they land on.
+// and parity surface. The hot paths use hudPick/hudPickPx, which walk
+// the same variants richest-first and stop at the first that fits.
 func hudLadder(g *engine.Game) [][]hudSeg {
 	return [][]hudSeg{hudSegs(g, 0), hudSegs(g, 1), hudSegs(g, 2), hudSegs(g, 3)}
 }
+
+// hudKey is everything a HUD variant's formatted strings depend on;
+// the memo below rebuilds a variant only when one of these changes.
+type hudKey struct {
+	score int
+	coins int
+	world string
+	time  int
+	lives int
+	cheat bool
+}
+
+// hudMemo caches one built variant per slot: the HUD renders on both
+// surfaces every frame, and without this every frame re-formats the
+// same handful of strings. The slices are shared — callers must treat
+// them as read-only.
+var (
+	hudMemoMu sync.Mutex
+	hudMemo   [4]struct {
+		key  hudKey
+		segs []hudSeg // nil until first built for this key
+	}
+)
 
 // hudSegs builds one HUD content variant: 0 richest (SCORE, COINS,
 // WORLD, TIME, LIVES, CHEATS), 1 drops WORLD, 2 drops the labels, 3 is
@@ -804,6 +833,21 @@ func hudLadder(g *engine.Game) [][]hudSeg {
 // columns) and the canvas HUD band (drawHudPx, widths in pixels) render
 // the same variants, so the two surfaces cannot drift apart.
 func hudSegs(g *engine.Game, variant int) []hudSeg {
+	k := hudKey{score: g.Score, coins: g.CoinCount, world: g.LevelName(),
+		time: g.Time, lives: g.Lives, cheat: g.Cheats}
+	hudMemoMu.Lock()
+	e := &hudMemo[variant]
+	if e.segs == nil || e.key != k {
+		e.key = k
+		e.segs = formatHudSegs(g, variant)
+	}
+	segs := e.segs
+	hudMemoMu.Unlock()
+	return segs
+}
+
+// formatHudSegs is the uncached builder behind hudSegs.
+func formatHudSegs(g *engine.Game, variant int) []hudSeg {
 	seg := func(s string, ink hudInk) hudSeg { return hudSeg{s: s, ink: ink} }
 	switch variant {
 	case 1:
@@ -886,8 +930,9 @@ func hudWidthPx(segs []hudSeg) int {
 }
 
 // hudPick returns the richest variant that fits maxCols terminal
-// columns, falling back to the bare score. It builds only the variant
-// it lands on — the HUD runs every frame.
+// columns, walking the variants richest-first and falling back to the
+// bare score. The walk formats nothing on steady frames — hudSegs
+// memoizes per game state.
 func hudPick(g *engine.Game, maxCols int) []hudSeg {
 	var last []hudSeg
 	for i := range 4 {
@@ -922,12 +967,13 @@ func drawHUD(s *Screen, g *engine.Game, p *Palette) {
 	}
 }
 
-// drawDecorations paints the sky dressing. bands are the title text's
-// keep-clear rects (nil outside the title screen) — the caller computes
-// them once per frame from the same title elements the title painter
-// stamps.
+// drawDecorations paints the sky dressing. ox, oy are the camera offset
+// in pixels — world tiles draw at tile*Pix-offset, like every other
+// world painter. bands are the title text's keep-clear rects (nil when
+// no title overlay draws) — the caller computes them once per frame
+// from the same title elements the title painter stamps.
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
-	txOf, tyOf func(int) int, bands [][4]int) {
+	ox, oy int, bands [][4]int) {
 	switch g.Level.Theme {
 	case engine.ThemeUnderground, engine.ThemeCastle:
 		return // no sky dressing underground or inside the castle
@@ -936,24 +982,24 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	// clouds but floats over open air.
 	overworld := g.Level.Theme == engine.ThemeOverworld
 	for tx := range g.Level.Width {
-		if row, _, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
-			x, y := txOf(tx*Pix), tyOf(row*Pix)
+		if row, ok := CloudAt(tx); ok && !cloudBlocked(g, tx, row) {
+			x, y := tx*Pix-ox, row*Pix-oy
 			if !cloudHitsBand(x, y, x+sprW(sprCloud), y+sprH(sprCloud), bands) {
 				f.DrawSprite(sprCloud, rc, x, y, false, 1)
 			}
 		}
 		if overworld && HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
-			f.DrawSprite(sprHill, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprHill)), false, 1)
+			f.DrawSprite(sprHill, rc, tx*Pix-ox, engine.GroundTop*Pix-oy-sprH(sprHill), false, 1)
 		}
 		if overworld && BushAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
-			f.DrawSprite(sprBush, rc, txOf(tx*Pix), tyOf(engine.GroundTop*Pix-sprH(sprBush)), false, 1)
+			f.DrawSprite(sprBush, rc, tx*Pix-ox, engine.GroundTop*Pix-oy-sprH(sprBush), false, 1)
 		}
 	}
 }
 
-func drawCastleAt(f *Frame, g *engine.Game, p *Palette, txOf, tyOf func(int) int) {
+func drawCastleAt(f *Frame, g *engine.Game, p *Palette, ox, oy int) {
 	c0, cy, _, _ := castleRect(g)
-	x, y := txOf(c0*Pix), tyOf(cy*Pix)
+	x, y := c0*Pix-ox, cy*Pix-oy
 	drawCastle(f, p, x, y)
 	drawCastleFlag(f, p, x, y-2, g.CastleFlag)
 }
@@ -1224,11 +1270,11 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 }
 
 // fireRuneColors re-skins mario art as fire mario: white cap and shirt,
-// red overalls. Cached per palette.
-var fireRuneCache sync.Map // *Palette -> map[rune]Color
+// red overalls. Cached per palette contents, like runeColorsCache.
+var fireRuneCache sync.Map // Palette -> map[rune]Color
 
 func fireRuneColors(p *Palette) map[rune]Color {
-	if v, ok := fireRuneCache.Load(p); ok {
+	if v, ok := fireRuneCache.Load(*p); ok {
 		return v.(map[rune]Color)
 	}
 	rc := map[rune]Color{}
@@ -1237,13 +1283,13 @@ func fireRuneColors(p *Palette) map[rune]Color {
 	}
 	rc['R'] = p.White
 	rc['B'] = p.FlagRed
-	fireRuneCache.Store(p, rc)
+	fireRuneCache.Store(*p, rc)
 	return rc
 }
 
 // starPhaseKey identifies one flicker phase of the star re-skin.
 type starPhaseKey struct {
-	p     *Palette
+	p     Palette
 	fire  bool
 	phase int // 1..3 (0 is the un-flickered base itself)
 }
@@ -1266,7 +1312,7 @@ func playerRuneColors(p *Palette, fire, star bool, tick int) map[rune]Color {
 	if phase == 0 {
 		return base
 	}
-	k := starPhaseKey{p, fire, phase}
+	k := starPhaseKey{*p, fire, phase}
 	if v, ok := starPhaseCache.Load(k); ok {
 		return v.(map[rune]Color)
 	}

@@ -27,6 +27,27 @@ func TestNearest256(t *testing.T) {
 	}
 }
 
+// TestNearest256GrayRamp pins the 24-step gray ramp (232-255): grays
+// must land on their nearest ramp step, near-black on the ramp's floor
+// rather than the terminal-profile black at cube 16, and only true
+// black crosses the ramp boundary into the cube.
+func TestNearest256GrayRamp(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hex  uint32
+		want int
+	}{
+		{"mid gray", 0x808080, 244},   // 232+12: the ramp holds #808080 exactly
+		{"dark gray", 0x1E1E1E, 234},  // ramp step #1C1C1C
+		{"near black", 0x0A0A0A, 232}, // ramp floor #080808
+		{"black", 0x000000, 16},       // boundary: leaves the ramp for cube black
+	} {
+		if got := nearest256(RGB(tc.hex)); got != tc.want {
+			t.Errorf("nearest256(%s #%06X) = %d, want %d", tc.name, tc.hex, got, tc.want)
+		}
+	}
+}
+
 // Every palette entry (every theme included) maps inside the fixed cube
 // 16-255: the base colors 0-15 are terminal-profile-dependent and must
 // never be picked by the 256-tier encoder.

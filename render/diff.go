@@ -15,9 +15,11 @@ const (
 	syncBegin = "\x1b[?2026h"
 	syncEnd   = "\x1b[?2026l"
 
-	// bridgeMax bounds how many clean cells Diff may re-write instead of
-	// paying for a cursor address. A clean cell costs at least one byte,
-	// so beyond this a cursor move always wins.
+	// bridgeMax bounds how many clean cells Diff may consider re-writing
+	// instead of paying for a cursor address. It is a scan bound, not an
+	// exact cost threshold: bridging can still win slightly past it by
+	// carrying style state, but long bridges bloat the frame for little
+	// gain, so the scan stops here.
 	bridgeMax = 12
 )
 
@@ -55,6 +57,7 @@ func Diff(prev, next *Screen) string {
 	}
 
 	var b strings.Builder
+	var scratch strings.Builder // emitRun's cost probes: reused, never read
 	st := sgrState{mode: next.Colors}
 	lastY, lastX := -1, 0 // cursor sits just past the last emitted run
 	dirty := false
@@ -73,7 +76,7 @@ func Diff(prev, next *Screen) string {
 				b.WriteString(syncBegin)
 				dirty = true
 			}
-			emitRun(&b, next, &st, lastY, lastX, y, run, x)
+			emitRun(&b, next, &st, lastY, lastX, y, run, x, &scratch)
 			lastY, lastX = y, x
 		}
 	}
@@ -90,7 +93,13 @@ func Diff(prev, next *Screen) string {
 // cost more than a cursor address in glyphs yet still win by carrying the
 // style state into the run. st is advanced to the state after the run in
 // every path — the terminal and the tracker must agree.
-func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from, to int) {
+//
+// Candidates are costed by serializing them into scratch — one builder
+// reused across the whole Diff, only the byte counts matter — and the
+// winner is then serialized for real into b: the same bytes, since
+// serialization is a pure function of the cells and the start state, but
+// without materializing three throwaway strings per span.
+func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from, to int, scratch *strings.Builder) {
 	var buf [16]byte
 	cursor := csiCursor(buf[:0], y+1, from+1)
 	tryBridge := false
@@ -127,18 +136,22 @@ func emitRun(b *strings.Builder, s *Screen, st *sgrState, lastY, lastX, y, from,
 	if y == lastY {
 		bridgeFrom = lastX
 	}
-	bridge, bSt := bridgeRun(s, y, bridgeFrom, from, st) // bSt: after bridge
-	bridged, bAfter := serializeRun(s, y, from, to, bSt) // bAfter: after run
-	direct, dAfter := serializeRun(s, y, from, to, *st)  // dAfter: after run
-	if len(lead)+len(bridge)+len(bridged) < len(cursor)+len(direct) {
+	scratch.Reset()
+	sim := *st
+	writeRun(scratch, s, y, bridgeFrom, from, &sim)
+	nBridge := scratch.Len()
+	writeRun(scratch, s, y, from, to, &sim)
+	nBridged := scratch.Len() - nBridge
+	directSim := *st
+	writeRun(scratch, s, y, from, to, &directSim)
+	nDirect := scratch.Len() - nBridge - nBridged
+	if len(lead)+nBridge+nBridged < len(cursor)+nDirect {
 		b.WriteString(lead)
-		b.WriteString(bridge)
-		b.WriteString(bridged)
-		*st = bAfter
+		writeRun(b, s, y, bridgeFrom, from, st)
+		writeRun(b, s, y, from, to, st)
 	} else {
 		b.WriteString(cursor)
-		b.WriteString(direct)
-		*st = dAfter
+		writeRun(b, s, y, from, to, st)
 	}
 }
 
@@ -152,24 +165,6 @@ func csiCursor(buf []byte, row, col int) string {
 	buf = strconv.AppendInt(buf, int64(col), 10)
 	buf = append(buf, 'H')
 	return string(buf)
-}
-
-// bridgeRun serializes the clean cells [from,to) on row y from a copy of
-// the style state; the cells are identical in prev and next, so writing
-// them is a visual no-op.
-func bridgeRun(s *Screen, y, from, to int, st *sgrState) (string, sgrState) {
-	sim := *st
-	var b strings.Builder
-	writeRun(&b, s, y, from, to, &sim)
-	return b.String(), sim
-}
-
-// serializeRun renders the span [from,to) on row y from a copy of st,
-// returning the bytes and the state after them.
-func serializeRun(s *Screen, y, from, to int, st sgrState) (string, sgrState) {
-	var b strings.Builder
-	writeRun(&b, s, y, from, to, &st)
-	return b.String(), st
 }
 
 // Stream renders successive game frames with differential output.

@@ -127,7 +127,7 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 				ox := int(g.CameraX * Pix)
 				oy := int(CameraY(g) * Pix)
 				for tx := range lv.Width {
-					row, _, ok := CloudAt(tx)
+					row, ok := CloudAt(tx)
 					if !ok || cloudBlocked(g, tx, row) {
 						continue
 					}
@@ -192,4 +192,88 @@ func TestLeaderHintDrawnOnTitle(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestDemoTitleCloudsNeverOverlapTitleText is the demo-mode half of the
+// cloud sweep: attract mode draws the same full title overlay over live
+// play, so its text needs the same keep-clear bands. (Regression: the
+// bands were computed only for StateTitle, so demo clouds sliced
+// straight through the logo and hint lines.)
+func TestDemoTitleCloudsNeverOverlapTitleText(t *testing.T) {
+	pal := sentinelCloudPal()
+	suppressed, drawn := 0, 0
+	for _, viewW := range []int{20, 30, 40} {
+		for _, viewH := range []int{7, 9, 12, 15} {
+			for _, lv := range engine.DefaultLevels() {
+				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH)
+				g.BeginDemo() // StatePlaying + Demo: the attract mode
+				f := worldFrame(g, pal)
+				bands := titleBands(f)
+				if len(bands) == 0 {
+					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
+				}
+				for _, b := range bands {
+					for y := b[1]; y < b[3]; y++ {
+						for x := b[0]; x < b[2]; x++ {
+							if f.At(x, y) == pal.Cloud {
+								t.Fatalf("%s %dx%d: cloud pixel at (%d,%d) inside demo title band %v",
+									lv.Name, viewW, viewH, x, y, b)
+							}
+						}
+					}
+				}
+
+				// Sweep bookkeeping, as in the title test: the filter must
+				// be live, and clouds must still draw on the demo sky.
+				ox := int(g.CameraX * Pix)
+				oy := int(CameraY(g) * Pix)
+				for tx := range lv.Width {
+					row, ok := CloudAt(tx)
+					if !ok || cloudBlocked(g, tx, row) {
+						continue
+					}
+					x0, y0 := tx*Pix-ox, row*Pix-oy
+					for _, b := range bands {
+						if x0 < b[2] && x0+sprW(sprCloud) > b[0] && y0 < b[3] && y0+sprH(sprCloud) > b[1] {
+							suppressed++
+							break
+						}
+					}
+				}
+				for y := range f.H {
+					for x := range f.W {
+						if f.At(x, y) == pal.Cloud {
+							drawn++
+						}
+					}
+				}
+			}
+		}
+	}
+	if suppressed == 0 {
+		t.Fatal("no cloud ever intersects a demo title band: sweep cannot catch regressions")
+	}
+	if drawn == 0 {
+		t.Fatal("no cloud pixels on any demo screen: clouds were over-suppressed")
+	}
+}
+
+// TestDemoDrawsLivePlayUnderTitle pins that the demo renders live-play
+// tiles under the attract overlay, not the bare title backdrop: 1-1's
+// first ? block sits inside a 40-tile viewport, and only the tile
+// painter draws its orange. Guards the worldFrame branch split — an
+// early-return title path for demos would silently replace play with
+// the backdrop.
+func TestDemoDrawsLivePlayUnderTitle(t *testing.T) {
+	g := engine.NewGame([]*engine.Level{engine.DefaultLevels()[0]}, 40, 12)
+	g.BeginDemo()
+	f := worldFrame(g, testPal) // tick 0: the ? block body is in its bright phase
+	for y := range f.H {
+		for x := range f.W {
+			if f.At(x, y) == testPal.QuestionBG {
+				return // live tile painter ran under the title overlay
+			}
+		}
+	}
+	t.Fatal("demo frame has no ? block: the title backdrop replaced live play")
 }

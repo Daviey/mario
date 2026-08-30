@@ -123,7 +123,9 @@ func drawCenterShadowPx(f *Frame, y int, s string, c Color, scale int, shadow Co
 }
 
 // pickTextPx returns the first candidate that fits maxW pixels, preferring
-// earlier (richer) entries; the last entry is used even if it overflows.
+// earlier (richer) entries. Unlike pickText it never returns empty: the
+// last entry is used even if it overflows — every px ladder's final rung
+// must draw somewhere, so there is no "" fallback to document on callers.
 func pickTextPx(candidates []string, maxW int) string {
 	for _, c := range candidates {
 		if textWidthPx(c, 1) <= maxW {
