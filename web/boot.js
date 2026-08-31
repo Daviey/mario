@@ -23,7 +23,11 @@
     pipeD:'#004400', pole:'#98E858', flag:'#E4221B', dark:'#1A0E04',
     mario:'#FF3B30', skin:'#FFC89E', overall:'#2B5DD7', white:'#FFFFFF',
   };
-  // Sprite art — render/sprites.go, verbatim.
+  // Sprite art — ported from render/sprites.go and rescaled to the
+  // loader's 4px tile grid (the Go renderer draws 6px tiles): cloud,
+  // hill and bush are those shapes redrawn at lower resolution, and
+  // Mario is the 5×5 boot-screen face (internal/art), not the in-game
+  // 7×7 sprite — the same face the favicon above draws.
   const sprMario = ['.RRR.','RRRRR','SSDSS','RBBBR','.D.D.'];
   const sprCloud = ['....WWWW....','..WWWWWWWW..','.WWWWWWWWWW.','..WWWWWWWW..'];
   const sprHill  = ['...EE...','.EGGGGE.','GGGGGGGG'];
