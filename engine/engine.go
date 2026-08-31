@@ -496,9 +496,10 @@ func (g *Game) updateFlagSlide() {
 // Castle-door geometry, in tile columns relative to the flagpole: the
 // walk-to-castle sequence ends when the player's centre reaches the door
 // column, with a force-entry column as the overshoot fallback.
-// render.castleRect (render/camera.go) draws the castle at FlagX+3, five
-// wide, so the door centre (FlagX+5) sits mid-castle — move these and
-// that footprint together.
+// render.castleRect (render/camera.go) derives its footprint FROM these
+// constants (door centre = two tiles inside the castle's left edge; the
+// castle's last column = CastleDoorPastX) — changing either const moves
+// the drawn castle with the door, no manual sync.
 const (
 	CastleDoorOffset = 5 // door centre column, relative to FlagX
 	CastleDoorPastX  = 7 // force door entry past this column, relative to FlagX

@@ -22,12 +22,17 @@ func CloudAt(tx int) (row int, ok bool) {
 	return 4 + int(h>>8)%7, true
 }
 
-// castleRect is the goal castle's tile footprint: anchored 3 tiles right
-// of the flag pole, 5 wide, on rows 9..12. Cloud avoidance and the
+// castleRect is the goal castle's tile footprint, on rows 9..12. It is
+// DERIVED from the engine's door geometry (engine.CastleDoorOffset /
+// CastleDoorPastX): the door centre sits two tiles inside the left edge
+// and the castle's last column is CastleDoorPastX, so the drawn castle
+// and the walk-in door can never drift apart. Cloud avoidance and the
 // castle painter both derive from this one geometry so they can never
-// drift apart.
+// drift apart either.
 func castleRect(g *engine.Game) (x0, y0, w, h int) {
-	return g.Level.FlagX + 3, 9, 5, 4
+	x0 = g.Level.FlagX + engine.CastleDoorOffset - 2
+	w = g.Level.FlagX + engine.CastleDoorPastX - x0 + 1
+	return x0, 9, w, 4
 }
 
 // cloudBlocked reports whether a cloud anchored at tx on sky row row would
