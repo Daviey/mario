@@ -508,6 +508,7 @@
     const seq = PRESS[e.code]
       || (e.key.length === 1 ? kittyPress(e.key) : null)
       || (e.key === 'Enter' ? '\r' : null)
+      || (e.key === 'Backspace' ? '\x7f' : null)
       || (e.key === 'Escape' ? '\x1b' : null);
     if (seq) { window.marioFeed(seq); e.preventDefault(); }
   });
