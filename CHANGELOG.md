@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.8.0 — 2026-08-31
+
+A hardening and code-health release: engine levels now enforce coin reachability everywhere, the SSH server gained a control lane and hard caps, and the giant render/server files were split into maintainable seams — plus a SECURITY.md shipped on the web build.
+
+## Highlights
+- Coin reachability is now enforced for every level — floating coins are guaranteed collectable, including jump-cut hops (new `engine/reach.go` checker).
+- The SSH game server routes teardown and window adjusts through a dedicated control lane, and mosh children are hard-capped via CAS.
+- `render.go` (1.6k lines) and `sshd/server.go` (750 lines) split into same-package seam files with zero behavior change.
+- Web build now ships a `SECURITY.md` policy page.
+
+## Added
+- `SECURITY.md` policy, served on the web build.
+- New guard tests: level-byte pinning, completability and feel beats, migration prefix linting, DB-mirrored entry clamps, replay shippability size gate.
+- `pgwire` surfaces row description names and supports a configurable app name.
+- EFI build mirrors the terminal leaderboard row format.
+- `r` restarts directly from the game-over ask screen; the submit ask re-arms every run.
+
+## Changed
+- Shared pending-column list and migration guards in the board client.
+- Input hold model extracted into `input/holds.go`.
+- Named engine tuning constants; deduped shared flow paths.
+- Release CI dedupes the asset list and cross-references the target matrix; deb/rpm Makefile rules collapsed.
+- `mario -serve` now rejects play-only flags it would ignore.
+- README leaderboard disclaimer reworded; dropped unneeded `ssh -t`.
+
+## Fixed
+- Web name entry: physical backspace now deletes a character.
+- Web service worker precache stamped from the actual dist contents; Supabase ldflags guarded so the board never silently goes offline.
+
+## Packaging
+- flake gains a `mkMario` factory with version stamping and a versioned output for tag-stamped builds.
+- Packager tools share a common flag/arg parsing preamble.
+- EFI artifact gitignore pattern scoped to the repo root.
+
+
+
 ## v0.7.1 — 2026-08-30
 
 A small maintenance release: a new per-tick replay tracing tool for diagnosing runs, and a web-deploy fix so the browser build reports its real version.
