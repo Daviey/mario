@@ -72,16 +72,24 @@ func unreachableCoins(l *Level) []Vec {
 				break
 			}
 		}
-		jumps := []int{0, 8, 16, -1} // -1: never jump
+		var scripts [][2]int // {jumpAt, cutAt}; -1: never
+		if nearCoin {
+			scripts = [][2]int{
+				{0, -1}, {8, -1}, {16, -1}, // full jumps, three run-ups
+				{-1, -1},                 // plain run (walk-offs, falls)
+				{0, 4}, {0, 8}, {16, 20}, // cut hops for coins under ceilings
+			}
+		} else {
+			scripts = [][2]int{{16, -1}, {-1, -1}} // transit: full-speed jump or run
+		}
 		runs := []bool{true, false}
 		if !nearCoin {
-			jumps = []int{16, -1}
-			runs = []bool{true}
+			runs = []bool{true} // walk precision only matters near coins
 		}
 		for _, dir := range []int{-1, 1} {
 			for _, run := range runs {
-				for _, jumpAt := range jumps {
-					script(g, s, dir, run, jumpAt, onTick)
+				for _, v := range scripts {
+					script(g, s, dir, run, v[0], v[1], onTick)
 				}
 			}
 		}
@@ -98,8 +106,11 @@ func unreachableCoins(l *Level) []Vec {
 
 // script runs one scripted try on g: a small player starts standing on
 // the surface s, holds walk or run toward dir and — from tick jumpAt —
-// holds jump for the rest of the flight. onTick observes every tick.
-func script(g *Game, s stand, dir int, run bool, jumpAt int, onTick func(*Player)) {
+// presses jump. The jump is held for the whole flight unless cutAt is
+// reached first: releasing early triggers the engine's JumpCut, the short
+// hop a player uses to grab a coin under a low overhang without bonking
+// the ceiling. Either value may be -1 (never jump / never cut).
+func script(g *Game, s stand, dir int, run bool, jumpAt, cutAt int, onTick func(*Player)) {
 	p := newPlayer(Vec{float64(s.tx) + 0.1, float64(s.ty - 1)}, PowerSmall)
 	p.Facing = dir
 	g.Player = p
@@ -114,7 +125,7 @@ func script(g *Game, s stand, dir int, run bool, jumpAt int, onTick func(*Player
 		} else {
 			in.Right = true
 		}
-		if t >= jumpAt {
+		if t >= jumpAt && (cutAt < 0 || t < cutAt) {
 			in.Up = true
 		}
 		g.updatePlayer(in)
