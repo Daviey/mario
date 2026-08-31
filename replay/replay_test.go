@@ -2,6 +2,7 @@ package replay
 
 import (
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -302,5 +303,87 @@ func TestRecorderResetForgets(t *testing.T) {
 	r.Record(engine.Input{Left: true})
 	if s := r.JSON(); s != "" {
 		t.Errorf("Record after Reset produced %q, want nothing", s)
+	}
+}
+
+// TestMaskOfCoversAllInputFields: every exported bool field of
+// engine.Input must map to its own mask bit — a field added without a
+// maskOf/inputOf pair silently records as "nothing pressed" and every
+// replay of a run using it scores wrong. Reflection finds the fields,
+// so this fails the moment an eleventh Input field appears without a
+// matching bit (maskOf would return 0 for it, or duplicate another
+// field's mask).
+func TestMaskOfCoversAllInputFields(t *testing.T) {
+	typ := reflect.TypeOf(engine.Input{})
+	seen := make(map[uint16]string)
+	fields := 0
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if f.PkgPath != "" || f.Type.Kind() != reflect.Bool {
+			continue // unexported or non-bool: not part of the wire format
+		}
+		fields++
+		var in engine.Input
+		reflect.ValueOf(&in).Elem().Field(i).SetBool(true)
+		m := maskOf(in)
+		if m == 0 {
+			t.Errorf("Input.%s has no mask bit: maskOf returned 0", f.Name)
+			continue
+		}
+		if prev, dup := seen[m]; dup {
+			t.Errorf("Input.%s and Input.%s share mask bit %b", prev, f.Name, m)
+		}
+		seen[m] = f.Name
+		if got := inputOf(m); got != in {
+			t.Errorf("inputOf(maskOf(%s)) = %+v, want %+v (wire bit drifted)", f.Name, got, in)
+		}
+	}
+	if fields == 0 {
+		t.Fatal("engine.Input has no exported bool fields; the guard rotted")
+	}
+	// Distinct nonzero masks per field, and they must all fit the uint16
+	// wire mask — bit 16 does not exist.
+	if len(seen) != fields {
+		t.Errorf("%d fields produced %d distinct masks", fields, len(seen))
+	}
+	if fields > 16 {
+		t.Errorf("%d Input fields exceed the uint16 mask (max 16 bits)", fields)
+	}
+}
+
+// TestShippableRejectsRLEExplosion: a recording under the tick cap can
+// still exceed the database's 256 KiB replay CHECK when the input
+// pattern defeats the RLE — alternating masks make every tick its own
+// run. Shippable must refuse it client-side; the same tick count with
+// compressible input stays shippable, proving the gate is the encoded
+// size, not the ticks.
+func TestShippableRejectsRLEExplosion(t *testing.T) {
+	const ticks = 50_000 // < MaxTicks: the tick cap alone would accept this
+	var boom Recorder
+	boom.Start()
+	for i := range ticks {
+		if i%2 == 0 {
+			boom.Record(engine.Input{Left: true})
+		} else {
+			boom.Record(engine.Input{})
+		}
+	}
+	if n := len(boom.JSON()); n <= ReplayMaxChars {
+		t.Fatalf("alternating %d ticks encoded to only %d chars; the explosion fixture rotted (want > %d)", ticks, n, ReplayMaxChars)
+	}
+	if boom.Shippable() {
+		t.Error("over-size recording must not be shippable")
+	}
+
+	var calm Recorder
+	calm.Start()
+	for range ticks {
+		calm.Record(engine.Input{Left: true})
+	}
+	if n := len(calm.JSON()); n > ReplayMaxChars {
+		t.Fatalf("compressible %d ticks encoded to %d chars, still over cap", ticks, n)
+	}
+	if !calm.Shippable() {
+		t.Error("same tick count with compressible input should stay shippable")
 	}
 }

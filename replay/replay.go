@@ -16,6 +16,15 @@ import (
 // playing but their recording is over-cap and cannot be submitted.
 const MaxTicks = 130_000
 
+// ReplayMaxChars caps the encoded wire format at 256 KiB, mirroring the
+// scores table's scores_replay_size CHECK (char_length(replay) <= 262144,
+// supabase/migrations/20260826000002_replay_verification.sql): a longer
+// recording would survive the client and die at the database after the
+// network round trip, so Shippable refuses it up front. MaxTicks alone
+// does not bound the size — a pathological input pattern defeats the RLE
+// (one run per tick) and blows past this cap long before the tick cap.
+const ReplayMaxChars = 262144
+
 // maskOf packs an Input into a bitmask; inputOf is its inverse.
 //
 // The bit numbers are the frozen wire format: Left..Restart occupy 0..7
@@ -135,8 +144,14 @@ func (r *Recorder) Record(in engine.Input) {
 	}
 }
 
-// Shippable reports whether the recording can back a submission.
-func (r *Recorder) Shippable() bool { return r.dirty && !r.full && r.n > 0 && r.n <= MaxTicks }
+// Shippable reports whether the recording can back a submission: armed,
+// non-empty, under the tick cap, and — the size half the tick count
+// cannot see — within the encoded-size cap the database enforces
+// (ReplayMaxChars). Oversize-but-under-ticks is exactly the RLE-explosion
+// case: every tick its own run.
+func (r *Recorder) Shippable() bool {
+	return r.dirty && !r.full && r.n > 0 && r.n <= MaxTicks && len(r.JSON()) <= ReplayMaxChars
+}
 
 // JSON encodes the wire format: {"v":1,"ticks":N,"runs":[[mask,count],...]}.
 // It returns "" when nothing was recorded (dirty=false) — callers read
