@@ -29,7 +29,9 @@ const (
 // the Handler.
 var errQueueClosed = errors.New("sshd: left the admission queue")
 
-// waiter is one queued session. pos is its 1-based place in line.
+// waiter is one queued session. pos is its 1-based place in line;
+// 0 = dequeued. It is written exactly twice — at enqueue, and by the
+// renumbering in exit/remove — never assigned directly elsewhere.
 type waiter struct {
 	sess  *Session
 	ready chan struct{}
@@ -159,6 +161,7 @@ func (a *admission) exit(dur time.Duration) {
 			x.pos = i + 1
 		}
 		a.active++ // the slot transfers; no window where it can be stolen
+		w.pos = 0  // dequeued: a racing poll must not treat it as in line
 		close(w.ready)
 	}
 }
@@ -173,6 +176,7 @@ func (a *admission) remove(w *waiter) {
 			for j, y := range a.waiters[i:] {
 				y.pos = i + j + 1
 			}
+			w.pos = 0 // dequeued: see exit
 			break
 		}
 	}

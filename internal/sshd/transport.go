@@ -50,13 +50,17 @@ const (
 var errMAC = errors.New("sshd: message authentication failed")
 
 // dirState is one direction of the packet protocol: cipher and MAC keys
-// (nil until NEWKEYS swaps them in) plus the packet sequence number,
-// which runs unbroken for the connection's lifetime — see the swap in
-// serverKex for why it is never reset.
+// (nil until NEWKEYS swaps them in) plus the packet sequence number.
 type dirState struct {
 	stream cipher.Stream // nil until NEWKEYS
 	macKey []byte        // nil until NEWKEYS
-	seq    uint32
+
+	// seq never resets: each direction's counter runs unbroken for the
+	// connection's lifetime, carrying over every NEWKEYS swap (strict
+	// kex is not negotiated — modern OpenSSH only resets on
+	// kex-strict-* agreement). Adding strict-kex support changes this
+	// field AND buildKexinit (the offer list), together.
+	seq uint32
 }
 
 // transport reads and writes SSH binary packets over conn.
@@ -350,9 +354,10 @@ func kexinitOffers(p []byte) error {
 
 // serverKex runs one key exchange. The caller has already read the peer's
 // KEXINIT payload into t.ic; t.is must be set to the payload we sent.
-// After the exchange both directions use fresh keys with reset sequence
-// numbers. Packets the peer sends between its KEXINIT and NEWKEYS (legal
-// under old keys) are returned for reprocessing.
+// After the exchange both directions use fresh keys (sequence numbers
+// run on — see dirState.seq). Packets the peer sends between its
+// KEXINIT and NEWKEYS (legal under old keys) are returned for
+// reprocessing.
 func (t *transport) serverKex(hk *hostKey) (queued [][]byte, err error) {
 	// Read the client's ECDH init. Tolerate ignore/debug noise.
 	var e []byte
@@ -427,15 +432,12 @@ func (t *transport) serverKex(hk *hostKey) (queued [][]byte, err error) {
 		return nil, err
 	}
 	keys := deriveKeys(shared, hash, t.sessionID)
-	// Each direction swaps at its own NEWKEYS, and neither sequence
-	// counter ever resets: strict-kex is not negotiated (modern OpenSSH
-	// only resets on kex-strict-* agreement), so both per-direction
-	// counters run unbroken for the connection's lifetime. Outbound:
-	// from this line our writes use the new keys, seq carried over.
-	// Inbound: the peer's packets between our NEWKEYS and its own —
-	// exactly what the loop below reads and queues — still decrypt and
-	// MAC under the OLD keys with the OLD counter; only the client's
-	// NEWKEYS swaps t.in (new keys and IV, seq again carried over).
+	// Each direction swaps at its own NEWKEYS, seq carried over (see
+	// dirState.seq). Outbound: from this line our writes use the new
+	// keys. Inbound: the peer's packets between our NEWKEYS and its
+	// own — exactly what the loop below reads and queues — still
+	// decrypt and MAC under the OLD keys; only the client's NEWKEYS
+	// swaps t.in.
 	enc, _ := aes.NewCipher(keys.encS)
 	t.out = dirState{stream: cipher.NewCTR(enc, keys.ivS), macKey: keys.macS, seq: t.out.seq}
 

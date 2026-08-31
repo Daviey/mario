@@ -10,26 +10,30 @@ import (
 )
 
 func TestDADecision(t *testing.T) {
-	for _, tc := range []struct {
+	type daCase struct {
 		da2, da3 string
 		decided  bool
 		trueClr  bool
-	}{
-		{"", "", false, false},              // silent
-		{"", "Apple_Terminal", true, false}, // macOS Terminal.app: no truecolor
-		{"", "kitty", true, true},           // DA3 names 24-bit terminals
-		{"", "wezterm", true, true},
-		{"", "6954726D", true, true},         // iTerm2 sends its name hex-encoded
-		{"", "someUnknownEmu", false, false}, // unknown family: no decision
-		{">65;58021;0", "", true, true},      // VTE (gnome-terminal)
-		{">84;0;0", "", true, true},          // tmux quantizes to outer
-		{">115;30020;0", "", true, true},     // Konsole
-		{">41;330;0", "", true, false},       // pre-2020 xterm: no truecolor
-		{">41;377;0", "", true, true},        // xterm >= patch 362
-		{">1;10;0", "Apple_Terminal", true, false},
-		{">1;10;0", "", false, false}, // Apple's DA2 alone is not in the table
-		{"garbage", "", false, false}, // malformed
-	} {
+	}
+	// Every table row is itself a case: the tables in termprobe.go are
+	// the source of truth, the assertions below cannot drift from them.
+	var cases []daCase
+	for _, f := range da3Families {
+		cases = append(cases, daCase{"", f.name, true, f.trueColor})
+	}
+	for _, f := range da2Families {
+		cases = append(cases, daCase{f.prefix + "58021;0", "", true, f.trueColor})
+	}
+	cases = append(cases,
+		daCase{"", "", false, false},               // silent
+		daCase{"", "someUnknownEmu", false, false}, // unknown family: no decision
+		daCase{">41;330;0", "", true, false},       // pre-2020 xterm: no truecolor
+		daCase{">41;377;0", "", true, true},        // xterm >= patch 362
+		daCase{">1;10;0", "Apple_Terminal", true, false},
+		daCase{">1;10;0", "", false, false}, // Apple's DA2 alone is not in the table
+		daCase{"garbage", "", false, false}, // malformed
+	)
+	for _, tc := range cases {
 		decided, trueClr := daDecision(tc.da2, tc.da3)
 		if decided != tc.decided || trueClr != tc.trueClr {
 			t.Errorf("daDecision(%q, %q) = (%v, %v), want (%v, %v)",
@@ -151,10 +155,7 @@ func TestTrueColorProbeSession(t *testing.T) {
 				<-s.Done()
 			})
 			tclient := dial(t, srv.Addr)
-			tclient.authNone()
-			tclient.openSession(1<<20, 32768)
-			tclient.ptyReq(80, 24) // consumes the query
-			tclient.shell()
+			tclient.playPrologue() // pty consumes the query
 			// The handler is now blocked in TrueColor waiting for the
 			// probe; the player types around the reply, and both the
 			// keystrokes and the decision must survive.
@@ -198,10 +199,7 @@ func TestTrueColorProbeSilentFallsBackToTerm(t *testing.T) {
 		<-s.Done()
 	}, func(s *Server) { s.ProbeWait = 20 * time.Millisecond })
 	tclient := dial(t, srv.Addr)
-	tclient.authNone()
-	tclient.openSession(1<<20, 32768)
-	tclient.ptyReq(80, 24) // TERM=xterm-256color: ambiguous, needs the probe
-	tclient.shell()
+	tclient.playPrologue() // TERM=xterm-256color: ambiguous, needs the probe
 	start := time.Now()
 	select {
 	case got := <-trueColor:

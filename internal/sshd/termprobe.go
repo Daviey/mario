@@ -205,36 +205,62 @@ func (p *termProbe) drain() []byte {
 	return out
 }
 
-// daDecision maps observed DA2/DA3 replies to 24-bit color support.
+// da3Families maps a terminal's DA3 name (DCS ! | name ST — substring
+// match, terminals append versions) to its 24-bit color support.
 // Only families with well-known replies appear; anything else leaves
-// the decision to the TERM rules. Entries:
-//   - DA3 is the terminal's own name (DCS ! | name ST): Apple_Terminal
-//     has no truecolor support (as of 2026 it still discards 38;2);
-//     kitty/wezterm/ghostty/contour/foot are 24-bit.
-//   - DA2 ">65;" is VTE (gnome-terminal & friends): 24-bit.
-//   - DA2 ">84;" is tmux: it quantizes 24-bit to its outer terminal,
-//     so claiming truecolor is safe either way.
-//   - DA2 ">115;" is Konsole: 24-bit.
-//   - DA2 ">41;<patch>;" is xterm: truecolor landed in patch 362
-//     (2020); the patch level is the second field.
+// the decision to the TERM rules. Apple_Terminal has no truecolor
+// support (as of 2026 it still discards 38;2). "6954726D" is iTerm2:
+// it encodes its name in hex instead of sending it literally ("iTrm",
+// VT100Output.m reportTertiaryDeviceAttribute).
+var da3Families = []struct {
+	name      string
+	trueColor bool
+}{
+	{"Apple_Terminal", false},
+	{"kitty", true},
+	{"wezterm", true},
+	{"ghostty", true},
+	{"contour", true},
+	{"foot", true},
+	{"6954726D", true}, // iTerm2, hex-encoded
+}
+
+// da2Families maps a DA2 attribute prefix to 24-bit color support:
+// ">65;" is VTE (gnome-terminal & friends), ">84;" is tmux (it
+// quantizes 24-bit to its outer terminal, so claiming truecolor is
+// safe either way), ">115;" is Konsole. xterm (">41;<patch>;") is not
+// here: its verdict depends on the patch level — see daDecision.
+var da2Families = []struct {
+	prefix    string
+	trueColor bool
+}{
+	{">65;", true},  // VTE
+	{">84;", true},  // tmux
+	{">115;", true}, // Konsole
+}
+
+// xtermPatchTruecolor is the xterm patch level where truecolor landed
+// (2020): DA2 ">41;<patch>;" carries the patch level in its second
+// field, and only patches at or above this render 38;2.
+const xtermPatchTruecolor = 362
+
+// daDecision consults the tables above: DA3 names first, then DA2
+// family prefixes, then the xterm patch gate. (decided, _) is false
+// when no table row matches — the TERM rules decide instead.
 func daDecision(da2, da3 string) (decided, trueColor bool) {
-	if strings.Contains(da3, "Apple_Terminal") {
-		return true, false
-	}
-	// iTerm2 encodes its name in hex instead of sending it literally:
-	// DA3 "6954726D" is "iTrm" (VT100Output.m reportTertiaryDeviceAttribute).
-	for _, n := range []string{"kitty", "wezterm", "ghostty", "contour", "foot", "6954726D"} {
-		if strings.Contains(da3, n) {
-			return true, true
+	for _, f := range da3Families {
+		if strings.Contains(da3, f.name) {
+			return true, f.trueColor
 		}
 	}
-	switch {
-	case strings.HasPrefix(da2, ">65;"), strings.HasPrefix(da2, ">84;"), strings.HasPrefix(da2, ">115;"):
-		return true, true
-	case strings.HasPrefix(da2, ">41;"):
-		fields := strings.Split(strings.TrimPrefix(da2, ">41;"), ";")
-		if patch, err := strconv.Atoi(fields[0]); err == nil {
-			return true, patch >= 362
+	for _, f := range da2Families {
+		if strings.HasPrefix(da2, f.prefix) {
+			return true, f.trueColor
+		}
+	}
+	if rest, ok := strings.CutPrefix(da2, ">41;"); ok {
+		if patch, err := strconv.Atoi(strings.Split(rest, ";")[0]); err == nil {
+			return true, patch >= xtermPatchTruecolor
 		}
 	}
 	return false, false
