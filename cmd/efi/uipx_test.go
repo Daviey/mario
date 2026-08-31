@@ -59,7 +59,7 @@ func TestBoardRendersRowsAndClamps(t *testing.T) {
 	pal := render.NewPalette(render.Colors24)
 	var rows []render.ScoreRow
 	for i := range 30 {
-		rows = append(rows, render.ScoreRow{Name: "DAVE", Score: i})
+		rows = append(rows, render.ScoreRow{Rank: i + 1, Name: "DAVE", Score: i})
 	}
 	ui := &render.ScoreUI{Mode: render.UIBoard, Status: "OFFLINE", Title: true, Rows: rows}
 
