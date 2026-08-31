@@ -21,7 +21,7 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, titleEls []titleText) {
 	case g.State == engine.StateWorldCard:
 		drawWorldCard(f, g, p)
 	case g.State == engine.StateTitle, g.Demo:
-		drawTitlePx(f, g, p, true, titleEls)
+		drawTitlePx(f, g, p, titleEls)
 	case g.State == engine.StateGameOver:
 		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
 		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
@@ -31,30 +31,27 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, titleEls []titleText) {
 	}
 }
 
-// drawTitlePx draws the title screen: mario vs goomba cast on the ground,
-// and in full mode the logo, subtitle, "press any key" blink and the
-// leaderboard hint above/below the cast. With full=false only the cast is
-// drawn — the leaderboard board takes the rest of the screen.
-func drawTitlePx(f *Frame, g *engine.Game, p *Palette, full bool, els []titleText) {
+// drawTitlePx draws the title screen: the logo, subtitle, "press any
+// key" blink and leaderboard hint stacked above the mario-vs-goomba
+// cast on the ground.
+func drawTitlePx(f *Frame, g *engine.Game, p *Palette, els []titleText) {
 	rc2 := runeColors(p)
 	// Bottom-anchored cascade: the cast stands ON the ground line and
 	// every text element stacks above it, so no viewport height can
 	// overlap or bury anything. Ground occupies the last 2 tile rows.
 	castY := titleCastY(f) // mario sprite top; feet on the last sky row
-	if full {
-		if els == nil {
-			els = titleTextEls(f, g)
+	if els == nil {
+		els = titleTextEls(f, g)
+	}
+	for _, e := range els {
+		if e.blink && g.Tick%40 >= 28 {
+			continue
 		}
-		for _, e := range els {
-			if e.blink && g.Tick%40 >= 28 {
-				continue
-			}
-			if e.shadow { // only the ground-level lines need it; over sky the
-				// shadow fills the letters' counters and wrecks legibility
-				drawCenterShadowPx(f, e.y, e.s, e.ink.color(p), e.scale, p.Dark)
-			} else {
-				drawCenterPx(f, e.y, e.s, e.ink.color(p), e.scale)
-			}
+		if e.shadow { // only the ground-level lines need it; over sky the
+			// shadow fills the letters' counters and wrecks legibility
+			drawCenterShadowPx(f, e.y, e.s, e.ink.color(p), e.scale, p.Dark)
+		} else {
+			drawCenterPx(f, e.y, e.s, e.ink.color(p), e.scale)
 		}
 	}
 	// Mario and the goomba flank the centre, facing each other.

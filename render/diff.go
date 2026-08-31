@@ -8,8 +8,6 @@ import (
 )
 
 // Stream renders successive game frames with differential output.
-// Reset forces the next Draw to emit a full repaint (used when the
-// terminal has been cleared or refitted out from under us).
 type Stream struct {
 	out  io.Writer
 	pal  *Palette
@@ -26,12 +24,6 @@ type Stream struct {
 
 // NewStream wraps a writer; frames are drawn with the given palette.
 func NewStream(out io.Writer, pal *Palette) *Stream { return &Stream{out: out, pal: pal} }
-
-// Reset drops the diff baseline.
-func (s *Stream) Reset() {
-	s.putScreen(s.prev)
-	s.prev = nil
-}
 
 // Snapshot renders one frame to a Screen without writing anything — for
 // callers that hand the frame to another goroutine (Flush). Rendering

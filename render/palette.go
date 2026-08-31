@@ -253,7 +253,6 @@ func runeColors(p *Palette) map[rune]Color {
 	rc := map[rune]Color{
 		'R': p.Player, 'S': p.Skin, 'D': p.Dark, 'B': p.Overall,
 		'W': p.White, 'C': p.Cloud, 'Y': p.Coin, 'L': p.GoldLight,
-		'O': p.GroundMid, 'o': p.GroundLight,
 		'G': p.Green, 'E': p.GreenLight, 'g': p.GreenDark,
 		'K': p.KoopaSkin, 'n': p.Goomba,
 	}
