@@ -117,6 +117,81 @@ func TestMoshHandshakeSpawnsAndSurvivesTeardown(t *testing.T) {
 	}
 }
 
+// moshExec sends one mosh-shaped exec request on tc.
+func moshExec(tc *testClient, cmdline string) {
+	w := &buf{}
+	w.u8(msgChannelRequest)
+	w.u32(0)
+	w.cstr("exec")
+	w.boolean(true)
+	w.cstr(cmdline)
+	tc.send(w.b)
+}
+
+// The MoshMax cap is a hard limit: with one slot, the second child's
+// handshake is refused outright (CHANNEL_FAILURE, before the exec
+// request is ever answered positively) while the first keeps running.
+func TestMoshMaxRefusesSecondChild(t *testing.T) {
+	bin, pidfile := stubMoshServer(t)
+	srv := startServer(t, echoHandler, func(s *Server) {
+		s.MoshBin = bin
+		s.MoshPortRange = "60000:60100"
+		s.MoshMax = 1
+	})
+
+	// The slot counter is package-global: earlier tests' stubs release
+	// asynchronously (reaped at kill), so wait the fleet out first.
+	deadline := time.Now().Add(5 * time.Second)
+	for RunningMosh() > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// First connection: the handshake succeeds and spawns the stub.
+	a := dial(t, srv.Addr)
+	a.authNone()
+	a.openSession(1<<20, 32768)
+	a.ptyReq(80, 24)
+	moshExec(a, "mosh-server new -c -l whoever -p 12345")
+	a.expect(msgChannelSuccess)
+	got := ""
+	readDeadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(got, "MOSH CONNECT 60000") {
+		if time.Now().After(readDeadline) {
+			t.Fatalf("no MOSH CONNECT line, got %q", got)
+		}
+		got += string(a.readData())
+	}
+	pidB, err := os.ReadFile(pidfile)
+	for err != nil && time.Now().Before(readDeadline) {
+		// The stub writes its pid just after the CONNECT line: the
+		// channel can beat the file by a beat.
+		time.Sleep(10 * time.Millisecond)
+		pidB, err = os.ReadFile(pidfile)
+	}
+	if err != nil {
+		t.Fatalf("stub never wrote its pid: %v", err)
+	}
+	pid := 0
+	fmt.Sscanf(strings.TrimSpace(string(pidB)), "%d", &pid)
+	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+
+	// Second connection, second handshake: refused at the cap. The
+	// refusal rides the reply lane, so it is observable even while the
+	// first connection holds its slot.
+	b := dial(t, srv.Addr)
+	b.authNone()
+	b.openSession(1<<20, 32768)
+	b.ptyReq(80, 24)
+	moshExec(b, "mosh-server new -c -l whoever -p 12345")
+	b.expect(msgChannelFailure)
+
+	// And a retry once the slot frees would work again — but here just
+	// pin the accounting: one child live, no leaked claims.
+	if n := RunningMosh(); n != 1 {
+		t.Fatalf("RunningMosh() = %d, want exactly 1 (cap 1, one live child)", n)
+	}
+}
+
 func TestMoshDisabledRefusesHandshake(t *testing.T) {
 	// No MoshBin configured: even a perfectly shaped handshake is
 	// refused exactly like any other exec.

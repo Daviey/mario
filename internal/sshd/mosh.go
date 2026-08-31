@@ -1,7 +1,6 @@
 package sshd
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -24,14 +23,46 @@ import (
 // ours. There is no shell behind this path — same rule as the rest of
 // the server.
 
-// moshMax caps concurrently running mosh servers. The SSH MaxSessions
-// cap cannot cover them: a mosh server outlives its SSH connection.
-const moshMax = 16
+// defaultMoshMax is the fallback for Server.MoshMax: the cap on
+// concurrently running mosh servers. Two-tier accounting by design:
+// the admission queue caps SHELL sessions at MaxSessions, but a mosh
+// child outlives the SSH connection that spawned it, so it holds a
+// slot in neither — it gets its own hard cap (MoshMax) instead.
+const defaultMoshMax = 16
 
+// moshRunning counts live mosh children. Acquisition is CAS-style
+// (acquireMoshSlot) before the spawn, release on spawn failure or
+// child exit, so the cap holds exactly even under bursts.
 var moshRunning atomic.Int32
 
 // RunningMosh reports the number of live mosh servers.
 func RunningMosh() int { return int(moshRunning.Load()) }
+
+// acquireMoshSlot atomically claims one of the MoshMax child slots:
+// compare-and-swap, not check-then-increment, so a burst of concurrent
+// handshakes cannot all observe the same headroom and oversubscribe
+// the cap. The claim happens BEFORE the exec request is answered, so
+// a refused client sees a CHANNEL_FAILURE instead of a silent yes.
+func (s *Server) acquireMoshSlot() bool {
+	for {
+		old := moshRunning.Load()
+		if old >= int32(s.moshMax()) {
+			return false
+		}
+		if moshRunning.CompareAndSwap(old, old+1) {
+			return true
+		}
+	}
+}
+
+// moshMax is the resolved child cap for this server (default
+// defaultMoshMax; see Server.MoshMax).
+func (s *Server) moshMax() int {
+	if s.MoshMax > 0 {
+		return s.MoshMax
+	}
+	return defaultMoshMax
+}
 
 // moshRequest is the sanitized form of a client's exec request.
 type moshRequest struct {
@@ -78,7 +109,9 @@ func splitQuoted(s string) []string {
 // Only "mosh-server new" with known-safe flags passes; everything else
 // (shells, other binaries, unknown flags) is rejected. Values of known
 // flags are ignored, not trusted: the spawn below always uses this
-// game binary, this port range and our own login name.
+// game binary, this port range and our own login name. No field of
+// the request may ever be echoed into the spawn argv — the safety of
+// this path lives in startMosh's rebuild from constants.
 func parseMoshArgv(cmdline string) (*moshRequest, bool) {
 	fields := splitQuoted(cmdline)
 	if len(fields) < 2 || fields[0] != "mosh-server" || fields[1] != "new" {
@@ -119,14 +152,17 @@ func (s *Server) moshPorts() string {
 // startMosh spawns the real mosh-server for one client and relays its
 // output to the SSH channel. The child is deliberately NOT killed when
 // the SSH side ends — mosh-server outlives the connection by design.
-func (s *Server) startMosh(c *conn, req *moshRequest) error {
-	// Soft cap: the check races the Add(1) after the spawn (there is no
-	// compare-and-increment here), so a burst of concurrent handshakes
-	// can each pass before any child registers — the count settles
-	// back as they exit. Overload protection, not a hard limit.
-	if moshRunning.Load() >= moshMax {
-		return fmt.Errorf("sshd: too many mosh sessions")
-	}
+//
+// The MoshMax slot has already been claimed by the caller
+// (acquireMoshSlot, before the exec request was answered): every error
+// path here releases it again, and the reaper below releases it when
+// the spawned parent exits — the count never drifts.
+func (s *Server) startMosh(c *conn, req *moshRequest) (err error) {
+	defer func() {
+		if err != nil {
+			moshRunning.Add(-1) // rollback the caller's claim
+		}
+	}()
 	game, err := os.Executable()
 	if err != nil {
 		return err
@@ -170,7 +206,6 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	moshRunning.Add(1)
 	pid := cmd.Process.Pid
 
 	// Relay mosh-server output to the client. Once the client has the
@@ -208,11 +243,16 @@ func (s *Server) startMosh(c *conn, req *moshRequest) error {
 		// exits, but the relays may not have pumped it to the wire
 		// yet — and the forked child holds the pipes open, so there
 		// is no EOF to wait for. Give them a beat to drain.
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(moshConnectDrain)
 		c.ch.shutdown()
 	}()
 	return nil
 }
+
+// moshConnectDrain is the beat the reaper gives the output relays to
+// pump the CONNECT line to the wire before the channel teardown (the
+// forked child holds the pipes open, so there is no EOF to wait for).
+const moshConnectDrain = 100 * time.Millisecond
 
 // moshEnv builds the environment handed to mosh-server. Inherited
 // TERM/COLORTERM/locale entries are stripped first: mosh-server

@@ -81,6 +81,14 @@ type Server struct {
 	// host firewall — mosh's data path is pure UDP.
 	MoshPortRange string
 
+	// MoshMax caps concurrently running mosh servers (default 16).
+	// Separate from MaxSessions on purpose: the admission queue caps
+	// shell sessions, but a mosh child outlives its SSH connection, so
+	// it holds no session slot — without its own cap a reconnect loop
+	// could stack unbounded children. Tests shrink it to probe the
+	// boundary.
+	MoshMax int
+
 	hk  *hostKey
 	adm *admission
 }
@@ -141,6 +149,9 @@ func (s *Server) init() error {
 	}
 	if s.MaxQueue == 0 {
 		s.MaxQueue = defaultMaxQueue
+	}
+	if s.MoshMax <= 0 {
+		s.MoshMax = defaultMoshMax
 	}
 	if s.Log == nil {
 		s.Log = log.New(log.Writer(), "ssh: ", log.LstdFlags|log.Lmsgprefix)
@@ -297,6 +308,11 @@ func (s *Server) serveConn(nc net.Conn) {
 		// channel (idempotent) and wait for the handler to drain out.
 		c.ch.shutdown()
 		<-c.ch.done
+		// The teardown burst rides the control lane; give the pump a
+		// bounded beat to put it on the wire before the deferred conn
+		// close takes the socket away (the handler-initiated path has
+		// the FIN grace for this; the reader-initiated one ends here).
+		c.drainControl(finGrace)
 	}
 }
 
@@ -337,7 +353,8 @@ func (c *conn) rekey(clientKexinit []byte) error {
 	return err
 }
 
-// nextPacket pulls buffered rekey-overflow packets first.
+// nextPacket pulls buffered rekey-overflow packets first: the queued
+// overflow replays before any fresh read once the new keys are in.
 func (c *conn) nextPacket() ([]byte, error) {
 	if len(c.queue) > 0 {
 		p := c.queue[0]
@@ -381,6 +398,9 @@ func (c *conn) loop() error {
 			w := &buf{}
 			w.u8(msgServiceAccept)
 			w.cstr(svc)
+			// Direct write, reader goroutine: the wire is quiet
+			// pre-session and the control pump is idle — nothing to
+			// protect yet.
 			if err := c.t.writePacket(w.b); err != nil {
 				return err
 			}
@@ -398,6 +418,8 @@ func (c *conn) loop() error {
 					authed = true
 					c.sendBanner()
 				}
+				// Direct write, reader goroutine: pre-session, wire
+				// quiet, pump idle (as above).
 				if err := c.t.writePacket([]byte{msgUserauthSuccess}); err != nil {
 					return err
 				}
@@ -421,6 +443,8 @@ func (c *conn) loop() error {
 				w.u8(msgUserauthFailure)
 				w.cstr("none")
 				w.boolean(false)
+				// Direct write, reader goroutine: pre-session, wire
+				// quiet, pump idle (as above).
 				if err := c.t.writePacket(w.b); err != nil {
 					return err
 				}
@@ -456,46 +480,8 @@ func (c *conn) loop() error {
 			r := &reader{b: p[1:]}
 			_ = r.u32()
 			data := r.str()
-			rawLen := len(data)
 			if c.ch != nil && r.ok() {
-				// Input is the real-time path: bytes reach the game the
-				// moment they are read, before any protocol bookkeeping.
-				// Nothing here may wait on a socket write — see the
-				// control-lane notes on conn.
-				c.ch.mu.Lock()
-				feed := c.ch.feed
-				probe := c.ch.probe
-				c.ch.mu.Unlock()
-				if probe != nil {
-					// The color-depth probe (termprobe.go) buffers bytes
-					// until the session installs its feed, then strips
-					// any late DA2/DA3 replies from passing input.
-					rest, buffered := probe.offer(data)
-					if buffered {
-						data = nil
-					} else {
-						data = rest
-					}
-				}
-				if feed != nil && len(data) > 0 {
-					feed(data)
-				}
-				// Then replenish the receive window we advertised at
-				// channel open, off this goroutine: every consumed byte
-				// (probe-buffered and stripped ones included — the client
-				// spent window on them all) is owed back. Adjusts
-				// coalesce and ride the control pump once they reach
-				// half the window; without them a window-tracking client
-				// (ssh is) goes input-silent after 2MB of cumulative
-				// input — an hour of held keys, or a few big pastes.
-				// The signal carries the channel pointer so the pump
-				// never reads c.ch itself.
-				if rawLen > 0 && c.ch.addOwed(rawLen) {
-					select {
-					case c.adjustSig <- c.ch:
-					default:
-					}
-				}
+				c.deliverInput(data)
 			}
 		case msgChannelRequest:
 			if err := c.channelRequest(p); err != nil {
@@ -516,9 +502,49 @@ func (c *conn) loop() error {
 	}
 }
 
+// deliverInput is the real-time path: bytes reach the game the moment
+// they are read, before any protocol bookkeeping. Nothing here may
+// wait on a socket write — see the control-lane notes in control.go.
+func (c *conn) deliverInput(data []byte) {
+	rawLen := len(data)
+	c.ch.mu.Lock()
+	feed := c.ch.feed
+	probe := c.ch.probe
+	c.ch.mu.Unlock()
+	if probe != nil {
+		// The color-depth probe (termprobe.go) buffers bytes until the
+		// session installs its feed, then strips any late DA2/DA3
+		// replies from passing input.
+		rest, buffered := probe.offer(data)
+		if buffered {
+			data = nil
+		} else {
+			data = rest
+		}
+	}
+	if feed != nil && len(data) > 0 {
+		feed(data)
+	}
+	// Then replenish the receive window we advertised at channel open,
+	// off this goroutine: every consumed byte (probe-buffered and
+	// stripped ones included — the client spent window on them all) is
+	// owed back. Adjusts coalesce and ride the control pump once they
+	// reach half the window; without them a window-tracking client
+	// (ssh is) goes input-silent after 2MB of cumulative input — an
+	// hour of held keys, or a few big pastes. The signal carries the
+	// channel pointer so the pump never reads c.ch itself.
+	if rawLen > 0 && c.ch.addOwed(rawLen) {
+		select {
+		case c.adjustSig <- c.ch:
+		default:
+		}
+	}
+}
+
 // sendBanner writes the flavor-text banner after auth. The write error
 // is swallowed on purpose: losing the banner is purely cosmetic, and
-// the auth SUCCESS that follows carries the real result.
+// the auth SUCCESS that follows carries the real result. Direct write,
+// reader goroutine: pre-session, wire quiet, pump idle.
 func (c *conn) sendBanner() {
 	w := &buf{}
 	w.u8(msgUserauthBanner)
@@ -557,6 +583,7 @@ func (c *conn) openChannel(p []byte) error {
 		t:      c.t,
 		srv:    c.srv,
 		conn:   c.t.conn,
+		lane:   c,
 		window: int(window),
 		maxPkt: int(maxPkt),
 		cols:   80,
@@ -572,6 +599,9 @@ func (c *conn) openChannel(p []byte) error {
 	// the session's (queue timeout, client close, transport error).
 	c.t.conn.SetReadDeadline(time.Time{})
 
+	// Direct write, reader goroutine: this is the last packet written
+	// before the session may start producing frames — the wire is
+	// still quiet and the pump idle.
 	w.u8(msgChannelOpenConf)
 	w.u32(peerID)
 	w.u32(0)             // our channel id
@@ -597,14 +627,19 @@ func (c *conn) dropIdle() error {
 	return errors.New("idle connection dropped: no session channel before PostAuthWait")
 }
 
+// env request bounds: the 65th variable (or an oversized name/value)
+// is refused outright rather than silently accepted-and-dropped.
+const (
+	maxEnvVars = 64
+	maxEnvName = 256
+	maxEnvVal  = 1024
+)
+
 func (c *conn) channelRequest(p []byte) error {
 	r := &reader{b: p[1:]}
 	_ = r.u32() // recipient channel
 	kind := string(r.str())
 	wantReply := r.boolean()
-	if !r.ok() || c.ch == nil {
-		return nil
-	}
 	reply := func(ok bool) {
 		if !wantReply {
 			return
@@ -619,6 +654,13 @@ func (c *conn) channelRequest(p []byte) error {
 		// Replies ride the control pump: writing here would put the
 		// reader behind a frame chunk stuck on a full kernel buffer.
 		c.writeControl(w.b)
+	}
+	if !r.ok() || c.ch == nil {
+		// Malformed payload, or a request for a channel that does not
+		// exist: fail it, never silence it — ssh(1) waits forever on a
+		// want-reply request that gets no answer.
+		reply(false)
+		return nil
 	}
 	switch kind {
 	case "pty-req":
@@ -647,11 +689,26 @@ func (c *conn) channelRequest(p []byte) error {
 	case "env":
 		name := string(r.str())
 		val := string(r.str())
+		if !r.ok() {
+			// Truncated payload: refuse rather than store a
+			// half-parsed variable and report success.
+			reply(false)
+			return nil
+		}
 		c.ch.mu.Lock()
-		if len(c.ch.env) < 64 && len(name) <= 256 && len(val) <= 1024 {
+		ok := len(c.ch.env) < maxEnvVars && len(name) <= maxEnvName && len(val) <= maxEnvVal
+		if ok {
 			c.ch.env[name] = val
 		}
 		c.ch.mu.Unlock()
+		if !ok {
+			// The cap is a real refusal, not a silent drop: the client
+			// learns its variable did not land.
+			c.srv.Log.Printf("session %s: env request %q refused (cap %d vars, %d/%d byte limits)",
+				c.t.conn.RemoteAddr(), name, maxEnvVars, maxEnvName, maxEnvVal)
+			reply(false)
+			return nil
+		}
 		reply(true)
 		return nil
 	case "window-change":
@@ -682,104 +739,123 @@ func (c *conn) channelRequest(p []byte) error {
 		}
 		return nil
 	case "shell":
-		c.ch.mu.Lock()
-		start := !c.ch.shelled
-		c.ch.shelled = true
-		c.ch.mu.Unlock()
-		if !start {
-			reply(false)
-			return nil
-		}
-		reply(true)
-		// Pin the queued success ahead of the handler's first output
-		// (the probe query below): the sync waits on the pump, never on
-		// the socket, and the wire is quiet this early.
-		c.syncControl()
-		// Ask the client's terminal to identify itself (DA2+DA3); the
-		// replies set the session's color depth (termprobe.go). Shell
-		// sessions only: the mosh wrapper runs its ssh with -n (stdin
-		// from /dev/null), so a reply can never come back through a
-		// handshake — don't send the query or pay the wait there.
-		// Queries draw nothing on screen. The field write is locked to
-		// match every other access (the data loop on this same goroutine
-		// is sequential with it, and the handler goroutines only spawn
-		// after — but don't leave an unlocked accessor behind).
-		c.ch.mu.Lock()
-		needProbe := c.ch.probe == nil && c.ch.term != ""
-		if needProbe {
-			c.ch.probe = newTermProbe(c.ch.wait)
-		}
-		c.ch.mu.Unlock()
-		sess := &Session{ch: c.ch}
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					c.srv.Log.Printf("handler panic: %v", r)
-					c.ch.shutdown()
-				}
-			}()
-			// The query write rides the session channel from this
-			// goroutine, off the conn reader (which must never wait on
-			// a socket write once frames may be flowing); ch.write can
-			// block on the channel window and takes ch.mu itself.
-			if needProbe {
-				if _, err := c.ch.write([]byte(termQuery)); err != nil {
-					c.ch.shutdown()
-					return
-				}
-			}
-			admitted, err := c.srv.adm.enter(sess, c.srv.MaxSessions, c.srv.MaxQueue, c.srv.QueueTimeout, nil)
-			if err != nil {
-				// Refused, gave up or disconnected while waiting.
-				c.ch.shutdown()
-				return
-			}
-			c.srv.Handler(sess)
-			c.srv.adm.exit(time.Since(admitted))
-			c.ch.shutdown()
-		}()
-		return nil
+		return c.startShellSession(reply)
 	case "signal":
 		reply(true)
 		return nil
 	case "exec":
-		// The one exec the server ever runs: the mosh handshake.
-		// "mosh-server new ..." is strictly validated and rebuilt with
-		// our own command and port range; anything else is refused
-		// exactly like before. Every attempt is logged — this is the
-		// one place a client can ask this server to run something.
-		cmdline := string(r.str())
-		c.srv.Log.Printf("exec request: %q", cmdline)
-		if c.srv.MoshBin != "" {
-			if req, ok := parseMoshArgv(cmdline); ok {
-				c.ch.mu.Lock()
-				started := c.ch.execStarted
-				c.ch.execStarted = true
-				c.ch.mu.Unlock()
-				if started {
-					reply(false)
-					return nil
-				}
-				reply(true)
-				// Same ordering pin as shell: the CONNECT line
-				// startMosh writes must follow the exec success.
-				c.syncControl()
-				// Off the conn goroutine: startMosh waits for the
-				// color probe's reply, and this loop is what delivers
-				// inbound CHANNEL_DATA to the probe.
-				go func() {
-					if err := c.srv.startMosh(c, req); err != nil {
-						c.srv.Log.Printf("mosh: %v", err)
-					}
-				}()
-				return nil
-			}
-		}
-		reply(false)
-		return nil
+		return c.startMoshSession(reply, string(r.str()))
 	default:
 		// subsystem, x11, agent…: nothing here but the game.
 		reply(false)
 	}
+	return nil
+}
+
+// startShellSession serves the "shell" request: one game per channel.
+// The success reply is pinned ahead of the handler's first output —
+// syncControl waits on the pump, never on the socket, and the wire is
+// quiet this early (its twin call sits in startMoshSession).
+func (c *conn) startShellSession(reply func(bool)) error {
+	c.ch.mu.Lock()
+	start := !c.ch.shelled
+	c.ch.shelled = true
+	c.ch.mu.Unlock()
+	if !start {
+		reply(false)
+		return nil
+	}
+	reply(true)
+	c.syncControl()
+	// Ask the client's terminal to identify itself (DA2+DA3); the
+	// replies set the session's color depth (termprobe.go). Shell
+	// sessions only: the mosh wrapper runs its ssh with -n (stdin
+	// from /dev/null), so a reply can never come back through a
+	// handshake — don't send the query or pay the wait there.
+	// Queries draw nothing on screen. The field write is locked to
+	// match every other access (the data loop on this same goroutine
+	// is sequential with it, and the handler goroutines only spawn
+	// after — but don't leave an unlocked accessor behind).
+	c.ch.mu.Lock()
+	needProbe := c.ch.probe == nil && c.ch.term != ""
+	if needProbe {
+		c.ch.probe = newTermProbe(c.ch.wait)
+	}
+	c.ch.mu.Unlock()
+	sess := &Session{ch: c.ch}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.srv.Log.Printf("handler panic: %v", r)
+				c.ch.shutdown()
+			}
+		}()
+		// The query write rides the session channel from this
+		// goroutine, off the conn reader (which must never wait on
+		// a socket write once frames may be flowing); ch.write can
+		// block on the channel window and takes ch.mu itself.
+		if needProbe {
+			if _, err := c.ch.write([]byte(termQuery)); err != nil {
+				c.ch.shutdown()
+				return
+			}
+		}
+		admitted, err := c.srv.adm.enter(sess, c.srv.MaxSessions, c.srv.MaxQueue, c.srv.QueueTimeout, nil)
+		if err != nil {
+			// Refused, gave up or disconnected while waiting.
+			c.ch.shutdown()
+			return
+		}
+		c.srv.Handler(sess)
+		c.srv.adm.exit(time.Since(admitted))
+		c.ch.shutdown()
+	}()
+	return nil
+}
+
+// startMoshSession serves the "exec" request — the one exec the server
+// ever runs: the mosh handshake. "mosh-server new ..." is strictly
+// validated and rebuilt with our own command and port range; anything
+// else is refused. Every attempt is logged — this is the one place a
+// client can ask this server to run something. The MoshMax child slot
+// is claimed BEFORE the request is answered, so a refused client sees
+// a CHANNEL_FAILURE instead of a silent yes.
+func (c *conn) startMoshSession(reply func(bool), cmdline string) error {
+	c.srv.Log.Printf("exec request: %q", cmdline)
+	if c.srv.MoshBin == "" {
+		reply(false)
+		return nil
+	}
+	req, ok := parseMoshArgv(cmdline)
+	if !ok {
+		reply(false)
+		return nil
+	}
+	c.ch.mu.Lock()
+	started := c.ch.execStarted
+	c.ch.execStarted = true
+	c.ch.mu.Unlock()
+	if started {
+		reply(false)
+		return nil
+	}
+	if !c.srv.acquireMoshSlot() {
+		c.srv.Log.Printf("mosh: refusing handshake, %d children running (cap %d)",
+			RunningMosh(), c.srv.MoshMax)
+		reply(false)
+		return nil
+	}
+	reply(true)
+	// Same ordering pin as shell: the CONNECT line startMosh writes
+	// must follow the exec success.
+	c.syncControl()
+	// Off the conn goroutine: startMosh waits for the color probe's
+	// reply, and this loop is what delivers inbound CHANNEL_DATA to
+	// the probe.
+	go func() {
+		if err := c.srv.startMosh(c, req); err != nil {
+			c.srv.Log.Printf("mosh: %v", err)
+		}
+	}()
 	return nil
 }

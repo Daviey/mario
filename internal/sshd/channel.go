@@ -130,6 +130,7 @@ type channel struct {
 	t    *transport
 	srv  *Server
 	conn net.Conn
+	lane *conn // control lane for the teardown burst; nil without a pump
 
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -208,23 +209,23 @@ func (c *channel) shutdown() error {
 		c.sendErr = true
 		c.cond.Broadcast()
 		c.mu.Unlock()
-		// Complete the wire teardown BEFORE closing done: serveConn
-		// closes the connection once done is signaled, and closing with
-		// writes in flight turns the FIN into an RST.
-		// A well-behaved session ends with an exit status (ssh(1) exits
-		// 255 without one), then EOF and the channel close.
-		es := &buf{}
-		es.u8(msgChannelRequest)
-		es.u32(0)
-		es.cstr("exit-status")
-		es.boolean(false)
-		es.u32(0)
-		c.t.writePacket(es.b)
-		c.t.writePacket([]byte{msgChannelEOF, 0, 0, 0, 0})
-		w := &buf{}
-		w.u8(msgChannelClose)
-		w.u32(0)
-		c.t.writePacket(w.b)
+		// A well-behaved session ends with an exit status (ssh(1)
+		// exits 255 without one), then EOF and the channel close. The
+		// burst rides the control lane (lossless FIFO), so shutdown —
+		// which runs on the reader goroutine when the client closes —
+		// never blocks behind a frame chunk stuck on a full kernel
+		// buffer: the exact head-of-line stall the lane exists to
+		// prevent. done closes only after the burst is queued, and the
+		// FIN grace below (plus serveConn's drainControl) gives the
+		// pump time to write it before the socket goes away.
+		for _, pkt := range c.teardown() {
+			if c.lane != nil {
+				c.lane.writeControl(pkt)
+			} else {
+				// No pump exists (unit-test pipes): write directly.
+				c.t.writePacket(pkt)
+			}
+		}
 		close(c.done)
 		// Give the client a moment to process the channel close before
 		// the FIN — slamming TCP shut at the same instant makes ssh(1)
@@ -236,6 +237,22 @@ func (c *channel) shutdown() error {
 		}()
 	})
 	return nil
+}
+
+// teardown builds the end-of-session wire choreography: exit-status
+// request, EOF, then CHANNEL_CLOSE.
+func (c *channel) teardown() [][]byte {
+	es := &buf{}
+	es.u8(msgChannelRequest)
+	es.u32(0)
+	es.cstr("exit-status")
+	es.boolean(false)
+	es.u32(0)
+	eof := []byte{msgChannelEOF, 0, 0, 0, 0}
+	w := &buf{}
+	w.u8(msgChannelClose)
+	w.u32(0)
+	return [][]byte{es.b, eof, w.b}
 }
 
 func (c *channel) write(p []byte) (int, error) {
