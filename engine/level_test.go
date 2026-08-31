@@ -217,7 +217,7 @@ func TestDefaultLevelsValid(t *testing.T) {
 				run = 0
 			}
 		}
-		if maxRun > 4 {
+		if maxRun > MaxPitWidth {
 			t.Errorf("level %d: pit of width %d exceeds jump range", i, maxRun)
 		}
 		// No entity spawns inside solid tiles.
@@ -228,6 +228,13 @@ func TestDefaultLevelsValid(t *testing.T) {
 		}
 		if n := len(l.GoombaSpawns) + len(l.KoopaSpawns) + len(l.ParaSpawns); n < 5 {
 			t.Errorf("level %d: too few enemies", i)
+		}
+		// Every plant spawn sits on a pipe mouth (its marker cell is the
+		// air cell above; the mouth row itself must be pipe).
+		for _, p := range l.PlantSpawns {
+			if l.At(int(math.Round(p.X-PlantCenterOffset)), int(p.Y)) != Pipe {
+				t.Errorf("level %d: plant at %v not on a pipe", i, p)
+			}
 		}
 	}
 }

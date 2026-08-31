@@ -80,7 +80,7 @@ func (g *Game) updateEnemies() {
 				continue
 			}
 			if overlap(a.Pos.X, a.Pos.Y, a.W, a.H, b.Pos.X, b.Pos.Y, b.W, b.H) {
-				g.awardShell(b, a.Chain)
+				g.awardLadder(a.Chain, b.Pos.X, b.Pos.Y)
 				a.Chain++
 				g.flipEnemy(b)
 			}
@@ -122,7 +122,7 @@ func (g *Game) playerEnemyInteractions() {
 			switch e.Kind {
 			case KindGoomba:
 				e.State = EnemySquashed
-				e.Timer = 30
+				e.Timer = SquashHoldTicks
 			case KindPara:
 				// Wings clipped: the paratroopa demotes to a walking
 				// koopa (a second stomp makes the shell, as usual).
@@ -135,7 +135,8 @@ func (g *Game) playerEnemyInteractions() {
 				e.H = GoombaH
 				e.Vel.X = 0
 			}
-			g.awardStomp(e.Pos.X, e.Pos.Y)
+			g.awardLadder(g.Player.stompChain, e.Pos.X, e.Pos.Y)
+			g.Player.stompChain++
 			g.bouncePlayer()
 			g.emit("stomp")
 		case stomping && e.State == EnemyShell:

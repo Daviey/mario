@@ -8,6 +8,12 @@ import "math"
 // Input is the player input for one logical tick. Quit, Pause, Restart,
 // Suicide and AnyKey are edge triggered (set for exactly one tick per key
 // press) and are produced by the input package.
+//
+// Down is a reserved replay bit: the recording wire format (replay.go
+// maskOf) freezes it as bit 3, so it must never be reclaimed or
+// renumbered — that would rewrite every existing recording. It has no
+// gameplay effect during play (there is no crouch); the title screen
+// merely counts it among its start keys.
 type Input struct {
 	Left, Right, Up, Down, Run            bool
 	Quit, Pause, Restart, Suicide, AnyKey bool
@@ -72,6 +78,7 @@ const (
 	HurryTime        = 100 // HUD turns red below this
 	HurryFlashTicks  = 120 // "HURRY!" flash duration once time crosses HurryTime
 	ExtraLifeCoins   = 100
+	ScoreTickPace    = 2 // time units cashed into score per countdown beat; also the tick-sound period
 )
 
 // Game is a complete playthrough: levels, lives, score and the live world
@@ -100,10 +107,16 @@ type Game struct {
 	Tick      int
 
 	// Flow and feel state (all deterministic).
-	Best       int      // local best score; hydrated by the host, kept live
-	Daily      bool     // daily-challenge run (card title + leaderboard mode)
-	Demo       bool     // attract mode: title art is drawn over live play
-	Cheats     bool     // cheat mode: no fireball cap (host also refuses to record/submit)
+	Best  int  // local best score; hydrated by the host, kept live
+	Daily bool // daily-challenge run (card title + leaderboard mode)
+	Demo  bool // attract mode: title art is drawn over live play
+	// Cheat mode. Engine-side it lifts only the fireball cap; the rest
+	// of the contract lives in the host: mario.go refuses to record a
+	// cheat run (App.Step gates the Recorder on !Cheats), so the UI
+	// refuses to submit it (UNRECORDED) and no leaderboard row can
+	// leave the machine — the server's require_replay trigger would
+	// reject such a row anyway.
+	Cheats     bool
 	Hurry      bool     // time crossed HurryTime: HUD turns red
 	HurryT     int      // "HURRY!" flash countdown
 	FlagDrop   float64  // 0 pennant at the top of the pole, 1 at the base
@@ -121,14 +134,27 @@ type Game struct {
 	curIn      Input // current tick's input (stomp bounce reads held jump)
 }
 
-// NewGame creates a game over the given levels. viewW/viewH is the camera
-// viewport in tiles; viewW is clamped down to the narrowest level.
-func NewGame(levels []*Level, viewW, viewH int) *Game {
+// clampViewport narrows a viewport to the level set so the camera can
+// never see past a level's edge: the width is clamped to the narrowest
+// level, the height to the first level's rows. NewGame and SetViewport
+// share it; SetViewport additionally substitutes the current values for
+// non-positive dimensions.
+func clampViewport(levels []*Level, viewW, viewH int) (int, int) {
 	for _, l := range levels {
 		if l.Width < viewW {
 			viewW = l.Width
 		}
 	}
+	if viewH > levels[0].Height {
+		viewH = levels[0].Height
+	}
+	return viewW, viewH
+}
+
+// NewGame creates a game over the given levels. viewW/viewH is the camera
+// viewport in tiles, clamped to the levels by clampViewport.
+func NewGame(levels []*Level, viewW, viewH int) *Game {
+	viewW, viewH = clampViewport(levels, viewW, viewH)
 	g := &Game{
 		Levels: levels,
 		ViewW:  viewW,
@@ -147,14 +173,7 @@ func NewGame(levels []*Level, viewW, viewH int) *Game {
 // recording replays identically at any viewport. Non-positive dimensions
 // keep their current values.
 func (g *Game) SetViewport(viewW, viewH int) {
-	for _, l := range g.Levels {
-		if l.Width < viewW {
-			viewW = l.Width
-		}
-	}
-	if viewH > g.Levels[0].Height {
-		viewH = g.Levels[0].Height
-	}
+	viewW, viewH = clampViewport(g.Levels, viewW, viewH)
 	if viewW <= 0 {
 		viewW = g.ViewW
 	}
@@ -184,7 +203,7 @@ func (g *Game) Reset() {
 }
 
 // newRun resets the counters and kicks off a fresh run from the world
-// card; Reset, startRun and BeginDaily all funnel through here.
+// card; Reset, BeginDaily and the title-screen start all funnel through here.
 func (g *Game) newRun() {
 	g.Score = 0
 	g.CoinCount = 0
@@ -213,7 +232,7 @@ func (g *Game) Update(in Input) {
 	switch g.State {
 	case StateTitle:
 		if in.AnyKey || in.Restart || in.Left || in.Right || in.Up || in.Down {
-			g.startRun()
+			g.newRun()
 		}
 	case StateWorldCard:
 		g.stateTimer--
@@ -272,11 +291,6 @@ func (g *Game) Update(in Input) {
 	g.prevIn = in
 }
 
-// startRun kicks off a fresh run from the title screen.
-func (g *Game) startRun() {
-	g.newRun()
-}
-
 // BeginDaily resets into a daily-challenge run: the host has already
 // swapped in the challenge level (Levels[0]); this arms the flag, resets
 // the run and starts from the world card.
@@ -285,6 +299,10 @@ func (g *Game) BeginDaily() {
 	g.newRun()
 }
 
+// DemoLives is the attract-mode life pool: effectively endless, so the
+// demo can loop forever without ever tripping into game over.
+const DemoLives = 99
+
 // BeginDemo starts the attract-mode demo from the title screen.
 func (g *Game) BeginDemo() {
 	if g.State != StateTitle {
@@ -292,7 +310,7 @@ func (g *Game) BeginDemo() {
 	}
 	g.Demo = true
 	g.loadLevel(0, PowerSmall)
-	g.Lives = 99 // the demo loops forever; it never shows game over
+	g.Lives = DemoLives
 	g.State = StatePlaying
 }
 
@@ -333,6 +351,15 @@ func (g *Game) clearSpawnThreats() {
 	})
 }
 
+// updatePlaying runs one live-play tick. The ordering is load-bearing and
+// must not be reshuffled: clock → suicide → fireballs → player physics →
+// checkpoint → flag grab → enemies/plants/bars/combats → lava → pickups →
+// particles → camera → pit → cleanup. The early returns are not optional
+// style — a kill (time-out, suicide, lava, fall-out) or a flag grab
+// invalidates every later step, which would otherwise read and mutate a
+// world the run has already left (dead players must not collect coins;
+// a flag grab ends combat mid-stride). Player physics itself can kill or
+// clear the level, hence its immediate re-check before the world moves.
 func (g *Game) updatePlaying(in Input) {
 	g.curIn = in
 
@@ -449,8 +476,8 @@ func flagGrabBonus(feet, groundRow, topRow float64) int {
 
 func (g *Game) updateFlagSlide() {
 	p := g.Player
-	// Height-2: the ground surface — every level stands on two ground rows.
-	bottom := float64(g.Level.Height-2) - p.H
+	// GroundTop: the ground surface — every level stands on two ground rows.
+	bottom := float64(GroundTop) - p.H
 	if p.Pos.Y < bottom {
 		p.Pos.Y = math.Min(p.Pos.Y+FlagSlideSpeed, bottom)
 		if bottom > g.flagTopY {
@@ -462,9 +489,20 @@ func (g *Game) updateFlagSlide() {
 	// Feet on the ground: hop off towards the castle.
 	g.State = StateWalkCastle
 	p.Pos.X = float64(g.Level.FlagX) + 0.8
-	p.Vel = Vec{X: CastleWalkSpeed, Y: -0.22}
+	p.Vel = Vec{X: CastleWalkSpeed, Y: CastleHopVel}
 	p.Facing = 1
 }
+
+// Castle-door geometry, in tile columns relative to the flagpole: the
+// walk-to-castle sequence ends when the player's centre reaches the door
+// column, with a force-entry column as the overshoot fallback.
+// render.castleRect (render/camera.go) draws the castle at FlagX+3, five
+// wide, so the door centre (FlagX+5) sits mid-castle — move these and
+// that footprint together.
+const (
+	CastleDoorOffset = 5 // door centre column, relative to FlagX
+	CastleDoorPastX  = 7 // force door entry past this column, relative to FlagX
+)
 
 func (g *Game) updateWalkCastle() {
 	p := g.Player
@@ -488,8 +526,8 @@ func (g *Game) updateWalkCastle() {
 	p.WalkDist += CastleWalkSpeed
 	g.updateCamera()
 
-	doorX := float64(g.Level.FlagX + 5) // castle door centre
-	if p.Pos.X+p.W/2 >= doorX || p.Pos.X > float64(g.Level.FlagX+7) {
+	doorX := float64(g.Level.FlagX + CastleDoorOffset) // castle door centre
+	if p.Pos.X+p.W/2 >= doorX || p.Pos.X > float64(g.Level.FlagX+CastleDoorPastX) {
 		g.InCastle = true
 		g.stateTimer = CastleDwellTicks
 	}
@@ -500,10 +538,10 @@ func (g *Game) updateScoreTick() {
 		g.CastleFlag = math.Min(1, g.CastleFlag+CastleFlagRise)
 	}
 	if g.Time > 0 {
-		d := min(2, g.Time)
+		d := min(ScoreTickPace, g.Time)
 		g.Time -= d
 		g.Score += d * TimeBonusPerUnit
-		if g.Tick%2 == 0 {
+		if g.Tick%ScoreTickPace == 0 {
 			g.emit("tick")
 		}
 		return
@@ -536,8 +574,12 @@ func (g *Game) kill() {
 	g.emit("die")
 }
 
+// updateCamera tracks the player, which sits CameraAnchor of the viewport
+// width from the camera's left edge, clamped to the level's span.
+const CameraAnchor = 0.35
+
 func (g *Game) updateCamera() {
-	target := g.Player.Pos.X - float64(g.ViewW)*0.35
+	target := g.Player.Pos.X - float64(g.ViewW)*CameraAnchor
 	if target < 0 {
 		target = 0
 	}
@@ -649,28 +691,20 @@ func (g *Game) oneUp() {
 	g.emit("oneup")
 }
 
-// awardStomp pays the combo ladder for an airborne stomp chain.
-func (g *Game) awardStomp(x, y float64) {
-	if g.Player.stompChain >= len(stompLadder) {
+// awardLadder pays one rung of the shared combo ladder — the airborne
+// stomp chain and a sliding shell's kill chain climb the same ladder —
+// at a world position: past the last rung, every further kill in the
+// chain pays a 1-UP instead. The caller owns the chain counter
+// (Player.stompChain advances here on return; a shell's Chain is the
+// shell's own bookkeeping).
+func (g *Game) awardLadder(chain int, x, y float64) {
+	if chain >= len(stompLadder) {
 		g.oneUp()
 		g.spawnScorePop(x, y, 0, true)
 	} else {
-		v := stompLadder[g.Player.stompChain]
-		g.Score += v
-		g.spawnScorePop(x, y, v, false)
-	}
-	g.Player.stompChain++
-}
-
-// awardShell pays the combo ladder for consecutive kills by one sliding shell.
-func (g *Game) awardShell(e *Enemy, chain int) {
-	if chain >= len(stompLadder) {
-		g.oneUp()
-		g.spawnScorePop(e.Pos.X, e.Pos.Y, 0, true)
-	} else {
 		v := stompLadder[chain]
 		g.Score += v
-		g.spawnScorePop(e.Pos.X, e.Pos.Y, v, false)
+		g.spawnScorePop(x, y, v, false)
 	}
 }
 

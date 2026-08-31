@@ -23,10 +23,17 @@ const (
 
 // Physics tuning (per 60 Hz tick).
 const (
-	Gravity         = 0.021
-	MaxFall         = 0.32
-	JumpVel         = -0.43 // full jump clears ~4.4 tiles
-	JumpCut         = -0.15 // velocity clamp when the jump key is released early
+	Gravity = 0.021
+	MaxFall = 0.32
+	JumpVel = -0.43 // full jump clears ~4.4 tiles
+	JumpCut = -0.15 // velocity clamp when the jump key is released early
+	// Level-authoring clearances, both hanging off the full jump: the
+	// JumpVel apex is ~4.4 tiles (a running jump covers ~5), so a pit
+	// wider than MaxPitWidth is unjumpable and a shelf higher than
+	// MaxShelfRise above the floor is unmountable. The generator and
+	// the level tests both clamp to these.
+	MaxPitWidth     = 4 // widest pit a full-speed running jump still clears
+	MaxShelfRise    = 4 // tallest shelf a jump mounts from the floor
 	WalkAccel       = 0.006
 	RunAccel        = 0.009
 	MaxWalk         = 0.085
@@ -67,6 +74,14 @@ const (
 	FlipVel            = -0.28 // pop-up impulse when an enemy is knocked on its back
 	DeathBounceVel     = -0.38 // death-arc launch impulse at the freeze-frame beat
 
+	// Pose pacing: how long the purely visual beats hold. These set
+	// pose countdowns, corpse holds and bump animations; physics reads
+	// none of them.
+	StretchPoseTicks = 6  // jump-stretch pose after liftoff
+	SquashPoseTicks  = 6  // hard-landing squash pose
+	BumpAnimTicks    = 8  // block bump animation length
+	SquashHoldTicks  = 30 // squashed-enemy corpse hold before it pops
+
 	FireBarBallGap  = 0.55  // tiles between fire-bar balls
 	FireBarBallSize = 0.45  // collision box of one ball
 	FireBarLen      = 6     // balls per bar
@@ -80,6 +95,7 @@ const (
 
 	FlagSlideSpeed  = 0.05     // tiles per tick down the pole
 	CastleWalkSpeed = 0.07     // auto-walk to the castle door
+	CastleHopVel    = -0.22    // hop off the pole base towards the castle door
 	CastleFlagRise  = 1.0 / 60 // victory-flag rise per tick: full hoist in one second
 )
 
@@ -307,6 +323,16 @@ func (fb FireBar) BallPos(i, tick int) Vec {
 	angle := fb.Speed * float64(tick)
 	r := FireBarHubClear + float64(i+1)*FireBarBallGap
 	return Vec{fb.X + r*math.Cos(angle), fb.Y + r*math.Sin(angle)}
+}
+
+// MaxReach returns how far a bar's sweep extends from its hub centre:
+// hub clearance, one ball gap per ball, plus half a ball for the
+// outermost ball's collision box — the single derivation of the sweep
+// radius that spawnThreatNear (level.go) keeps checkpoints outside of.
+// It is bar-independent (every bar shares FireBarLen), so the receiver
+// is the law's home, not input.
+func (fb FireBar) MaxReach() float64 {
+	return FireBarHubClear + float64(FireBarLen)*FireBarBallGap + FireBarBallSize/2
 }
 
 // ParticleKind discriminates visual particles.

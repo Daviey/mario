@@ -71,7 +71,7 @@ func (g *Game) updatePlayer(in Input) {
 		p.Grounded = false
 		p.jumpBuffer = 0
 		p.groundTimer = CoyoteTicks + 1 // consume coyote so the jump cannot re-fire
-		p.StretchT = 6
+		p.StretchT = StretchPoseTicks
 		g.spawnDustPuff(p.Pos.X+p.W/2-0.15, p.Pos.Y+p.H)
 		g.spawnDustPuff(p.Pos.X+p.W/2+0.15, p.Pos.Y+p.H)
 		g.emit("jump")
@@ -108,7 +108,7 @@ func (g *Game) updatePlayer(in Input) {
 		p.Vel.Y = 0
 		p.stompChain = 0         // the stomp combo ends when feet touch ground
 		if fall > HardLandFall { // hard landing: squash pose and twin dust puffs
-			p.SquashT = 6
+			p.SquashT = SquashPoseTicks
 			g.spawnDustPuff(p.Pos.X+p.W/2-0.2, p.Pos.Y+p.H)
 			g.spawnDustPuff(p.Pos.X+p.W/2+0.2, p.Pos.Y+p.H)
 		}
@@ -159,7 +159,7 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 	switch t := g.Level.At(tx, ty); t {
 	case Question, QuestionMush, QuestionFire, QuestionStar, HiddenCoin, HiddenLife:
 		g.Level.Set(tx, ty, Used)
-		g.bumps[idx] = 8
+		g.bumps[idx] = BumpAnimTicks
 		switch t {
 		case Question, HiddenCoin:
 			g.addCoin()
@@ -189,7 +189,7 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 			g.spawnDebris(tx, ty)
 			g.emit("brick")
 		} else {
-			g.bumps[idx] = 8
+			g.bumps[idx] = BumpAnimTicks
 			g.emit("bump")
 		}
 	default:

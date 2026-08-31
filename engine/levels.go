@@ -63,6 +63,12 @@ func (b *Builder) Ground(x0, x1 int) {
 	b.Fill(x0, GroundTop, x1, b.h-1, '#')
 }
 
+// Ceiling fills the top row across the whole level with bricks — the
+// closed roof of the underground and castle worlds.
+func (b *Builder) Ceiling() {
+	b.Fill(0, 0, b.w-1, 0, 'B')
+}
+
 // Pipe places a two-tile-wide pipe of the given height on the ground.
 // It panics above height 3: taller pipes cannot be cleared with a
 // normal jump, so no well-formed level may contain one.
@@ -76,7 +82,7 @@ func (b *Builder) Pipe(x, height int) {
 // Plant puts a piranha plant in the pipe at column x of the given height
 // (the pipe must already/be about to exist there).
 func (b *Builder) Plant(x, height int) {
-	b.plants = append(b.plants, Vec{float64(x) + 0.65, float64(GroundTop - height)})
+	b.plants = append(b.plants, Vec{float64(x) + PlantCenterOffset, float64(GroundTop - height)})
 }
 
 // Theme selects the level's visual world.
@@ -177,8 +183,12 @@ func level1() *Level {
 	b.Set(46, 12, 'G')
 
 	b.Coins(9, 56, 57, 58)
-	for x, ch := range map[int]byte{60: 'B', 61: '?', 62: 'B', 63: 'U', 64: 'B', 65: 'f', 66: 'B'} {
-		b.Set(x, 9, ch)
+	// A mixed block row: brick-question-brick in reading order.
+	for _, s := range []struct {
+		x  int
+		ch byte
+	}{{60, 'B'}, {61, '?'}, {62, 'B'}, {63, 'U'}, {64, 'B'}, {65, 'f'}, {66, 'B'}} {
+		b.Set(s.x, 9, s.ch)
 	}
 	b.Set(64, 12, 'G')
 	b.Set(66, 12, 'G')
@@ -210,10 +220,10 @@ func level2() *Level {
 	b := NewBuilder(170, LevelHeight)
 	b.Theme(ThemeUnderground)
 	b.Ground(0, 29)
-	b.Ground(33, 60)          // pit 30-32
-	b.Ground(65, 100)         // pit 61-64 (needs a running jump)
-	b.Ground(105, 169)        // pit 101-104 (running jump)
-	b.Fill(0, 0, 169, 0, 'B') // the underground brick ceiling
+	b.Ground(33, 60)   // pit 30-32
+	b.Ground(65, 100)  // pit 61-64 (needs a running jump)
+	b.Ground(105, 169) // pit 101-104 (running jump)
+	b.Ceiling()        // the underground brick ceiling
 	b.Set(3, 12, 'M')
 
 	b.Set(10, 9, '?')
@@ -352,8 +362,11 @@ func level4() *Level {
 	b.Pipe(22, 3)
 	b.Plant(22, 3)
 
-	for x, ch := range map[int]byte{34: 'B', 35: '?', 36: 'B', 37: 'U', 38: 'B'} {
-		b.Set(x, 9, ch)
+	for _, s := range []struct {
+		x  int
+		ch byte
+	}{{34, 'B'}, {35, '?'}, {36, 'B'}, {37, 'U'}, {38, 'B'}} {
+		b.Set(s.x, 9, s.ch)
 	}
 	b.Coins(8, 34, 35, 36, 37, 38)
 
@@ -405,10 +418,10 @@ func level5() *Level {
 	b := NewBuilder(190, LevelHeight)
 	b.Theme(ThemeUnderground)
 	b.Ground(0, 39)
-	b.Ground(43, 79)          // pit 40-42
-	b.Ground(84, 119)         // pit 80-83 (running jump)
-	b.Ground(123, 189)        // pit 120-122
-	b.Fill(0, 0, 189, 0, 'B') // the underground brick ceiling
+	b.Ground(43, 79)   // pit 40-42
+	b.Ground(84, 119)  // pit 80-83 (running jump)
+	b.Ground(123, 189) // pit 120-122
+	b.Ceiling()        // the underground brick ceiling
 	b.Set(3, 12, 'M')
 
 	b.Set(10, 9, '?')
@@ -431,8 +444,11 @@ func level5() *Level {
 	b.Set(60, 12, 'G')
 	b.Set(62, 12, 'G')
 
-	for x, ch := range map[int]byte{66: 'B', 67: '?', 68: 'B', 69: 'f', 70: 'B'} {
-		b.Set(x, 9, ch)
+	for _, s := range []struct {
+		x  int
+		ch byte
+	}{{66, 'B'}, {67, '?'}, {68, 'B'}, {69, 'f'}, {70, 'B'}} {
+		b.Set(s.x, 9, s.ch)
 	}
 	b.Coins(8, 66, 67, 68, 69, 70)
 
@@ -543,10 +559,10 @@ func level7() *Level {
 	b := NewBuilder(170, LevelHeight)
 	b.Theme(ThemeCastle)
 	b.Ground(0, 29)
-	b.Ground(33, 64)          // lava 30-32
-	b.Ground(69, 104)         // lava 65-68 (running jump)
-	b.Ground(108, 169)        // lava 105-107
-	b.Fill(0, 0, 169, 0, 'B') // the castle brick ceiling
+	b.Ground(33, 64)   // lava 30-32
+	b.Ground(69, 104)  // lava 65-68 (running jump)
+	b.Ground(108, 169) // lava 105-107
+	b.Ceiling()        // the castle brick ceiling
 	b.Fill(30, 13, 32, 14, 'L')
 	b.Fill(65, 13, 68, 14, 'L')
 	b.Fill(105, 13, 107, 14, 'L')

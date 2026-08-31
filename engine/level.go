@@ -209,8 +209,8 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 // 2026-08-30). Falls back to the player start.
 func (l *Level) computeCheckpoint() {
 	// The two ground rows every level stands on sit at the bottom, so
-	// Height-2 is the ground surface a respawn column must have.
-	ground := l.Height - 2
+	// GroundTop is the ground surface a respawn column must have.
+	ground := GroundTop
 	for x := l.Width / 2; x < l.Width-8; x++ {
 		if !l.At(x, ground).Solid() || !l.At(x, ground+1).Solid() {
 			continue
@@ -254,15 +254,14 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 			return true
 		}
 	}
-	// A fire bar sweeps a full disc around its hub: BallPos puts the
-	// outermost ball's centre FireBarHubClear + FireBarLen*FireBarBallGap
-	// tiles out, and its collision box adds half a ball beyond that
-	// (entity.go). The reach must mirror that law exactly — counting only
-	// FireBarLen-1 gaps left the guard a tile short of the sweep.
-	reach := FireBarHubClear + float64(FireBarLen)*FireBarBallGap + FireBarBallSize/2
+	// A fire bar sweeps a full disc around its hub: MaxReach (entity.go)
+	// is the far edge of the outermost ball's collision box, the exact
+	// law the sweep guard must mirror — counting only FireBarLen-1
+	// gaps left it a tile short of the sweep.
 	x0, x1 := colX, colX+SmallW
 	y0, y1 := float64(ground)-SmallH, float64(ground)
 	for _, fb := range l.BarSpawns {
+		reach := fb.MaxReach()
 		dx, dy := 0.0, 0.0
 		if fb.X < x0 {
 			dx = x0 - fb.X

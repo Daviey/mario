@@ -62,7 +62,7 @@ func TestStompChainEndAwardsOneUp(t *testing.T) {
 	g := newGame(t, buildLevel(t, 60))
 	g.Player.stompChain = len(stompLadder)
 	lives := g.Lives
-	g.awardStomp(1, 1)
+	g.awardLadder(g.Player.stompChain, 1, 1)
 	if g.Lives != lives+1 {
 		t.Errorf("past-ladder stomp did not award 1-UP: %d -> %d", lives, g.Lives)
 	}
@@ -403,8 +403,8 @@ func TestDailyLevelsSolvableShape(t *testing.T) {
 		for x := range l.Width {
 			if !l.At(x, ground).Solid() {
 				pit++
-				if pit > 4 {
-					t.Fatalf("seed %d: pit wider than 4 at x=%d", seed, x)
+				if pit > MaxPitWidth {
+					t.Fatalf("seed %d: pit wider than %d at x=%d", seed, MaxPitWidth, x)
 				}
 			} else {
 				pit = 0

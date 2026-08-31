@@ -47,7 +47,9 @@ func (g *Game) moveX(pos *Vec, w, h, dx float64) bool {
 
 // moveY shifts a body vertically by dy. When moving down it reports whether
 // the body landed (and leaves it flush with the surface). When moving up it
-// returns the ceiling row and the columns of the tiles hit, if any.
+// returns the ceiling row and the columns of the tiles hit, if any; that
+// column slice aliases the game's reused ceilBuf scratch, so it is valid
+// only until the next moveY call — copy it out if it must survive one.
 func (g *Game) moveY(pos *Vec, w, h, dy float64) (landed bool, ceilTy int, ceilCols []int) {
 	if dy == 0 {
 		return false, -1, nil

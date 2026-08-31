@@ -49,7 +49,7 @@ func DailyLevel(seed uint64) *Level {
 	b := NewBuilder(w, LevelHeight)
 	if r.intn(3) == 0 {
 		b.Theme(ThemeUnderground)
-		b.Fill(0, 0, w-1, 0, 'B')
+		b.Ceiling()
 	}
 
 	b.Set(3, 12, 'M')
@@ -85,7 +85,7 @@ func DailyLevel(seed uint64) *Level {
 		need := w - finalReserve - x
 		switch segment() {
 		case 0: // pit: 2-4 wide, flanked by flat ground
-			pw := 2 + r.intn(3)
+			pw := 2 + r.intn(MaxPitWidth-1)
 			if need < pw+8 {
 				continue
 			}
@@ -117,7 +117,7 @@ func DailyLevel(seed uint64) *Level {
 				b.Ground(tx, tx)
 			}
 			groundEnd = x + n + 1
-			row := 10 - r.intn(2) // 9 or 10: a 4-tile shelf is the most a jump mounts
+			row := GroundTop - (MaxShelfRise - 1 + r.intn(2)) // rise 3 or 4 tiles: a 4-tile shelf is the most a jump mounts
 			for i := range n {
 				ch := byte('B')
 				switch {
@@ -180,7 +180,7 @@ func DailyLevel(seed uint64) *Level {
 				b.Ground(tx, tx)
 			}
 			groundEnd = x + n + 1
-			row := 11 - r.intn(3) // 11, 10 or 9: 8 would sit past the 4.4-tile jump
+			row := GroundTop - (MaxShelfRise - 2 + r.intn(3)) // rise 2..4 tiles: a 5-tile rise would sit past the 4.4-tile jump
 			b.Fill(x, row, x+n-1, row, 'B')
 			xs := make([]int, 0, n)
 			for i := range n {
