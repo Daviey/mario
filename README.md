@@ -12,6 +12,11 @@
 </p>
 
 <p align="center">
+  <em>New: the full build story, seven days start to finish —
+  <a href="https://blog.daviey.com/posts/super-cli-mario-terminal-in-six-days/">SUPER CLI MARIO: a complete Mario clone for your terminal in zero-dependency Go</a></em>
+</p>
+
+<p align="center">
   <a href="https://github.com/Daviey/mario/actions/workflows/ci.yml"><img src="https://github.com/Daviey/mario/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/Daviey/mario/releases/latest"><img src="https://img.shields.io/github/v/tag/Daviey/mario?label=release&sort=semver" alt="latest release" /></a>
   <img src="https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go" alt="Go 1.22+" />
@@ -155,8 +160,9 @@ board surface (terminal, web, APK). You can also read the board without
 playing: `mario -scores`.
 
 **Daily mode** generates a new challenge level every day from the date seed:
-same level for everyone, structurally checked to be solvable, with its own
-leaderboard. Enter it from the title screen (`d`), or start straight into a
+same level for everyone, with its own leaderboard. Every seed is proven
+playable in CI: a checker drives the engine's real player physics and
+asserts each floating coin is collectable and the flag is reachable. Enter it from the title screen (`d`), or start straight into a
 run with `mario -daily`.
 
 ## How it's built
@@ -172,6 +178,11 @@ run with `mario -daily`.
 * A fixed 60 Hz tick through a pure `Game.Update(Input)` transition drives the
   engine. The determinism tests byte-compare full rendered runs, and the replay
   verifier leans on the same property.
+* Levels are proven playable in tests. A reachability checker runs the
+  engine's real player physics over every built-in level and every daily
+  seed, asserting each floating coin is collectable and the flag reachable,
+  small Mario only, no power-ups. The checker has its own negative control;
+  a proof that cannot fail proves nothing.
 * `make release` cross-compiles 17 OS/arch pairs from one codebase; `make web`
   produces the static PWA, `make apk` wraps it for Android, `make deb` /
   `make rpm` / AUR / Nix package it for distros, and `make efi` / `make iso`
