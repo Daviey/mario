@@ -746,3 +746,48 @@ func TestSubmitCarriesLevel(t *testing.T) {
 		t.Fatalf("submitted level = %d, want 2", got.Level)
 	}
 }
+
+// The ask prompt covers the game-over banner that says PRESS R TO
+// RESTART; 'r' at the prompt honors it — decline + restart in one key,
+// re-armed so the next game over asks again. (Every other game-over
+// surface already treats 'r' as restart: banner, board, pause menu.)
+func TestAskRClosesAndRestarts(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	g := gameOverGame(t)
+	io := NewRouter(input.NewMapper(), NewUI(nil, nil))
+	step := func(n int) *render.ScoreUI {
+		var s *render.ScoreUI
+		for range n {
+			g.Update(io.Poll())
+			s = io.UITick(g)
+		}
+		return s
+	}
+	if s := step(1); s == nil || s.Mode != render.UIAsk {
+		t.Fatalf("game over should ask, got %+v", s)
+	}
+
+	io.Feed([]byte("r"))
+	if s := step(1); s != nil {
+		t.Fatalf("r at ask should close the prompt: %+v", s)
+	}
+	if io.QuitRequested() {
+		t.Fatal("restart must not quit")
+	}
+	in := io.Poll()
+	if !in.Restart {
+		t.Fatal("restart edge missing from polled input")
+	}
+	g.Update(in)
+	if g.State != engine.StateWorldCard {
+		t.Fatalf("restart should reset the game, got %v", g.State)
+	}
+
+	// Re-armed: a second game over asks to submit again.
+	g.Score = 500
+	g.State = engine.StateGameOver
+	if s := step(1); s == nil || s.Mode != render.UIAsk {
+		t.Fatalf("next game over should ask again, got %+v", s)
+	}
+}

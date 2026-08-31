@@ -379,6 +379,14 @@ func (u *UI) keyLocked(b byte) {
 		case b == 'n' || b == 'N' || b == 'q' || b == 'Q' || b == 0x1b:
 			u.mode = render.UIOff
 			u.done = true
+		case b == 'r' || b == 'R':
+			// The game-over banner under this prompt says PRESS R
+			// TO RESTART; honor it — decline and restart in one key
+			// (the board screen's 'r' does the same).
+			u.mode = render.UIOff
+			u.asked = false
+			u.done = false
+			u.restart = true
 		}
 	case render.UIEntry:
 		switch {

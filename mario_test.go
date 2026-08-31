@@ -384,3 +384,72 @@ func TestRecorderSurvivesDeaths(t *testing.T) {
 			res.Score, res.Level, res.State, a.Game.Score, a.Game.LevelIndex()+1, a.Game.State)
 	}
 }
+
+// The submit ask is once per RUN, not once per session: after declining
+// and restarting from the game-over banner (mapped 'r', not the board's
+// 'r' which re-arms itself), the next game over must offer submission
+// again. The ask flag used to survive the restart forever — one decline
+// silenced the prompt for the whole session.
+func TestDeclineThenBannerRestartRearmsAsk(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := New(nil)
+	a.Feed([]byte("\r")) // AnyKey: title → world card → run
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("never started run 1: %v", a.Game.State)
+	}
+	gameOver := func(score int) *render.ScoreUI {
+		t.Helper()
+		a.Game.Lives = 1
+		a.Game.Score = score
+		a.Feed([]byte("k"))
+		for range 600 {
+			a.Step()
+			if a.Game.State == engine.StateGameOver {
+				break
+			}
+		}
+		if a.Game.State != engine.StateGameOver {
+			t.Fatalf("never reached game over: %v", a.Game.State)
+		}
+		return a.UI()
+	}
+
+	// Run 1 ends with a score: the ask appears, the player declines.
+	if ui := gameOver(120); ui == nil || ui.Mode != render.UIAsk {
+		t.Fatalf("first game over should ask, got %+v", ui)
+	}
+	a.Feed([]byte("n"))
+	for range 10 {
+		a.Step()
+		if a.UI() == nil {
+			break
+		}
+	}
+	if a.UI() != nil {
+		t.Fatalf("decline should close the ask: %+v", a.UI())
+	}
+
+	// Banner restart: mapped 'r' straight from the game-over screen.
+	a.Feed([]byte("r"))
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("restart never reached playing: %v", a.Game.State)
+	}
+
+	// Run 2's game over must ask again.
+	if ui := gameOver(200); ui == nil || ui.Mode != render.UIAsk {
+		t.Fatalf("ask was not re-offered after banner restart, got %+v", ui)
+	}
+}

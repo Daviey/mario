@@ -284,6 +284,13 @@ func (a *App) Step() {
 				default:
 					a.rec.Start()
 					a.runs++
+					// Every run start re-arms the submit ask: the
+					// board's 'r' re-arms itself, but a restart via
+					// the game-over banner or pause menu (mapped 'r')
+					// must not leave a declined run's ask flag set
+					// forever — the prompt is once per run, not once
+					// per session.
+					a.leaderboard.ResetForNewRun()
 				}
 			}
 		case engine.StateTitle:
