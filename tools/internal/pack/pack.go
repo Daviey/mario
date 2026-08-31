@@ -11,7 +11,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -190,4 +192,66 @@ func pad4(buf *bytes.Buffer) {
 	if r := buf.Len() % 4; r != 0 {
 		buf.Write(make([]byte, 4-r))
 	}
+}
+
+// Inputs is the parsed flag set mkdeb and mkrpm share — version,
+// architecture, the prebuilt binary, the packaging directory and the
+// output path — plus the payload files those flags name (the binary
+// itself and mario.6 / mario.desktop / copyright from pkgdir), read
+// once so neither tool repeats the four-step ReadFile preamble.
+type Inputs struct {
+	Version, Arch, Bin, Pkgdir, Out string
+	Game, Man, Desktop, Copyright   []byte
+}
+
+// ParseInputs defines the shared mkdeb/mkrpm flag set, parses it (from
+// args, or os.Args[1:] when no args are given), and reads everything
+// the package formats need: the binary from -bin and the man page,
+// desktop entry and copyright from -pkgdir (default "packaging").
+// archHelp and outHelp name the tool-specific flags (the Debian arch /
+// .deb path forms for mkdeb, the Go arch / .rpm forms for mkrpm) —
+// everything else is identical. It fails on a missing required flag or
+// an unreadable file, so the tool mains collapse to parse → validate
+// the arch → pack.
+func ParseInputs(archHelp, outHelp string, args ...string) (*Inputs, error) {
+	in := &Inputs{}
+	fs := flag.NewFlagSet("pack", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&in.Version, "version", "", "package version (leading 'v' stripped), e.g. v0.3.0")
+	fs.StringVar(&in.Arch, "arch", "", archHelp)
+	fs.StringVar(&in.Bin, "bin", "", "path to the built static binary")
+	fs.StringVar(&in.Pkgdir, "pkgdir", "packaging", "directory holding mario.6, mario.desktop, copyright")
+	fs.StringVar(&in.Out, "out", "", outHelp)
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if in.Version == "" || in.Arch == "" || in.Bin == "" || in.Out == "" {
+		return nil, fmt.Errorf("-version, -arch, -bin and -out are all required")
+	}
+	reads := []struct {
+		dst  *[]byte
+		path string
+		what string
+	}{
+		{&in.Game, in.Bin, "binary"},
+		{&in.Man, filepath.Join(in.Pkgdir, "mario.6"), "man page"},
+		{&in.Desktop, filepath.Join(in.Pkgdir, "mario.desktop"), "desktop entry"},
+		{&in.Copyright, filepath.Join(in.Pkgdir, "copyright"), "copyright"},
+	}
+	for _, r := range reads {
+		b, err := os.ReadFile(r.path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s %s: %w", r.what, r.path, err)
+		}
+		*r.dst = b
+	}
+	return in, nil
+}
+
+// Fatal prints "<tool>: <err>" to stderr and exits 1 — the shared
+// death line of mkapp/mkipa (and the mkdeb/mkrpm mains), so a failure
+// always names the tool that detected it.
+func Fatal(tool string, err error) {
+	fmt.Fprintln(os.Stderr, tool+":", err)
+	os.Exit(1)
 }

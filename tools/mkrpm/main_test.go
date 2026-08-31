@@ -48,7 +48,12 @@ func buildRpm(t *testing.T, version, arch string) []byte {
 	t.Helper()
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "mario.rpm")
-	if err := run(version, arch, bin, pkg, out); err != nil {
+	in, err := pack.ParseInputs("arch", "out",
+		"-version", version, "-arch", arch, "-bin", bin, "-pkgdir", pkg, "-out", out)
+	if err != nil {
+		t.Fatalf("ParseInputs: %v", err)
+	}
+	if err := run(in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	rpm, err := os.ReadFile(out)
@@ -550,10 +555,12 @@ func TestDeterministic(t *testing.T) {
 func TestArchRejected(t *testing.T) {
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "x.rpm")
-	if err := run("1.0.0", "mips", bin, pkg, out); err == nil {
-		t.Error("unsupported arch accepted")
+	in, err := pack.ParseInputs("arch", "out",
+		"-version", "1.0.0", "-arch", "mips", "-bin", bin, "-pkgdir", pkg, "-out", out)
+	if err != nil {
+		t.Fatalf("ParseInputs: %v", err)
 	}
-	if err := run("1.0.0", "amd64", bin, pkg, ""); err == nil {
-		t.Error("empty -out accepted")
+	if err := run(in); err == nil {
+		t.Error("unsupported arch accepted")
 	}
 }

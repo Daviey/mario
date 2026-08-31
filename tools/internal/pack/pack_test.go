@@ -238,3 +238,60 @@ func TestWriteNewcEntry(t *testing.T) {
 		t.Errorf("archive length = %d, want 248", len(b))
 	}
 }
+
+func TestParseInputs(t *testing.T) {
+	dir := t.TempDir()
+	pkg := filepath.Join(dir, "pkg")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"mario.6":       "man",
+		"mario.desktop": "desktop",
+		"copyright":     "copyright",
+	} {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(dir, "mario-bin")
+	if err := os.WriteFile(bin, []byte("FAKE-ELF-BODY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "mario.pkg")
+
+	in, err := ParseInputs("arch help", "out help",
+		"-version", "v0.3.0", "-arch", "amd64", "-bin", bin, "-pkgdir", pkg, "-out", out)
+	if err != nil {
+		t.Fatalf("ParseInputs: %v", err)
+	}
+	if in.Version != "v0.3.0" || in.Arch != "amd64" || in.Bin != bin || in.Pkgdir != pkg || in.Out != out {
+		t.Errorf("flag fields = %+v", in)
+	}
+	if string(in.Game) != "FAKE-ELF-BODY" || string(in.Man) != "man" ||
+		string(in.Desktop) != "desktop" || string(in.Copyright) != "copyright" {
+		t.Error("payload files not read into Inputs")
+	}
+
+	// A missing required flag is one error for every tool (the pkgdir
+	// default covers -pkgdir).
+	for name, args := range map[string][]string{
+		"no version": {"-arch", "amd64", "-bin", bin, "-out", out},
+		"no arch":    {"-version", "v0.3.0", "-bin", bin, "-out", out},
+		"no bin":     {"-version", "v0.3.0", "-arch", "amd64", "-out", out},
+		"no out":     {"-version", "v0.3.0", "-arch", "amd64", "-bin", bin},
+	} {
+		if _, err := ParseInputs("arch help", "out help", args...); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	// An unreadable payload file names the piece that failed.
+	if _, err := ParseInputs("arch help", "out help",
+		"-version", "v0.3.0", "-arch", "amd64", "-bin", bin,
+		"-pkgdir", filepath.Join(dir, "missing"), "-out", out); err == nil {
+		t.Error("missing pkgdir accepted")
+	} else if !strings.Contains(err.Error(), "man page") {
+		t.Errorf("error does not name the missing piece: %v", err)
+	}
+}

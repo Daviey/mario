@@ -22,11 +22,9 @@ import (
 	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
-	"flag"
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -48,61 +46,40 @@ const (
 var debs = map[string]bool{"amd64": true, "arm64": true, "riscv64": true, "armhf": true, "i386": true}
 
 func main() {
-	version := flag.String("version", "", "package version (leading 'v' stripped), e.g. v0.3.0")
-	arch := flag.String("arch", "", "Debian architecture: amd64, arm64, riscv64, armhf or i386")
-	bin := flag.String("bin", "", "path to the built static binary")
-	pkgdir := flag.String("pkgdir", "packaging", "directory holding mario.6, mario.desktop, copyright")
-	out := flag.String("out", "", "output .deb path")
-	flag.Parse()
-
-	if err := run(*version, *arch, *bin, *pkgdir, *out); err != nil {
-		fmt.Fprintln(os.Stderr, "mkdeb:", err)
-		os.Exit(1)
+	// Shared -version/-arch/-bin/-pkgdir/-out flags + payload reads
+	// (tools/internal/pack); only the arch vocabulary is deb-specific.
+	in, err := pack.ParseInputs("Debian architecture: amd64, arm64, riscv64, armhf or i386", "output .deb path")
+	if err != nil {
+		pack.Fatal("mkdeb", err)
+	}
+	if err := run(in); err != nil {
+		pack.Fatal("mkdeb", err)
 	}
 }
 
-func run(version, arch, bin, pkgdir, out string) error {
-	if version == "" || arch == "" || bin == "" || out == "" {
-		return fmt.Errorf("-version, -arch, -bin and -out are all required")
+func run(in *pack.Inputs) error {
+	if !debs[in.Arch] {
+		return fmt.Errorf("unsupported Debian architecture %q (want amd64, arm64, riscv64, armhf or i386)", in.Arch)
 	}
-	if !debs[arch] {
-		return fmt.Errorf("unsupported Debian architecture %q (want amd64, arm64, riscv64, armhf or i386)", arch)
-	}
-	ver, err := pack.SanitizeVersion(version, "Debian")
-	if err != nil {
-		return err
-	}
-
-	game, err := os.ReadFile(bin)
-	if err != nil {
-		return err
-	}
-	man, err := os.ReadFile(filepath.Join(pkgdir, "mario.6"))
-	if err != nil {
-		return err
-	}
-	desktop, err := os.ReadFile(filepath.Join(pkgdir, "mario.desktop"))
-	if err != nil {
-		return err
-	}
-	copyright, err := os.ReadFile(filepath.Join(pkgdir, "copyright"))
+	ver, err := pack.SanitizeVersion(in.Version, "Debian")
 	if err != nil {
 		return err
 	}
 
 	files := []file{
-		{"usr/games/mario", 0o755, game},
-		{"usr/share/man/man6/mario.6.gz", 0o644, pack.Gzip(man, gzip.DefaultCompression)},
-		{"usr/share/doc/mario/copyright", 0o644, copyright},
-		{"usr/share/applications/mario.desktop", 0o644, desktop},
+		{"usr/games/mario", 0o755, in.Game},
+		{"usr/share/man/man6/mario.6.gz", 0o644, pack.Gzip(in.Man, gzip.DefaultCompression)},
+		{"usr/share/doc/mario/copyright", 0o644, in.Copyright},
+		{"usr/share/applications/mario.desktop", 0o644, in.Desktop},
 		{"usr/share/icons/hicolor/48x48/apps/mario.png", 0o644, art.IconPNG(48, 8)},
 	}
+
 	data, err := tarball(files)
 	if err != nil {
 		return err
 	}
 	control, err := tarball([]file{
-		{"control", 0o644, controlFile(ver, arch, len(data))},
+		{"control", 0o644, controlFile(ver, in.Arch, len(data))},
 		{"md5sums", 0o644, md5sums(files)},
 	})
 	if err != nil {
@@ -114,10 +91,10 @@ func run(version, arch, bin, pkgdir, out string) error {
 		{"control.tar.gz", control},
 		{"data.tar.gz", data},
 	})
-	if err := os.WriteFile(out, deb, 0o644); err != nil {
+	if err := os.WriteFile(in.Out, deb, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s (%d bytes, version %s, arch %s)\n", out, len(deb), ver, arch)
+	fmt.Printf("wrote %s (%d bytes, version %s, arch %s)\n", in.Out, len(deb), ver, in.Arch)
 	return nil
 }
 

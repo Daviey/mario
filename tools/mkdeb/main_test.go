@@ -11,6 +11,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/Daviey/mario/tools/internal/pack"
 	"strings"
 	"testing"
 )
@@ -44,7 +46,12 @@ func buildDeb(t *testing.T, version, arch string) []byte {
 	t.Helper()
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "mario.deb")
-	if err := run(version, arch, bin, pkg, out); err != nil {
+	in, err := pack.ParseInputs("arch", "out",
+		"-version", version, "-arch", arch, "-bin", bin, "-pkgdir", pkg, "-out", out)
+	if err != nil {
+		t.Fatalf("ParseInputs: %v", err)
+	}
+	if err := run(in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	deb, err := os.ReadFile(out)
@@ -282,11 +289,13 @@ func TestDeterministic(t *testing.T) {
 func TestArchRejected(t *testing.T) {
 	bin, pkg := fixture(t)
 	out := filepath.Join(t.TempDir(), "x.deb")
-	if err := run("1.0.0", "386", bin, pkg, out); err == nil {
-		t.Error("unsupported arch accepted")
+	in, err := pack.ParseInputs("arch", "out",
+		"-version", "1.0.0", "-arch", "386", "-bin", bin, "-pkgdir", pkg, "-out", out)
+	if err != nil {
+		t.Fatalf("ParseInputs: %v", err)
 	}
-	if err := run("1.0.0", "amd64", bin, pkg, ""); err == nil {
-		t.Error("empty -out accepted")
+	if err := run(in); err == nil {
+		t.Error("unsupported arch accepted")
 	}
 }
 

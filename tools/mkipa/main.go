@@ -75,13 +75,13 @@ func main() {
 	b := build{Version: *version, SrcDir: *src, WebDir: *web}
 	staging, err := os.MkdirTemp("", "mkipa-")
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 	defer os.RemoveAll(staging)
 	appDir := filepath.Join(staging, "Payload", "mario.app")
 	bin := filepath.Join(appDir, "mario")
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 	args := []string{
 		"-target", "arm64-apple-ios15.0",
@@ -95,28 +95,28 @@ func main() {
 	}
 	if out, err := runCmd(*clang, args...); err != nil {
 		fmt.Fprintln(os.Stderr, out)
-		fatal(fmt.Errorf("clang: %w", err))
+		pack.Fatal("mkipa", fmt.Errorf("clang: %w", err))
 	}
 	if out, err := runCmd(*ldid, "-S", bin); err != nil {
 		fmt.Fprintln(os.Stderr, out)
-		fatal(fmt.Errorf("ldid: %w", err))
+		pack.Fatal("mkipa", fmt.Errorf("ldid: %w", err))
 	}
 
 	if err := assemble(appDir, b); err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 
 	f, err := os.Create(*out)
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 	defer f.Close()
 	zw := zip.NewWriter(f)
 	if err := pack.ZipDir(staging, zw, uniformZipMode); err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 	if err := zw.Close(); err != nil {
-		fatal(err)
+		pack.Fatal("mkipa", err)
 	}
 	fmt.Println("wrote", *out)
 }
@@ -195,9 +195,4 @@ func copyTree(dst, src string) error {
 		// re-normalizes them via modeFor.
 		return os.WriteFile(target, data, info.Mode().Perm())
 	})
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "mkipa:", err)
-	os.Exit(1)
 }

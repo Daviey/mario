@@ -31,11 +31,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"flag"
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -141,45 +139,24 @@ const rpmSenseEqual = 8
 const pgpHashSHA256 = 8
 
 func main() {
-	version := flag.String("version", "", "package version (leading 'v' stripped), e.g. v0.3.0")
-	arch := flag.String("arch", "", "Go architecture: amd64, arm64, riscv64, arm or 386")
-	bin := flag.String("bin", "", "path to the built static binary")
-	pkgdir := flag.String("pkgdir", "packaging", "directory holding mario.6, mario.desktop, copyright")
-	out := flag.String("out", "", "output .rpm path")
-	flag.Parse()
-
-	if err := run(*version, *arch, *bin, *pkgdir, *out); err != nil {
-		fmt.Fprintln(os.Stderr, "mkrpm:", err)
-		os.Exit(1)
+	// Shared -version/-arch/-bin/-pkgdir/-out flags + payload reads
+	// (tools/internal/pack); -arch takes the GOARCH name — the RPM
+	// mapping lives in run(), below.
+	in, err := pack.ParseInputs("Go architecture: amd64, arm64, riscv64, arm or 386", "output .rpm path")
+	if err != nil {
+		pack.Fatal("mkrpm", err)
+	}
+	if err := run(in); err != nil {
+		pack.Fatal("mkrpm", err)
 	}
 }
 
-func run(version, arch, bin, pkgdir, out string) error {
-	if version == "" || arch == "" || bin == "" || out == "" {
-		return fmt.Errorf("-version, -arch, -bin and -out are all required")
-	}
-	rpmArch, ok := arches[arch]
+func run(in *pack.Inputs) error {
+	rpmArch, ok := arches[in.Arch]
 	if !ok {
-		return fmt.Errorf("unsupported architecture %q (want amd64, arm64, riscv64, arm or 386)", arch)
+		return fmt.Errorf("unsupported architecture %q (want amd64, arm64, riscv64, arm or 386)", in.Arch)
 	}
-	ver, err := pack.SanitizeVersion(version, "RPM")
-	if err != nil {
-		return err
-	}
-
-	game, err := os.ReadFile(bin)
-	if err != nil {
-		return err
-	}
-	man, err := os.ReadFile(filepath.Join(pkgdir, "mario.6"))
-	if err != nil {
-		return err
-	}
-	desktop, err := os.ReadFile(filepath.Join(pkgdir, "mario.desktop"))
-	if err != nil {
-		return err
-	}
-	copyright, err := os.ReadFile(filepath.Join(pkgdir, "copyright"))
+	ver, err := pack.SanitizeVersion(in.Version, "RPM")
 	if err != nil {
 		return err
 	}
@@ -187,10 +164,10 @@ func run(version, arch, bin, pkgdir, out string) error {
 	// Fedora has no /usr/games convention: the binary goes in /usr/bin.
 	// Everything else mirrors the .deb payload exactly.
 	entries := manifest([]file{
-		{"usr/bin/mario", 0o755, false, game},
-		{"usr/share/man/man6/mario.6.gz", 0o644, true, pack.Gzip(man, gzip.DefaultCompression)},
-		{"usr/share/doc/mario/copyright", 0o644, true, copyright},
-		{"usr/share/applications/mario.desktop", 0o644, false, desktop},
+		{"usr/bin/mario", 0o755, false, in.Game},
+		{"usr/share/man/man6/mario.6.gz", 0o644, true, pack.Gzip(in.Man, gzip.DefaultCompression)},
+		{"usr/share/doc/mario/copyright", 0o644, true, in.Copyright},
+		{"usr/share/applications/mario.desktop", 0o644, false, in.Desktop},
 		{"usr/share/icons/hicolor/48x48/apps/mario.png", 0o644, false, art.IconPNG(48, 8)},
 	})
 
@@ -207,10 +184,10 @@ func run(version, arch, bin, pkgdir, out string) error {
 	}
 	rpm = append(rpm, hdr...)
 	rpm = append(rpm, payload...)
-	if err := os.WriteFile(out, rpm, 0o644); err != nil {
+	if err := os.WriteFile(in.Out, rpm, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s (%d bytes, version %s, arch %s)\n", out, len(rpm), ver, rpmArch)
+	fmt.Printf("wrote %s (%d bytes, version %s, arch %s)\n", in.Out, len(rpm), ver, rpmArch)
 	return nil
 }
 

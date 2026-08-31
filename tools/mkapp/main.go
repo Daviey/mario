@@ -252,61 +252,56 @@ func main() {
 
 	amd64Bin, err := os.ReadFile(*amd64Path)
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	arm64Bin, err := os.ReadFile(*arm64Path)
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	if err := checkArch(*amd64Path, amd64Bin, archAMD64); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	if err := checkArch(*arm64Path, arm64Bin, archARM64); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 
 	var fat bytes.Buffer
 	if err := writeFat(&fat, amd64Bin, arm64Bin); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	if *universal != "" {
 		if err := os.WriteFile(*universal, fat.Bytes(), 0o755); err != nil {
-			fatal(err)
+			pack.Fatal("mkapp", err)
 		}
 		// Same umask trap as assemble(): WriteFile's mode is masked
 		// (077 on the CI runner) and would strip the exec bit.
 		if err := os.Chmod(*universal, 0o755); err != nil {
-			fatal(err)
+			pack.Fatal("mkapp", err)
 		}
 		fmt.Println("wrote", *universal)
 	}
 
 	staging, err := os.MkdirTemp("", "mkapp-")
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	defer os.RemoveAll(staging)
 	appDir := filepath.Join(staging, "Mario.app")
 	if err := assemble(appDir, fat.Bytes(), *version); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 
 	f, err := os.Create(*out)
 	if err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	defer f.Close()
 	zw := zip.NewWriter(f)
 	if err := pack.ZipDir(staging, zw, normalizeZipMode); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	if err := zw.Close(); err != nil {
-		fatal(err)
+		pack.Fatal("mkapp", err)
 	}
 	fmt.Println("wrote", *out)
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "mkapp:", err)
-	os.Exit(1)
 }
