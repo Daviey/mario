@@ -54,6 +54,9 @@ jobs:
       # Try every target even if one fails: per-platform signal, and the
       # runner is single-threaded across jobs anyway, so no cost.
       fail-fast: false
+      # The 17 OS/ARCH pairs mirror the Makefile TARGETS list
+      # one-for-one — keep in sync: a new target needs both (a Makefile
+      # rule AND a matrix entry, plus the release job's asset globs).
       matrix:
         include:
           - { goos: linux,   goarch: amd64 }
@@ -278,23 +281,33 @@ jobs:
           name: web-dist
           path: web-dist
 
-      # SHA256SUMS lists the 17 platform binaries (mario-darwin-* sweeps
-      # in the universal), the five debs + RPMs, the Android APK, the iOS
-      # IPA, the macOS app zip + the web zip; mario-web.zip is picked up
-      # by the dist/mario-* glob below (do not list it twice). The debs
-      # are mario_<ver>_<arch>.deb, the RPMs mario_<ver>_<rpmarch>.rpm,
-      # the APK mario_<ver>_android.apk, the IPA
-      # mario_<ver>_ios_unsigned.ipa, the app zip
-      # mario_<ver>_macos.app.zip and the AppImage
-      # mario_<ver>_amd64.AppImage — underscores, so they never collide
-      # with that glob.
+      # One source of truth for the release asset set, computed once
+      # here and consumed by the checksums and upload steps below
+      # (shell state does not survive between steps, so it travels via
+      # GITHUB_ENV). ASSET_GLOBS: the 17 platform binaries (the
+      # mario-darwin-* glob sweeps in the universal) plus the five debs
+      # (mario_<ver>_<arch>.deb) and five RPMs (mario_<ver>_<rpmarch>.rpm
+      # — underscore forms, so they never collide with the binary
+      # globs). OPTIONAL_GLOBS: best-effort artifacts (their jobs are
+      # continue-on-error) that join each list only when present.
+      # Cross-ref: the binary globs must cover every Makefile TARGETS /
+      # build-matrix pair — 17 pairs; keep in sync — a new target needs
+      # both.
+      - name: Asset globs
+        run: |
+          echo "ASSET_GLOBS=mario-linux-* mario-darwin-* mario-freebsd-* mario-openbsd-* mario-netbsd-* mario-solaris-* mario-windows-* mario_*_*.deb mario_*_*.rpm" >> "$GITHUB_ENV"
+          echo "OPTIONAL_GLOBS=mario_*_android.apk mario_*_ios_unsigned.ipa mario_*_macos.app.zip mario_*_amd64.AppImage" >> "$GITHUB_ENV"
+
+      # SHA256SUMS lists the 17 platform binaries, the five debs + RPMs,
+      # the Android APK, the iOS IPA, the macOS app zip and the web zip;
+      # mario-web.zip is zipped here and summed last.
       - name: Checksums + web zip
         run: |
-          cd dist && sha256sum mario-linux-* mario-darwin-* mario-freebsd-* mario-openbsd-* mario-netbsd-* mario-solaris-* mario-windows-* mario_*_*.deb mario_*_*.rpm > SHA256SUMS
-          ls mario_*_android.apk >/dev/null 2>&1 && sha256sum mario_*_android.apk >> SHA256SUMS || echo no-apk-this-run
-          ls mario_*_ios_unsigned.ipa >/dev/null 2>&1 && sha256sum mario_*_ios_unsigned.ipa >> SHA256SUMS || echo no-ipa-this-run
-          ls mario_*_macos.app.zip >/dev/null 2>&1 && sha256sum mario_*_macos.app.zip >> SHA256SUMS || echo no-macos-app-this-run
-          ls mario_*_amd64.AppImage >/dev/null 2>&1 && sha256sum mario_*_amd64.AppImage >> SHA256SUMS || echo no-appimage-this-run
+          cd dist
+          sha256sum $ASSET_GLOBS > SHA256SUMS
+          for g in $OPTIONAL_GLOBS; do
+            ls $g >/dev/null 2>&1 && sha256sum $g >> SHA256SUMS || echo "no $g this run"
+          done
           cd ../web-dist && zip -qr ../dist/mario-web.zip .
           cd ../dist && sha256sum mario-web.zip >> SHA256SUMS
 
@@ -302,13 +315,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Asset list; best-effort artifacts join only when their jobs
-          # produced one (set -- keeps this shellcheck-clean POSIX sh).
-          set -- dist/mario-* dist/mario_*_*.deb dist/mario_*_*.rpm dist/SHA256SUMS
-          ls dist/mario_*_android.apk >/dev/null 2>&1 && set -- "$@" dist/mario_*_android.apk
-          ls dist/mario_*_ios_unsigned.ipa >/dev/null 2>&1 && set -- "$@" dist/mario_*_ios_unsigned.ipa
-          ls dist/mario_*_macos.app.zip >/dev/null 2>&1 && set -- "$@" dist/mario_*_macos.app.zip
-          ls dist/mario_*_amd64.AppImage >/dev/null 2>&1 && set -- "$@" dist/mario_*_amd64.AppImage
+          # Same asset set as the checksums step ($ASSET_GLOBS /
+          # $OPTIONAL_GLOBS from the "Asset globs" step), plus
+          # mario-web.zip — built by that step, deliberately not in the
+          # globs so it is never listed twice — and SHA256SUMS itself.
+          # Best-effort artifacts join only when their jobs produced
+          # one; the for/set loop keeps this POSIX sh (dash on the
+          # runner).
+          cd dist
+          set -- $ASSET_GLOBS mario-web.zip SHA256SUMS
+          for g in $OPTIONAL_GLOBS; do
+            ls $g >/dev/null 2>&1 && set -- "$@" $g
+          done
           if gh release create "$GITHUB_REF_NAME" "$@" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
               --repo "$GITHUB_REPOSITORY"; then
