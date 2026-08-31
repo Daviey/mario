@@ -75,7 +75,13 @@ func runReplayTrace(path string, daily bool, day, window string) error {
 	if err != nil {
 		return fmt.Errorf("replay: %w", err)
 	}
-	fmt.Printf("replay: file=%s mode=%s engine=%s", path, mode, board.EngineVersion)
+	fmt.Printf("replay: file=%s mode=%s", path, mode)
+	if daily {
+		// day= is the resolved challenge date (flag or today's, the
+		// same default the level rebuild above used).
+		fmt.Printf(" day=%s", day)
+	}
+	fmt.Printf(" engine=%s", board.EngineVersion)
 	if window != "" {
 		fmt.Printf(" window=[%g,%g)", x0, x1)
 	}
