@@ -152,10 +152,10 @@ func boardScreen(f *render.Frame, p *render.Palette, u *render.ScoreUI, worldY, 
 		if row.Verified {
 			mark = "+" // the pixel font's stand-in for the terminal's '✓'
 		}
-		// Must track render/scoreui.go drawBoardText's row format
-		// (rank, mark, name, score, level — same columns, same order);
-		// derive it properly if this is touched again.
-		txt := fmt.Sprintf("%2d %s %-8s %6d  L%d", row.Rank, mark, row.Name, row.Score, row.Level)
+		// Same layout as the terminal board — single source via
+		// render.BoardRowFormat ('+' stands in for the '✓' mark because
+		// the pixel font has no checkmark glyph).
+		txt := fmt.Sprintf(render.BoardRowFormat, row.Rank, mark, row.Name, row.Score, row.Level)
 		f.DrawTextPx(txt, (f.W-render.TextWidthPx(txt))/2, worldY+14+i*7, color)
 	}
 }

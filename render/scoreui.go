@@ -26,6 +26,13 @@ const (
 	UIAbout
 )
 
+// BoardRowFormat is the leaderboard row layout shared by every board
+// surface (terminal cells here, the EFI pixel-font board in cmd/efi/uipx.go
+// — which substitutes '+' for the '✓' mark because the 3×5 font has no
+// checkmark glyph). Single source: column alignment must not drift between
+// surfaces.
+const BoardRowFormat = "%2d %s %-8s %6d  L%d"
+
 // String names the mode for logs and the JSON bridge.
 func (m UIMode) String() string {
 	switch m {
@@ -185,7 +192,7 @@ func drawBoardText(s *Screen, ui *ScoreUI, p *Palette, tick int) {
 			if r.Verified {
 				mark = "✓"
 			}
-			s.Center(bodyY+i, fmt.Sprintf("%2d %s %-8s %6d  L%d", r.Rank, mark, r.Name, r.Score, r.Level),
+			s.Center(bodyY+i, fmt.Sprintf(BoardRowFormat, r.Rank, mark, r.Name, r.Score, r.Level),
 				rowColor(r.Mine, p), bg, r.Mine)
 		}
 		if ui.Rank > 0 {
