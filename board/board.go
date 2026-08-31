@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.08.30c" // c: 2-4 checkpoint 86→90 (fire-bar guard now covers the bar's true reach); pre-c 2-4 recordings diverge
+const EngineVersion = "2026.08.31a" // a: coin reachability fix (2-1/2-3 shelves and daily coin rows lowered to 4 tiles); pre-a recordings diverge
 
 // Client is a configured PostgREST endpoint.
 type Client struct {

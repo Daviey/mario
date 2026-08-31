@@ -117,7 +117,7 @@ func DailyLevel(seed uint64) *Level {
 				b.Ground(tx, tx)
 			}
 			groundEnd = x + n + 1
-			row := 9 - r.intn(2)
+			row := 10 - r.intn(2) // 9 or 10: a 4-tile shelf is the most a jump mounts
 			for i := range n {
 				ch := byte('B')
 				switch {
@@ -180,7 +180,7 @@ func DailyLevel(seed uint64) *Level {
 				b.Ground(tx, tx)
 			}
 			groundEnd = x + n + 1
-			row := 10 - r.intn(3) // 10, 9 or 8
+			row := 11 - r.intn(3) // 11, 10 or 9: 8 would sit past the 4.4-tile jump
 			b.Fill(x, row, x+n-1, row, 'B')
 			xs := make([]int, 0, n)
 			for i := range n {

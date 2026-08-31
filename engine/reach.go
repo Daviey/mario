@@ -1,0 +1,146 @@
+package engine
+
+// Coin reachability: the fairness contract every level must satisfy. A
+// floating coin is only fair if a small, unpowered player can collect it
+// by ordinary play — running and jumping from terrain they can actually
+// stand on, starting at the spawn. Coins that need super-Mario brick
+// breaking or an enemy bounce chain do not count: power-ups and enemies
+// are not guaranteed to still be there when the player arrives.
+//
+// The check drives the engine's own player physics (updatePlayer) on a
+// scratch copy of the level, so the verdict can never drift from the
+// real simulation. (The 2026-08-30 incident: both daily coin emitters
+// could place shelves five tiles above the floor — 0.6 tiles beyond the
+// 4.40-tile jump apex — making whole coin rows decorative.)
+
+type stand struct{ tx, ty int }
+
+// unreachableCoins reports every coin spawn of l that a small player
+// cannot collect, as spawn positions (top-left of the coin box).
+//
+// It flood-fills the tiles a small player can stand on, starting from
+// the spawn surface: from every reachable surface it runs the same
+// scripts a player has available (run or walk, either direction, one
+// full jump immediately or after a short run-up, or no jump at all) and
+// records every tile the runs land on as newly reachable. Any coin a
+// run touches along the way is collectible.
+func unreachableCoins(l *Level) []Vec {
+	g := NewGame([]*Level{l}, 40, 15)
+	g.Enemies = nil // enemies move; reachability must not depend on them
+	g.Plants = nil
+	g.FireBars = nil
+	g.CoinItems = nil
+
+	coins := l.CoinSpawns
+	touched := make([]bool, len(coins))
+
+	visited := map[stand]bool{}
+	root := spawnSurface(l)
+	visited[root] = true
+	queue := []stand{root}
+	done := 0 // coins touched so far; the flood stops once all are safe
+
+	onTick := func(p *Player) {
+		for i, c := range coins {
+			if !touched[i] && overlap(p.Pos.X, p.Pos.Y, p.W, p.H, c.X, c.Y, CoinSize, CoinSize) {
+				touched[i] = true
+				done++
+			}
+		}
+		if p.Grounded {
+			ty := int(p.Pos.Y + p.H + 0.1)
+			for _, fx := range [2]float64{p.Pos.X + 0.1, p.Pos.X + p.W - 0.1} {
+				if s := (stand{int(fx), ty}); !visited[s] {
+					visited[s] = true
+					queue = append(queue, s)
+				}
+			}
+		}
+	}
+
+	for len(queue) > 0 && done < len(coins) {
+		s := queue[0]
+		queue = queue[1:]
+		// Precision landings only matter near a coin: far from any
+		// untouched coin, full scripts are wasted transit. The short
+		// set still runs (full-speed jumps and plain runs) so the
+		// flood keeps crossing pits and mounting terrain everywhere.
+		nearCoin := false
+		for i, c := range coins {
+			if !touched[i] && abs(int(c.X)-s.tx) <= 6 {
+				nearCoin = true
+				break
+			}
+		}
+		jumps := []int{0, 8, 16, -1} // -1: never jump
+		runs := []bool{true, false}
+		if !nearCoin {
+			jumps = []int{16, -1}
+			runs = []bool{true}
+		}
+		for _, dir := range []int{-1, 1} {
+			for _, run := range runs {
+				for _, jumpAt := range jumps {
+					script(g, s, dir, run, jumpAt, onTick)
+				}
+			}
+		}
+	}
+
+	var bad []Vec
+	for i, ok := range touched {
+		if !ok {
+			bad = append(bad, coins[i])
+		}
+	}
+	return bad
+}
+
+// script runs one scripted try on g: a small player starts standing on
+// the surface s, holds walk or run toward dir and — from tick jumpAt —
+// holds jump for the rest of the flight. onTick observes every tick.
+func script(g *Game, s stand, dir int, run bool, jumpAt int, onTick func(*Player)) {
+	p := newPlayer(Vec{float64(s.tx) + 0.1, float64(s.ty - 1)}, PowerSmall)
+	p.Facing = dir
+	g.Player = p
+	g.prevIn = Input{} // so the first scripted press registers as an edge
+	for t := 0; t < 160; t++ {
+		in := Input{}
+		if run {
+			in.Run = true
+		}
+		if dir < 0 {
+			in.Left = true
+		} else {
+			in.Right = true
+		}
+		if t >= jumpAt {
+			in.Up = true
+		}
+		g.updatePlayer(in)
+		g.prevIn = in
+		onTick(p)
+		if p.Pos.Y > float64(g.Level.Height)+1 {
+			return // fell out of the level; the script is spent
+		}
+	}
+}
+
+// spawnSurface returns the standable tile under the player spawn.
+func spawnSurface(l *Level) stand {
+	tx := int(l.PlayerStart.X)
+	ty := min(l.Height-1, int(l.PlayerStart.Y+SmallH))
+	for ; ty < l.Height; ty++ {
+		if l.At(tx, ty).Solid() && !l.At(tx, ty-1).Solid() {
+			return stand{tx, ty}
+		}
+	}
+	return stand{tx, l.Height - 1}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}

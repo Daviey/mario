@@ -363,8 +363,8 @@ func level4() *Level {
 	b.Set(54, 12, 'G')
 	b.Set(56, 12, 'G')
 
-	b.Fill(58, 8, 60, 8, 'B')
-	b.Coins(6, 58, 59, 60)
+	b.Fill(58, 9, 60, 9, 'B')
+	b.Coins(7, 58, 59, 60)
 
 	b.Pipe(72, 2)
 	b.Plant(72, 2)
@@ -508,9 +508,9 @@ func level6() *Level {
 	b.Coins(9, 78, 79, 80, 81, 82)
 
 	b.Set(90, 12, 'W')
-	b.Fill(92, 8, 96, 8, 'B')
-	b.Coins(7, 92, 93, 94, 95, 96)
-	b.Set(94, 7, 'K')
+	b.Fill(92, 9, 96, 9, 'B')
+	b.Coins(8, 92, 93, 94, 95, 96)
+	b.Set(94, 8, 'K')
 	b.Set(100, 12, 'G')
 	b.Set(104, 12, 'W')
 	b.Set(108, 12, 'G')
