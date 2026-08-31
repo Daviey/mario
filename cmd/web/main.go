@@ -87,9 +87,6 @@ func main() {
 	// 4+ tall; the engine bounds by level).
 	js.Global().Set("marioSize", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		w := args[0].Int() / render.Pix
-		if w < 16 {
-			w = 16 // playable minimum, matching the pre-Resize behavior
-		}
 		h := (args[1].Int() - render.HudBandPx - render.StatusBandPx) / render.Pix
 		app.Resize(w, h)
 		jsFrameSink = jsRGB{} // frame size changes: reallocate on next deliver
@@ -146,7 +143,6 @@ func main() {
 			app.ResetToTitle()
 		}
 	}
-	select {} // hold the last frame; the page offers a restart
 }
 
 // ticker bridges the Go ticker to the browser event loop: each wait yields
