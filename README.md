@@ -131,9 +131,9 @@ Levels are plain ASCII text files, so you can play your own: `./mario -level myl
 
 ## A leaderboard nobody can cheat*
 
-*Not quite nobody: the verifier proves the engine produced the score from a real input
+<em>*Not quite nobody: the verifier proves the engine produced the score from a real input
 sequence, not that a human was holding the keys. Tool-assisted runs still verify because they
-genuinely earned the score. What nobody can do is claim a number the game didn't produce.
+genuinely earned the score. What nobody can do is claim a number the game didn't produce.</em>
 
 Every run is recorded as a compressed input log. When you submit a score, the
 recording goes with it, and a verifier **replays your inputs against the same
