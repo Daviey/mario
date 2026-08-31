@@ -347,14 +347,7 @@ func (u *UI) Tick(g *engine.Game) *render.ScoreUI {
 	// Game over / win with a score: offer submission once.
 	if u.mode == render.UIOff && !u.asked &&
 		(g.State == engine.StateGameOver || g.State == engine.StateWin) && g.Score > 0 {
-		u.asked = true
-		u.player = u.identityLocked()
-		u.score = g.Score
-		u.level = g.LevelIndex() + 1
-		u.daily = g.Daily
-		u.day = today()
-		u.rank = 0
-		u.mode = render.UIAsk
+		u.armAskLocked(g)
 	}
 
 	keys := u.keys
@@ -383,9 +376,8 @@ func (u *UI) keyLocked(b byte) {
 			// The game-over banner under this prompt says PRESS R
 			// TO RESTART; honor it — decline and restart in one key
 			// (the board screen's 'r' does the same).
+			u.rearmRunLocked()
 			u.mode = render.UIOff
-			u.asked = false
-			u.done = false
 			u.restart = true
 		}
 	case render.UIEntry:
@@ -412,11 +404,10 @@ func (u *UI) keyLocked(b byte) {
 				u.quit = true // submitted/declined: game is over anyway
 			}
 		case b == 'r' || b == 'R':
-			// Close and play again. Clearing the once-per-run flags lets
-			// the next game over offer submission again.
+			// Close and play again; rearmRunLocked lets the next game
+			// over offer submission again.
+			u.rearmRunLocked()
 			u.mode = render.UIOff
-			u.asked = false
-			u.done = false
 			u.restart = true
 		}
 	case render.UIAbout:
@@ -504,16 +495,45 @@ func (u *UI) Submitted() bool {
 }
 
 // ResetForNewRun clears the machine's state (including once-per-run flags
-// and pending quit requests) so a fresh run can prompt for submission again.
+// and pending quit requests) so a fresh run can prompt for submission
+// again. The once-per-run flags go through rearmRunLocked — the one
+// run-lifecycle reset path every restart edge shares.
 func (u *UI) ResetForNewRun() {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.rearmRunLocked()
 	u.mode = render.UIOff
+	u.status = ""
+}
+
+// armAskLocked is the one ask-arming path: a finished run with a score
+// offers submission exactly once per run. rearmRunLocked below is the
+// reset side of that lifecycle; caller holds the mutex.
+func (u *UI) armAskLocked(g *engine.Game) {
+	u.asked = true
+	u.player = u.identityLocked()
+	u.score = g.Score
+	u.level = g.LevelIndex() + 1
+	u.daily = g.Daily
+	u.day = today()
+	u.rank = 0
+	u.mode = render.UIAsk
+}
+
+// rearmRunLocked is the ONE run-lifecycle reset: every edge that starts
+// a fresh run — ResetForNewRun (the App's run starts and its
+// reset-to-title), 'r' at the ask prompt (the game-over banner's PRESS R
+// TO RESTART) and 'r' on the board (close and play again) — returns the
+// once-per-run flags to their fresh-run state through here, so they can
+// never desync between edges again (the daily-board leak grew the same
+// way, from board-open logic inlined at one edge only). The 'r' edges
+// rearm and then set restart; quit is cleared too because a restart
+// supersedes a stale close request. Caller holds the mutex.
+func (u *UI) rearmRunLocked() {
 	u.asked = false
 	u.done = false
 	u.quit = false
 	u.restart = false
-	u.status = ""
 }
 
 func (u *UI) snapshotLocked(g *engine.Game) *render.ScoreUI {

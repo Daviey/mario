@@ -791,3 +791,48 @@ func TestAskRClosesAndRestarts(t *testing.T) {
 		t.Fatalf("next game over should ask again, got %+v", s)
 	}
 }
+
+// The title-screen 'd' starts the daily challenge. 'd' is WASD-Right, so
+// unlike 'l'/'i' it cannot be a mapper no-op: the same press reaches the
+// engine as Right, which at the title starts a NORMAL run. The daily
+// trigger must therefore be taken BEFORE the engine update (the App.Step
+// order replayed here: TakeDailyAtTitle, then Poll, then Update) so the
+// daily wins and the press never dismisses the title as a movement key.
+func TestTitleDStartsDailyNotConsumedAsRight(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// Control: the press really is Right — driven straight into the
+	// engine it dismisses the title into a normal run. If this ever
+	// stops holding, 'd' became a no-op and the ordering under test is
+	// no longer load-bearing.
+	ctl := NewRouter(input.NewMapper(), NewUI(nil, nil))
+	ctlG := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	ctl.Feed([]byte("d"))
+	in := ctl.Poll()
+	if !in.Right {
+		t.Fatal("'d' must map to Right for this test to mean anything")
+	}
+	ctlG.Update(in)
+	if ctlG.State == engine.StateTitle || ctlG.Daily {
+		t.Fatalf("control: title 'd' should start a normal run, got state=%v daily=%v", ctlG.State, ctlG.Daily)
+	}
+
+	// The ordered path: the daily trigger is taken before Poll/Update,
+	// so the same press lands inside the daily run instead of at the
+	// title. BeginDaily is App.StartDaily's core (the level swap aside).
+	io := NewRouter(input.NewMapper(), NewUI(nil, nil))
+	g := engine.NewGame(engine.DefaultLevels(), 20, engine.LevelHeight)
+	io.Feed([]byte("d"))
+	if !io.TakeDailyAtTitle(g) {
+		t.Fatal("title 'd' should trigger the daily")
+	}
+	if io.TakeDailyAtTitle(g) {
+		t.Fatal("the daily trigger must be a single-shot edge")
+	}
+	g.BeginDaily()
+	g.Update(io.Poll())
+	if g.State == engine.StateTitle || !g.Daily {
+		t.Fatalf("'d' started a normal run instead of the daily: state=%v daily=%v", g.State, g.Daily)
+	}
+}
