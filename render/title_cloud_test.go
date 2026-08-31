@@ -15,54 +15,12 @@ func sentinelCloudPal() *Palette {
 	return &pal
 }
 
-// titleBands recomputes the full-mode title-screen text layout
-// (independently of titleTextEls) as x0,y0,x1,y1 pixel rects: MARIO logo,
-// SUPER CLI subtitle, build version, PRESS ANY KEY blink, L LEADERBOARD hint.
-func titleBands(f *Frame) [][4]int {
-	castY := titleCastY(f)
-	castH := 2 * sprH(sprMarioSmall)
-	var bands [][4]int
-	add := func(s string, y, scale int) {
-		w := textWidthPx(s, scale)
-		x := (f.W - w) / 2
-		if x < 0 {
-			x = 0
-		}
-		h := 5 * scale
-		bands = append(bands, [4]int{x, y, min(x+w, f.W), min(y+h, f.H)})
-	}
-
-	if castY >= 13 {
-		logoY := max(2, min(f.H/12, castY-10))
-		add("MARIO", logoY, 2)
-		if subY := logoY + 15; subY+5 <= castY {
-			add(pickTextPx([]string{"SUPER CLI EDITION", "SUPER CLI"}, f.W-2), subY, 1)
-			tailY := subY + 5
-			if vc := versionCandidates(Version); len(vc) > 0 {
-				if v := pickTextPx(vc, f.W-2); v != "" {
-					if verY := subY + 7; verY+5 <= castY {
-						add(v, verY, 1)
-						tailY = verY + 5
-					}
-				}
-			}
-			// about banner (mirrors titleTextEls)
-			if fanY := tailY + 2; fanY+5 <= castY {
-				add(pickTextPx([]string{"UNOFFICIAL FAN GAME", "FAN GAME"}, f.W-2), fanY, 1)
-				if nY := fanY + 6; nY+5 <= castY {
-					add(pickTextPx([]string{"NOT AFFILIATED WITH NINTENDO", "NO NINTENDO AFFILIATION", "NOT NINTENDO"}, f.W-2), nY, 1)
-				}
-			}
-		}
-	}
-
-	pressY := min(castY+castH+1, f.H-5) // ground band: first line under the cast
-	add(pickTextPx([]string{"PRESS ANY KEY", "ANY KEY"}, f.W-2), pressY, 1)
-	if hintY := pressY + 6; hintY+5 <= f.H { // second ground-band line, flush bottom
-		add(pickTextPx([]string{"L LEADERBOARD", "L BOARD"}, f.W-2), hintY, 1)
-	}
-	return bands
-}
+// Title bands for these sweeps come from the production single source —
+// titleTextEls via titleTextBands, the same rects the cloud filter in
+// drawDecorations keeps clear — so the test can never drift from the
+// layout actually painted. The layout pins below (red logo pixels in
+// band[0], a white subtitle under it) independently verify the bands
+// match what the title painter stamps.
 
 // TestTitleCloudsNeverOverlapTitleText sweeps the title screen of every
 // built-in level at several viewport sizes: no cloud may paint a pixel
@@ -76,7 +34,7 @@ func TestTitleCloudsNeverOverlapTitleText(t *testing.T) {
 			for _, lv := range engine.DefaultLevels() {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH) // starts on title
 				f := worldFrame(nil, g, pal)
-				bands := titleBands(f)
+				bands := titleTextBands(f, g)
 				if len(bands) == 0 {
 					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
 				}
@@ -208,7 +166,7 @@ func TestDemoTitleCloudsNeverOverlapTitleText(t *testing.T) {
 				g := engine.NewGame([]*engine.Level{lv}, viewW, viewH)
 				g.BeginDemo() // StatePlaying + Demo: the attract mode
 				f := worldFrame(nil, g, pal)
-				bands := titleBands(f)
+				bands := titleTextBands(f, g)
 				if len(bands) == 0 {
 					t.Fatalf("%s %dx%d: no title text bands", lv.Name, viewW, viewH)
 				}
