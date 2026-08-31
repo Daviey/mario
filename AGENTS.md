@@ -40,7 +40,7 @@ stdin bytes ──▶ Router.Feed() ──┬─(UI active)──▶ Router.plai
 | `board/` | Supabase PostgREST client + `.env` loader + `EngineVersion` |
 | `replay/` | Run recorder (RLE input log) and deterministic replay executor |
 | `supabase/migrations/` | SQL schema for the `scores` table (RLS + grants) — source of truth for the live DB |
-| `web/` | Static browser shell: `index.html` (canvas + boot-screen loader), builds to `dist/web/` |
+| `web/` | Static browser shell: `index.html` (canvas + boot-screen loader), builds to `dist/web/` — which also carries the repo-root `SECURITY.md` (the `make web` copy is the single source of truth, served at `/SECURITY.md` on mario.baby; the VPS nginx location forces `text/plain` because stock mime.types maps no `.md`) |
 | `packaging/` | Distro payload shared by .deb and AUR: `mario.6` manpage, `mario.desktop`, Debian `copyright`; `packaging/aur/` = AUR `PKGBUILD` + `.SRCINFO` |
 | `internal/art/` | Standalone Mario-icon renderer (`art.IconPNG`) shared by genicon, mkdeb and the AUR build |
 | `internal/sshd/` | From-scratch SSH2 server (stdlib only): transport + curve25519/ed25519 KEX + `none` auth + one session channel per connection + FIFO admission queue when full (`admission.go`); `mario -serve ADDR` runs one `App` per connection (`cmd/mario/serve.go`) |

@@ -315,6 +315,7 @@ web:
 	sed "s|^const CACHE = 'mario-[^']*';|const CACHE = 'mario-$(VERSION)';|" web/sw.js > $(WEBDIST)/sw.js
 	@grep -Fqx "const CACHE = 'mario-$(VERSION)';" $(WEBDIST)/sw.js || { echo "ERROR: sw.js CACHE stamp did not land (want const CACHE = 'mario-$(VERSION)';)" >&2; exit 1; }
 	cp -r web/icons $(WEBDIST)/
+	cp SECURITY.md $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \
 		cp "$$wasm_exec" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
