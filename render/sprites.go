@@ -94,7 +94,7 @@ func sprH(art []string) int { return len(art) }
 
 //
 // Sprite art. All sprites face RIGHT; the renderer mirrors for left.
-// Runes index the palette via runeColors (see render.go).
+// Runes index the palette via runeColors (see palette.go).
 //
 
 var sprMarioSmall = []string{ // 7×7 on a 1×1-tile hitbox
@@ -604,11 +604,17 @@ func drawFlagPole(f *Frame, p *Palette, x, y int) {
 	f.Fill(x+2, y, 1, Pix, p.Pole)
 }
 
+// pennantTravelPx is how far the goal pennant rides down the pole over
+// a full flag slide (drop 0→1): from the finial to the pole base, in
+// pixels — 7 tile rows, finial (engine.FlagTopRow, 7) to the ground
+// (engine.GroundTop, 13).
+const pennantTravelPx = 7 * Pix
+
 func drawFlagTop(f *Frame, p *Palette, x, y int, drop float64) {
 	f.Fill(x+2, y, 2, 2, p.GreenLight) // ball
 	f.Fill(x+2, y+2, 1, Pix-2, p.Pole) // pole
-	// The pennant rides down with the player (7 pole rows to travel).
-	dy := int(drop * float64(7*Pix))
+	// The pennant rides down with the player.
+	dy := int(drop * float64(pennantTravelPx))
 	f.Fill(x+1, y+2+dy, 1, 1, p.FlagRed) // pennant, pointing down-left
 	f.Fill(x-1, y+3+dy, 3, 1, p.FlagRed)
 	f.Fill(x-2, y+4+dy, 4, 1, p.FlagRed)
