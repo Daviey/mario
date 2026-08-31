@@ -63,9 +63,11 @@ func runVerifyPending() error {
 
 	// Pending carries full 256 KB replay strings per row, so fetch in
 	// small batches: two rows fit the client's raised response cap with
-	// margin even fully JSON-escaped, and rows are consumed (verified or
-	// deleted) as we go, so the loop drains the queue. One bad row can
-	// never wedge the run — decode/replay failures delete just that row.
+	// margin even fully JSON-escaped. Rows are consumed (verified or
+	// deleted) as we go; the 1000-row bound is a runaway guard, not a
+	// queue limit — a backlog past it spills to the next scheduled run
+	// (the Action verifies every 15 minutes). One bad row can never
+	// wedge the run — decode/replay failures delete just that row.
 	kept, versionDrops := 0, 0
 	var detDrops []string // determinism failures: replay != claim
 	for kept+versionDrops+len(detDrops) < 1000 {
