@@ -85,7 +85,7 @@ same game.
 **Legacy BIOS / USB:** `make iso` wraps the same payload in a BIOS-bootable hybrid ISO, and `make iso-qemu` smoke-boots it headless.
 
 **Over SSH:** `mario -serve :1985` turns any machine into an arcade. Players connect with
-`ssh -t yourhost -p 1985` and just play: any username works, there are no accounts and nothing
+`ssh yourhost -p 1985` and just play: any username works, there are no accounts and nothing
 to install. (1985 is the year Super Mario Bros. shipped.) The server speaks the whole SSH
 protocol from the standard library (curve25519 key exchange, ed25519 host key, AES-CTR + HMAC)
 and offers exactly one service: the game. No shell, no exec, no forwarding; every connection
@@ -104,7 +104,7 @@ truecolor automatically (even through mosh, which normally flattens everything t
 Terminal.app gets an honest 16-color palette, because that's what it has. When all sessions are
 taken, extra players queue with a live position and ETA instead of bouncing.
 
-Play it right now, over IPv4 or IPv6: `ssh -t mario.baby` (port 22), `ssh -t mario.baby -p 1985`,
+Play it right now, over IPv4 or IPv6: `ssh mario.baby` (port 22), `ssh mario.baby -p 1985`,
 or roam with `mosh mario.baby`.
 
 ### Controls
