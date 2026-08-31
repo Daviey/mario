@@ -431,3 +431,27 @@ func TestEmitCollapsesImmediateRepeats(t *testing.T) {
 		}
 	}
 }
+
+// TestDeathFreezeFrameHoldsPose: the classic death beat — the player
+// holds perfectly still for DeathFreezeTicks before the arc launches.
+// The freeze window is the ticks while stateTimer still sits above
+// DyingTicks-DeathFreezeTicks, so the pose holds for
+// DeathFreezeTicks-1 updates after the killing one and the arc starts on
+// the next.
+func TestDeathFreezeFrameHoldsPose(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	g.Update(Input{Suicide: true})
+	if g.State != StateDying {
+		t.Fatalf("state = %v, want dying", g.State)
+	}
+	y := g.Player.Pos.Y
+	run(g, DeathFreezeTicks-1, Input{})
+	if g.Player.Pos.Y != y {
+		t.Fatalf("freeze frame moved the player: y %f -> %f within %d ticks",
+			y, g.Player.Pos.Y, DeathFreezeTicks-1)
+	}
+	g.Update(Input{}) // the freeze ends: the death arc launches upward
+	if g.Player.Pos.Y >= y {
+		t.Fatalf("death arc did not launch after the freeze: y %f, want above %f", g.Player.Pos.Y, y)
+	}
+}

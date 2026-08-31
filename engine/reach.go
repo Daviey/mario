@@ -104,6 +104,78 @@ func unreachableCoins(l *Level) []Vec {
 	return bad
 }
 
+// flagReachable reports whether a small, unpowered player can reach the
+// goal flag from the spawn by ordinary play — the completability
+// contract every shippable level must satisfy: a level whose flag no
+// amount of running and jumping can touch is unwinnable. It flood-fills
+// the same standable-tile graph as unreachableCoins with the same
+// movement scripts (the engine's own updatePlayer), watching for the
+// engine's grab test: the player's right edge past FlagX+0.3.
+func flagReachable(l *Level) bool {
+	g := NewGame([]*Level{l}, 40, 15)
+	g.Enemies = nil  // same fairness contract as the coin check: enemies
+	g.Plants = nil   // and hazards move, so completion must never depend
+	g.FireBars = nil // on where they happen to sit when the player arrives
+	g.CoinItems = nil
+
+	grabX := float64(l.FlagX) + 0.3 // updatePlaying's flag-grab threshold
+	reached := false
+	visited := map[stand]bool{}
+	root := spawnSurface(l)
+	visited[root] = true
+	queue := []stand{root}
+
+	onTick := func(p *Player) {
+		if !reached && p.Pos.X+p.W >= grabX {
+			reached = true
+		}
+		if p.Grounded {
+			ty := int(p.Pos.Y + p.H + 0.1)
+			for _, fx := range [2]float64{p.Pos.X + 0.1, p.Pos.X + p.W - 0.1} {
+				if s := (stand{int(fx), ty}); !visited[s] {
+					visited[s] = true
+					queue = append(queue, s)
+				}
+			}
+		}
+	}
+
+	for len(queue) > 0 && !reached {
+		s := queue[0]
+		queue = queue[1:]
+		// Precision landings only matter near the flag (the final
+		// staircase and the grab itself); far from it the transit set —
+		// full-speed jump or plain run — still crosses pits and mounts
+		// terrain everywhere.
+		nearFlag := abs(l.FlagX-s.tx) <= 14
+		var scripts [][2]int // {jumpAt, cutAt}; -1: never
+		if nearFlag {
+			scripts = [][2]int{
+				{0, -1}, {8, -1}, {16, -1}, // full jumps, three run-ups
+				{-1, -1},                 // plain run (walk-offs, falls)
+				{0, 4}, {0, 8}, {16, 20}, // cut hops under a low ceiling
+			}
+		} else {
+			scripts = [][2]int{{16, -1}, {-1, -1}}
+		}
+		runs := []bool{true, false}
+		if !nearFlag {
+			runs = []bool{true}
+		}
+		for _, dir := range []int{-1, 1} {
+			for _, run := range runs {
+				for _, v := range scripts {
+					script(g, s, dir, run, v[0], v[1], onTick)
+					if reached {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // script runs one scripted try on g: a small player starts standing on
 // the surface s, holds walk or run toward dir and — from tick jumpAt —
 // presses jump. The jump is held for the whole flight unless cutAt is

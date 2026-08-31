@@ -27,3 +27,42 @@ func TestDailyLevelsCoinsReachable(t *testing.T) {
 		}
 	}
 }
+
+// Completability: every shippable level must be finishable. No other
+// test proves any level's flag reachable — the shape checks pin pits and
+// stairs, the coin checks pin pickups, but only this proves the route
+// from spawn to flag exists under the real physics.
+func TestDefaultLevelsFlagReachable(t *testing.T) {
+	for _, l := range DefaultLevels() {
+		if !flagReachable(l) {
+			t.Errorf("%s: flag at column %d unreachable from the spawn by a small player", l.Name, l.FlagX)
+		}
+	}
+}
+
+// Sampled dailies: twelve dates spread across the year (the exhaustive
+// date sweep is the coin test's job) prove the generator's segment
+// grammar never walls the flag route off.
+func TestDailyLevelsFlagReachable(t *testing.T) {
+	dates := [][2]int{{1, 1}, {2, 3}, {3, 7}, {4, 18}, {5, 29}, {6, 15},
+		{7, 23}, {8, 31}, {9, 9}, {10, 2}, {11, 11}, {12, 25}}
+	for _, md := range dates {
+		l := DailyLevelFor(2026, md[0], md[1])
+		if !flagReachable(l) {
+			t.Errorf("daily %02d-%02d: flag at column %d unreachable from the spawn", md[0], md[1], l.FlagX)
+		}
+	}
+}
+
+// Negative control: a floor-to-sky wall before the flag must read
+// unreachable — without this, a silently broken flood (say, scripts that
+// teleport or a grab test that always fires) would make the reachability
+// suite vacuously green.
+func TestFlagReachableNegativeControl(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) {
+		b.Fill(30, 0, 30, GroundTop-1, '#') // wall between spawn and the flag at 55
+	})
+	if flagReachable(l) {
+		t.Error("flag reported reachable through a floor-to-sky wall")
+	}
+}

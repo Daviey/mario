@@ -112,24 +112,32 @@ func TestSideHitSmallPlayerDies(t *testing.T) {
 	}
 }
 
-func TestSideHitSuperPlayerShrinks(t *testing.T) {
-	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') })
-	g := newGame(t, l)
-	g.Player.grow()
-	g.Player.W, g.Player.H = SuperW, SuperH
-	g.Player.Pos = Vec{18.5, 13 - SuperH}
-	run(g, 120, Input{Right: true})
-	if g.Player.Power < PowerSuper && g.State == StatePlaying {
-		// Shrunk and survived.
+// Both powered states pay the same side-hit toll: shrink to small with
+// the feet planted and invincibility granted — fire armour buys nothing
+// extra against a plain contact hit.
+func TestSideHitPoweredPlayerShrinks(t *testing.T) {
+	for _, power := range []PowerLevel{PowerSuper, PowerFire} {
+		l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') })
+		g := newGame(t, l)
+		if power == PowerFire {
+			g.Player.fireUp()
+		} else {
+			g.Player.grow()
+		}
+		g.Player.W, g.Player.H = SuperW, SuperH
+		g.Player.Pos = Vec{18.5, 13 - SuperH}
+		run(g, 120, Input{Right: true})
+		if g.State != StatePlaying || g.Player.Power != PowerSmall {
+			t.Fatalf("power %v: state=%v power=%v, want shrunk and playing",
+				power, g.State, g.Player.Power)
+		}
 		if g.Player.H != SmallH {
-			t.Errorf("height = %f, want small", g.Player.H)
+			t.Errorf("power %v: height = %f, want small", power, g.Player.H)
 		}
 		if g.Player.Invincible == 0 {
-			t.Error("no invincibility granted after shrink")
+			t.Errorf("power %v: no invincibility granted after shrink", power)
 		}
-		return
 	}
-	t.Fatalf("super player died or stayed super: state=%v power=%v", g.State, g.Player.Power)
 }
 
 func TestInvinciblePreventsDamage(t *testing.T) {
@@ -225,7 +233,7 @@ func TestStompMovingShellStopsIt(t *testing.T) {
 	e.State = EnemyShellMoving
 	e.H = GoombaH
 	e.Dir = -1
-	e.Pos.Y = 13 - GoombaH
+	e.Chain = 5             // mid-ladder: the stop must zero the kill chain
 	dropPlayer(g, 20, 11.2) // close enough to catch the moving shell
 	for range 60 {
 		if e.State != EnemyShellMoving {
@@ -235,6 +243,15 @@ func TestStompMovingShellStopsIt(t *testing.T) {
 	}
 	if e.State != EnemyShell {
 		t.Fatalf("state = %v, want idle shell", e.State)
+	}
+	if e.Chain != 0 {
+		t.Errorf("chain = %d after stomp-stop, want 0", e.Chain)
+	}
+	// Re-kick: the shell slides again with a fresh chain, so its next
+	// victim is paid from the ladder's first rung, not the stale one.
+	g.kickShell(e)
+	if e.State != EnemyShellMoving || e.Chain != 0 {
+		t.Errorf("re-kick: state=%v chain=%d, want moving with chain 0", e.State, e.Chain)
 	}
 	if g.Player.Vel.Y >= 0 {
 		t.Errorf("no stomp bounce: %f", g.Player.Vel.Y)
