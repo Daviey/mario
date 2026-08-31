@@ -3,6 +3,8 @@ package board
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,5 +58,39 @@ func TestPowOKLeadingZeroBoundary(t *testing.T) {
 	}
 	if !powOK(digestWithLeadingZeroBits(powBits + 4)) {
 		t.Errorf("digest with more than %d leading zero bits rejected", powBits)
+	}
+}
+
+// TestPowMatchesMigration syncs the two difficulty definitions by reading
+// the migration itself: verify_pow() accepts a digest whose hex form
+// starts with N zero characters, and that prefix must encode exactly
+// powBits leading zero bits. The payload concatenation order
+// ("<device_id>:<score>:<nonce>", mirrored in solvePow) is asserted too,
+// but only when the SQL's payload expression is in the shape this test
+// parses — a refactored trigger skips that half rather than guessing.
+func TestPowMatchesMigration(t *testing.T) {
+	sql, err := os.ReadFile("../supabase/migrations/20260825000003_pow_and_privacy.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v (tests run from board/, so the path is relative to it)", err)
+	}
+	prefixRe := regexp.MustCompile(`position\('([0-9]*)' in encode`)
+	m := prefixRe.FindStringSubmatch(string(sql))
+	if m == nil {
+		t.Fatal("verify_pow(): hex-prefix check not found in migration")
+	}
+	if bits := 4 * len(m[1]); bits != powBits {
+		t.Errorf("migration demands %d leading zero bits (hex prefix %q), Go powBits = %d", bits, m[1], powBits)
+	}
+
+	payloadRe := regexp.MustCompile(`payload text := new\.(\w+)::text \|\| ':' \|\| new\.(\w+)::text \|\| ':' \|\| coalesce\(new\.(\w+), ''\)`)
+	pm := payloadRe.FindStringSubmatch(string(sql))
+	if pm == nil {
+		t.Log("payload expression not in parseable shape; skipping payload-order half")
+		return
+	}
+	for i, want := range []string{"device_id", "score", "pow_nonce"} {
+		if pm[i+1] != want {
+			t.Errorf("payload part %d is new.%s, want new.%s (solvePow hashes <device_id>:<score>:<nonce>)", i+1, pm[i+1], want)
+		}
 	}
 }

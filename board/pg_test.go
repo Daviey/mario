@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -82,8 +83,9 @@ func TestPendingRowFromValues(t *testing.T) {
 	if p.ID != "id-1" || p.Name != "DAVE" || p.Score != 500 || p.Level != 2 || p.Mode != "classic" {
 		t.Errorf("row = %+v", p)
 	}
-	// Column-count guarding lives in Pending (it sees the query result);
-	// here only value conversion is under test.
+	// Column-name/count guarding lives in queryPending (it sees the
+	// RowDescription); here only value conversion is under test, plus
+	// the mapper's own last-resort width guard.
 	bad := append([]pgwire.Value{}, cols...)
 	bad[2] = val("not-a-number")
 	if _, err := pendingRowFromValues(bad, "pending"); err == nil || !strings.Contains(err.Error(), "score") {
@@ -93,6 +95,9 @@ func TestPendingRowFromValues(t *testing.T) {
 	bad[0] = nul
 	if _, err := pendingRowFromValues(bad, "pending"); err == nil || !strings.Contains(err.Error(), "NULL id") {
 		t.Errorf("want NULL id error, got %v", err)
+	}
+	if _, err := pendingRowFromValues(cols[:13], "pending"); err == nil || !strings.Contains(err.Error(), "want 14") {
+		t.Errorf("want width guard error, got %v", err)
 	}
 }
 
@@ -252,9 +257,16 @@ func dbAuthFrame(code uint32) []byte {
 	return dbFrame('R', binary.BigEndian.AppendUint32(nil, code))
 }
 
-// dbRowDesc announces n columns; the client ignores the field details.
-func dbRowDesc(n int) []byte {
-	return dbFrame('T', binary.BigEndian.AppendUint16(nil, uint16(n)))
+// dbRowDesc announces the given column names; the per-field metadata
+// after each name is zeros, exactly like pgwire's test helper.
+func dbRowDesc(names ...string) []byte {
+	body := binary.BigEndian.AppendUint16(nil, uint16(len(names)))
+	for _, n := range names {
+		body = append(body, n...)
+		body = append(body, 0) // name terminator
+		body = append(body, make([]byte, 18)...)
+	}
+	return dbFrame('T', body)
 }
 
 // dbDataRow encodes one row; a nil value is NULL.
@@ -283,7 +295,7 @@ func TestDBClientSQLOperations(t *testing.T) {
 	f := newFakeDB(t, func(sql string) [][]byte {
 		if strings.HasPrefix(sql, "SELECT") {
 			return [][]byte{
-				dbRowDesc(14),
+				dbRowDesc(pendingColumns...),
 				dbDataRow([]byte("id-1"), []byte("DAVE"), []byte("500"), []byte("2"),
 					[]byte("classic"), nil, []byte(EngineVersion), []byte(`{"v":1,"ticks":1,"runs":[[0,1]]}`),
 					[]byte("ssh"), nil, []byte("xterm"), nil, []byte("legacy"), []byte("80x24")),
@@ -333,10 +345,10 @@ func TestDBClientSQLOperations(t *testing.T) {
 	if len(q) != 4 {
 		t.Fatalf("sent %d queries, want 4: %q", len(q), q)
 	}
+	selectList := "SELECT " + strings.Join(pendingColumns, ",") + " FROM scores"
 	for _, want := range []string{
-		"SELECT id,name,score,level,mode,day,engine_version,replay",
-		"surface,user_agent,term,colorterm,input_regime,viewport",
-		"FROM scores WHERE verified = false AND replay IS NOT NULL",
+		selectList,
+		"WHERE verified = false AND replay IS NOT NULL",
 		"ORDER BY created_at ASC",
 		"LIMIT 5",
 	} {
@@ -360,26 +372,94 @@ func TestDBClientSQLOperations(t *testing.T) {
 	}
 }
 
-// TestDBClientColumnGuard: a query result that no longer has 14 columns
-// (schema drift) must error out, not mis-parse into a PendingRow.
+// TestDBClientColumnGuard: schema drift in the query result — a wrong
+// column count, renamed or reordered columns — must error out, not
+// mis-parse into a PendingRow (scores read as levels). The names come
+// from the RowDescription the wire layer now surfaces.
 func TestDBClientColumnGuard(t *testing.T) {
-	short := [][]byte{nil, []byte("DAVE"), []byte("500"), []byte("2"),
-		[]byte("classic"), nil, []byte(EngineVersion), []byte("{}"),
-		[]byte("ssh"), nil, []byte("xterm"), nil, []byte("legacy")}
-	f := newFakeDB(t, func(string) [][]byte {
-		return append([][]byte{dbRowDesc(len(short))}, dbDataRow(short...), dbCmdTag("SELECT 1"), dbReady())
+	full := [][]byte{[]byte("id-1"), []byte("DAVE"), []byte("500"), []byte("2"),
+		[]byte("classic"), nil, []byte(EngineVersion), []byte(`{"v":1}`),
+		[]byte("ssh"), nil, []byte("xterm"), nil, []byte("legacy"), []byte("80x24")}
+	short := full[:len(full)-1]
+	swapped := append([]string(nil), pendingColumns...)
+	swapped[2], swapped[3] = swapped[3], swapped[2] // score <-> level
+	renamed := append([]string(nil), pendingColumns...)
+	renamed[7] = "replay_json"
+	cases := []struct {
+		name string
+		desc []string
+		row  [][]byte
+		want string
+	}{
+		{"thirteen columns", pendingColumns[:len(pendingColumns)-1], short, "want 14"},
+		{"swapped names", swapped, full, `column 3 is "level", want "score"`},
+		{"renamed column", renamed, full, `column 8 is "replay_json", want "replay"`},
+	}
+	for _, tc := range cases {
+		f := newFakeDB(t, func(string) [][]byte {
+			return [][]byte{dbRowDesc(tc.desc...), dbDataRow(tc.row...), dbCmdTag("SELECT 1"), dbReady()}
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		conn, err := pgwire.Connect(ctx, pgwire.Config{
+			Addr: f.ln.Addr().String(), User: "mario", Password: "secret", Database: "mario",
+		})
+		if err != nil {
+			cancel()
+			t.Fatalf("%s: connect: %v", tc.name, err)
+		}
+		c := &DBClient{conn: conn}
+		_, err = c.Pending(ctx, 1)
+		conn.Close()
+		cancel()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want it to contain %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestPendingColumnsSharedAcrossBackends pins the drift guard end to end:
+// the PostgREST select string (Client.Pending) and the direct SQL SELECT
+// (DBClient.queryPending) must both request exactly pendingColumns, in
+// order — the two backends feed the same positional mapper, so a column
+// added to one but not the other quietly verifies a different queue.
+func TestPendingColumnsSharedAcrossBackends(t *testing.T) {
+	joined := strings.Join(pendingColumns, ",")
+	if len(pendingColumns) != 14 {
+		t.Fatalf("pendingColumns has %d entries, want 14", len(pendingColumns))
+	}
+
+	// PostgREST side: the select= query parameter.
+	client, f := testClient(t, func(*http.Request, string) (int, string) { return 200, `[]` })
+	if _, err := client.Pending(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(t).URL.Query().Get("select"); got != joined {
+		t.Errorf("PostgREST select = %q, want %q", got, joined)
+	}
+
+	// Direct-SQL side: the SELECT column list.
+	db := newFakeDB(t, func(string) [][]byte {
+		return [][]byte{dbRowDesc(pendingColumns...), dbCmdTag("SELECT 0"), dbReady()}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, err := pgwire.Connect(ctx, pgwire.Config{
-		Addr: f.ln.Addr().String(), User: "mario", Password: "secret", Database: "mario",
+		Addr: db.ln.Addr().String(), User: "mario", Password: "secret", Database: "mario",
 	})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer conn.Close()
 	c := &DBClient{conn: conn}
-	if _, err := c.Pending(ctx, 1); err == nil || !strings.Contains(err.Error(), "want 14") {
-		t.Fatalf("err = %v, want a 14-column guard error", err)
+	if _, err := c.Pending(ctx, 1); err != nil {
+		t.Fatalf("pending: %v", err)
+	}
+	queries := db.queries()
+	if len(queries) != 1 {
+		t.Fatalf("sent %d queries, want 1", len(queries))
+	}
+	want := "SELECT " + joined + " FROM scores"
+	if !strings.Contains(queries[0], want) {
+		t.Errorf("SQL %q does not select %q", queries[0], want)
 	}
 }

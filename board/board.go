@@ -117,13 +117,23 @@ func ClampPlayContext(e *Entry) {
 		e.Surface = ""
 	}
 	e.UserAgent = clampMeta(e.UserAgent, 256)
-	e.Term = clampMeta(e.Term, 64)
-	e.ColorTerm = clampMeta(e.ColorTerm, 32)
-	if e.InputRegime != "kitty" && e.InputRegime != "legacy" {
-		e.InputRegime = ""
+	clampTermEnv(&e.Term, &e.ColorTerm, &e.InputRegime, &e.Viewport)
+	// scores_engine_version_len (20260826000003): <= 32 chars.
+	e.EngineVersion = clampMeta(e.EngineVersion, 32)
+}
+
+// clampTermEnv bounds the four terminal-diagnostic fields the scores and
+// plays tables clamp identically (term <= 64, colorterm <= 32, the
+// kitty/legacy regime enum, the WxH viewport shape). Both clamp entry
+// points call it so the two CHECK families can never drift apart.
+func clampTermEnv(term, colorterm, regime, viewport *string) {
+	*term = clampMeta(*term, 64)
+	*colorterm = clampMeta(*colorterm, 32)
+	if *regime != "kitty" && *regime != "legacy" {
+		*regime = ""
 	}
-	if !viewportPat.MatchString(e.Viewport) {
-		e.Viewport = ""
+	if !viewportPat.MatchString(*viewport) {
+		*viewport = ""
 	}
 }
 
@@ -242,11 +252,24 @@ type PendingRow struct {
 	Viewport      string `json:"viewport"`
 }
 
+// pendingColumns is the one column projection every pending-row backend
+// requests, in positional order: Client.Pending's PostgREST select
+// string and DBClient.queryPending's SQL SELECT both derive from it, and
+// pendingRowFromValues maps the returned values positionally against the
+// same order. The projection is asserted against the RowDescription
+// names the database actually returns before mapping (see pg.go), and
+// pg_test.go pins the two backends together — drift is a mis-parse, not
+// a decode error.
+var pendingColumns = []string{
+	"id", "name", "score", "level", "mode", "day", "engine_version", "replay",
+	"surface", "user_agent", "term", "colorterm", "input_regime", "viewport",
+}
+
 // Pending fetches up to n unverified rows that carry a replay. Requires a
 // client built with the service-role key.
 func (c *Client) Pending(ctx context.Context, n int) ([]PendingRow, error) {
 	q := url.Values{
-		"select":   {`id,name,score,level,mode,day,engine_version,replay,surface,user_agent,term,colorterm,input_regime,viewport`},
+		"select":   {strings.Join(pendingColumns, ",")},
 		"verified": {"eq.false"},
 		"replay":   {"not.is.null"},
 		"order":    {"created_at.asc"},
@@ -305,18 +328,11 @@ func ClampPlaySession(p *PlaySession) {
 	if !ipPat.MatchString(p.IP) {
 		p.IP = ""
 	}
-	p.Term = clampMeta(p.Term, 64)
-	p.ColorTerm = clampMeta(p.ColorTerm, 32)
 	p.Client = clampMeta(p.Client, 128)
 	if p.Colors != 24 && p.Colors != 256 {
 		p.Colors = 16
 	}
-	if p.InputRegime != "kitty" && p.InputRegime != "legacy" {
-		p.InputRegime = ""
-	}
-	if !viewportPat.MatchString(p.Viewport) {
-		p.Viewport = ""
-	}
+	clampTermEnv(&p.Term, &p.ColorTerm, &p.InputRegime, &p.Viewport)
 	p.EngineVersion = clampMeta(p.EngineVersion, 32)
 	p.Level = clampLevel(p.Level)
 	if p.Score < 0 {
@@ -327,6 +343,10 @@ func ClampPlaySession(p *PlaySession) {
 	}
 	if p.Runs < 0 {
 		p.Runs = 0
+	}
+	// plays.runs (20260830000000): between 0 and 1,000,000.
+	if p.Runs > 1_000_000 {
+		p.Runs = 1_000_000
 	}
 	if p.EndedAt.Before(p.StartedAt) {
 		p.EndedAt = p.StartedAt
@@ -381,6 +401,14 @@ func (e *HTTPError) Error() string {
 // and 5xx server errors. A status the server chose deliberately (4xx:
 // PoW/RLS rejections, 429 rate limits, bad requests) fails identically
 // again; retrying it only doubles the latency.
+//
+// The retry policy is deliberately asymmetric, and only the fetch side
+// uses it: a failed board FETCH is retried once by the UI (the worst a
+// duplicate request costs is one extra read), but Submit never retries —
+// a timed-out POST may have landed server-side, a blind resubmit would
+// fork duplicate rows, and the scores rate limit (2 rows/min) makes the
+// second attempt likely to 429 anyway. The one-shot ask accepts the
+// loss: the player sees SUBMIT FAILED and can retry deliberately.
 func Transient(err error) bool {
 	if err == nil {
 		return false

@@ -185,6 +185,51 @@ func TestTopEmpty(t *testing.T) {
 	}
 }
 
+// TestTopModeArgShaping pins how TopMode shapes the rpc body: the daily
+// board carries p_mode and p_day (plus p_device_id when known), while
+// the classic board (Top, mode "") sends neither — board_rows defaults
+// p_mode to 'classic' itself, so the wire stays minimal on the hot path.
+func TestTopModeArgShaping(t *testing.T) {
+	var body string
+	client, _ := testClient(t, func(_ *http.Request, b string) (int, string) {
+		body = b
+		return 200, `[]`
+	})
+	ctx := context.Background()
+
+	if _, err := client.TopMode(ctx, 10, "dev-1", "daily", "2026-08-31"); err != nil {
+		t.Fatal(err)
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(body), &args); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{
+		"p_limit": float64(10), "p_device_id": "dev-1",
+		"p_mode": "daily", "p_day": "2026-08-31",
+	} {
+		if args[k] != want {
+			t.Errorf("daily rpc args[%s] = %v, want %v", k, args[k], want)
+		}
+	}
+
+	if _, err := client.Top(ctx, 10, "dev-1"); err != nil {
+		t.Fatal(err)
+	}
+	args = nil
+	if err := json.Unmarshal([]byte(body), &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["p_limit"] != float64(10) || args["p_device_id"] != "dev-1" {
+		t.Errorf("classic rpc args = %v, want only p_limit and p_device_id", args)
+	}
+	for _, k := range []string{"p_mode", "p_day"} {
+		if _, ok := args[k]; ok {
+			t.Errorf("classic rpc args must omit %s: %v", k, args)
+		}
+	}
+}
+
 func TestFromEnv(t *testing.T) {
 	t.Setenv("SUPABASE_URL", "")
 	t.Setenv("SUPABASE_KEY", "")
@@ -509,6 +554,20 @@ func TestClampPlaySessionBounds(t *testing.T) {
 		t.Errorf("score %d not clamped to 9999999", p.Score)
 	}
 
+	// The runs CHECK is two-sided: negative folds to 0, past the
+	// million cap folds to the cap, in-range passes through.
+	for _, tc := range []struct{ in, want int }{
+		{-3, 0},
+		{1_000_001, 1_000_000},
+		{42, 42},
+	} {
+		p.Runs = tc.in
+		ClampPlaySession(&p)
+		if p.Runs != tc.want {
+			t.Errorf("ClampPlaySession runs %d = %d, want %d", tc.in, p.Runs, tc.want)
+		}
+	}
+
 	// Real literals in both families pass through untouched.
 	p.IP, p.Viewport = "192.168.1.5", "80x24"
 	ClampPlaySession(&p)
@@ -519,5 +578,19 @@ func TestClampPlaySessionBounds(t *testing.T) {
 	ClampPlaySession(&p)
 	if p.IP != "::1" {
 		t.Errorf("ipv6 literal %q rejected", p.IP)
+	}
+}
+
+// The scores engine_version CHECK (scores_engine_version_len) is mirrored
+// on submissions too: a long engine string clamps to 32 chars, the same
+// bound ClampPlaySession enforces on telemetry.
+func TestClampPlayContextEngineVersion(t *testing.T) {
+	e := &Entry{EngineVersion: strings.Repeat("e", 33), Surface: "ssh"}
+	ClampPlayContext(e)
+	if want := strings.Repeat("e", 32); e.EngineVersion != want {
+		t.Errorf("Entry.EngineVersion = %d chars, want %d", len(e.EngineVersion), len(want))
+	}
+	if e.Surface != "ssh" {
+		t.Errorf("unrelated fields must survive: %+v", e)
 	}
 }

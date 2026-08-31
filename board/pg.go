@@ -116,22 +116,24 @@ func (c *DBClient) Latest(ctx context.Context, n int) ([]PendingRow, error) {
 		" WHERE replay IS NOT NULL", "DESC", n)
 }
 
-// queryPending is the body Pending and Latest share: the 14-column
-// scores select with a WHERE fragment, a created_at ordering direction
-// and a row limit. label names the caller in errors.
+// queryPending is the body Pending and Latest share: the pendingColumns
+// select with a WHERE fragment, a created_at ordering direction and a
+// row limit. label names the caller in errors. Before any row is
+// mapped, the RowDescription names the database actually returned are
+// asserted against pendingColumns — the mapping is positional, so a
+// reordered or renamed column set must error, not mis-parse.
 func (c *DBClient) queryPending(ctx context.Context, label, where, dir string, n int) ([]PendingRow, error) {
-	rows, err := c.conn.Query(ctx, `SELECT id,name,score,level,mode,day,engine_version,replay,
-		surface,user_agent,term,colorterm,input_regime,viewport
-		FROM scores`+where+`
-		ORDER BY created_at `+dir+` LIMIT `+strconv.Itoa(n))
+	rows, cols, err := c.conn.Query(ctx, "SELECT "+strings.Join(pendingColumns, ",")+
+		" FROM scores"+where+
+		" ORDER BY created_at "+dir+" LIMIT "+strconv.Itoa(n))
 	if err != nil {
 		return nil, fmt.Errorf("db %s: %w", label, err)
 	}
+	if err := checkPendingColumns(cols, label); err != nil {
+		return nil, err
+	}
 	out := make([]PendingRow, 0, len(rows))
 	for _, r := range rows {
-		if len(r) != 14 {
-			return nil, fmt.Errorf("db %s: got %d columns, want 14", label, len(r))
-		}
 		p, err := pendingRowFromValues(r, label)
 		if err != nil {
 			return nil, err
@@ -141,12 +143,30 @@ func (c *DBClient) queryPending(ctx context.Context, label, where, dir string, n
 	return out, nil
 }
 
-// pendingRowFromValues converts one 14-column query result into a
-// PendingRow. NULL text columns become "" exactly like the PostgREST JSON
-// path (its nulls decode to the zero value). label names the calling
-// query in errors.
+// checkPendingColumns asserts cols — the column names surfaced from the
+// query's RowDescription — are exactly pendingColumns, in order.
+func checkPendingColumns(cols []string, label string) error {
+	if len(cols) != len(pendingColumns) {
+		return fmt.Errorf("db %s: got %d columns, want %d", label, len(cols), len(pendingColumns))
+	}
+	for i, c := range cols {
+		if c != pendingColumns[i] {
+			return fmt.Errorf("db %s: column %d is %q, want %q", label, i+1, c, pendingColumns[i])
+		}
+	}
+	return nil
+}
+
+// pendingRowFromValues converts one pendingColumns-wide query result into
+// a PendingRow. NULL text columns become "" exactly like the PostgREST
+// JSON path (its nulls decode to the zero value). label names the
+// calling query in errors; the caller has already asserted the column
+// names — this guard only catches a malformed DataRow.
 func pendingRowFromValues(r []pgwire.Value, label string) (PendingRow, error) {
 	var p PendingRow
+	if len(r) != len(pendingColumns) {
+		return p, fmt.Errorf("db %s: got %d values, want %d", label, len(r), len(pendingColumns))
+	}
 	p.ID = r[0].String()
 	p.Name = r[1].String()
 	n, err := r[2].Int()
