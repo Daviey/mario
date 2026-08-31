@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +47,49 @@ func TestResolveMoshBin(t *testing.T) {
 				t.Errorf("note = %q, want %q", note, tc.wantNote)
 			}
 		})
+	}
+}
+
+// serveIgnored must flag exactly the play-only flags -serve never
+// consumes — and not the ones it does (-basic, -nobell, -level) nor
+// -width's 0 default.
+func TestServeIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		daily        bool
+		width        int
+		demo, cheats bool
+		want         []string
+	}{
+		{"clean serve", false, 0, false, false, nil},
+		{"default width is fine", false, 0, false, false, nil},
+		{"explicit width is ignored by serve", false, 30, false, false, []string{"-width"}},
+		{"daily belongs to play and -scores", true, 0, false, false, []string{"-daily"}},
+		{"demo is shadowed by serve", false, 0, true, false, []string{"-demo"}},
+		{"cheats never reach sessions", false, 0, false, true, []string{"-cheats"}},
+		{"all together", true, 40, true, true, []string{"-daily", "-width", "-demo", "-cheats"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := serveIgnored(tc.daily, tc.width, tc.demo, tc.cheats)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("serveIgnored = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// usage must document the dispatch precedence main actually implements;
+// the chain reads the same order the flag checks run in main().
+func TestUsageDocumentsModePrecedence(t *testing.T) {
+	var b bytes.Buffer
+	usage(&b)
+	out := b.String()
+	for _, chain := range []string{
+		"-version > -verify-pending > -dump-replays > -replay > -scores",
+		"> -ui-preview > -serve > -demo > interactive play",
+	} {
+		if !strings.Contains(out, chain) {
+			t.Errorf("usage missing precedence chain %q", chain)
+		}
 	}
 }

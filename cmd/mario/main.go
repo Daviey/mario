@@ -78,6 +78,18 @@ func main() {
 		fmt.Printf("mario %s (engine %s)\n", render.Version, board.EngineVersion)
 		return
 	}
+
+	// -serve never consumes the play-only flags: each SSH session sizes
+	// its own viewport from the client's terminal, starts the daily
+	// challenge from the title screen, and runs neither the demo script
+	// nor cheat mode (-basic and -nobell ARE honored). Reject the
+	// meaningless combos instead of silently dropping them.
+	if *serveAddr != "" {
+		if ignored := serveIgnored(*daily, *width, *demo, *cheats); len(ignored) > 0 {
+			fmt.Fprintf(os.Stderr, "mario: -serve ignores %s: each session sizes its own viewport, starts the daily from the title screen, and never runs the demo or cheats\n", strings.Join(ignored, ", "))
+			os.Exit(2)
+		}
+	}
 	// Auto color depth (render.ColorDepthFor — the rule shared with the
 	// SSH host and the mosh child): 24-bit when the terminal is known
 	// truecolor (a COLORTERM hint or a TrueColorTerm TERM family), the
@@ -182,6 +194,29 @@ func resolveMoshBin(flag string) (bin, note string) {
 	return p, ""
 }
 
+// serveIgnored lists the play-only flags -serve provably never
+// consumes (each SSH session sizes its own viewport from the client's
+// terminal, starts the daily from the title screen, and runs neither
+// the demo script nor cheat mode), so main can reject the meaningless
+// combos instead of silently dropping them. -width's 0 default and
+// every -serve-consumed flag (-basic, -nobell, -level, ...) yield nil.
+func serveIgnored(daily bool, width int, demo, cheats bool) []string {
+	var ignored []string
+	if daily {
+		ignored = append(ignored, "-daily")
+	}
+	if width != 0 {
+		ignored = append(ignored, "-width")
+	}
+	if demo {
+		ignored = append(ignored, "-demo")
+	}
+	if cheats {
+		ignored = append(ignored, "-cheats")
+	}
+	return ignored
+}
+
 // helpRequested reports whether any argument explicitly asks for help.
 // flag.Parse would print usage for these too (exit 0), but only to its
 // default stderr stream.
@@ -219,6 +254,13 @@ func usage(w io.Writer) {
 		}
 		fmt.Fprintf(w, "  %s%s%s\n", b.String(), strings.Repeat(" ", pad), text)
 	})
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "mode precedence (first given wins):")
+	fmt.Fprintln(w, "  -version > -verify-pending > -dump-replays > -replay > -scores")
+	fmt.Fprintln(w, "  > -ui-preview > -serve > -demo > interactive play")
+	fmt.Fprintln(w, "  -daily tunes -scores and play; -width and -cheats tune play only;")
+	fmt.Fprintln(w, "  -basic/-nobell also reach -serve; -level feeds play, -serve and -demo")
 
 	row := func(keys, what string) {
 		fmt.Fprintf(w, "  %-23s  %s\n", keys, what)
