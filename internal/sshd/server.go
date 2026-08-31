@@ -10,6 +10,7 @@ package sshd
 // The handler runs per connection with a Session that mirrors the pieces
 // of a terminal the game needs: a byte stream down to the client, a feed
 // for keystrokes, the pty size and TERM/ENV values.
+
 import (
 	"crypto/ed25519"
 	"encoding/binary"
@@ -22,8 +23,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/Daviey/mario/render"
 )
 
 // Server serves the game over SSH.
@@ -86,114 +85,6 @@ type Server struct {
 	adm *admission
 }
 
-// Session is one connected player.
-type Session struct {
-	ch *channel
-}
-
-// Write sends bytes to the client's terminal (respecting the SSH flow
-// control window; blocks until the client drains).
-func (s *Session) Write(p []byte) (int, error) { return s.ch.write(p) }
-
-// Logf emits an operator line on the server's logger (stderr by
-// default): session lifecycle telemetry from handlers.
-func (s *Session) Logf(format string, args ...any) {
-	s.ch.srv.Log.Printf(format, args...)
-}
-
-// RemoteAddr returns the connected client's address (host:port) — for
-// hosts that key per-player state such as input-calibration warm-start
-// by origin.
-func (s *Session) RemoteAddr() string { return s.ch.conn.RemoteAddr().String() }
-
-// Size returns the pty size in character cells (80x24 if no pty-req).
-func (s *Session) Size() (cols, rows int) {
-	s.ch.mu.Lock()
-	defer s.ch.mu.Unlock()
-	return s.ch.cols, s.ch.rows
-}
-
-// Term returns the TERM value from pty-req, or "" without one.
-func (s *Session) Term() string {
-	s.ch.mu.Lock()
-	defer s.ch.mu.Unlock()
-	return s.ch.term
-}
-
-// Env returns an environment variable sent via env requests.
-func (s *Session) Env(name string) string {
-	s.ch.mu.Lock()
-	defer s.ch.mu.Unlock()
-	return s.ch.env[name]
-}
-
-// OnFeed installs the keystroke handler (raw terminal bytes from the
-// client, e.g. app.Feed). It also releases the color-depth probe's
-// buffer: keystrokes typed while the probe waited for the terminal's
-// DA2/DA3 reply are replayed into f, and later input flows directly
-// (the probe keeps only stripping any late replies).
-func (s *Session) OnFeed(f func([]byte)) {
-	s.ch.mu.Lock()
-	s.ch.feed = f
-	p := s.ch.probe
-	s.ch.mu.Unlock()
-	if p != nil {
-		if b := p.drain(); len(b) > 0 {
-			f(b)
-		}
-	}
-}
-
-// TrueColor reports whether the client's terminal renders 24-bit
-// color. Resolution order: a COLORTERM the client forwarded as an env
-// request (ssh -o SendEnv=COLORTERM), then the TERM family, then the
-// DA2/DA3 probe fired at pty-req (waits up to the server's ProbeWait
-// for the terminal to identify itself; silent terminals fall back to
-// the TERM rules). See termprobe.go.
-func (s *Session) TrueColor() bool {
-	return s.ch.decideColorTerm() != ""
-}
-
-// ColorTerm returns the DECIDED color-depth signal for this session —
-// env request > TERM family > DA probe (see TrueColor). Empty means the
-// 16-color palette. Telemetry should report this, not the raw env: the
-// probe decides most real sessions.
-func (s *Session) ColorTerm() string {
-	return s.ch.decideColorTerm()
-}
-
-// ColorDepth reports the SGR color mode this session's client renders
-// (render.Colors24/256/16): 24-bit when TrueColor holds (env request >
-// TERM family > DA probe), otherwise the fixed 256-color cube whenever
-// the pty TERM advertises 256 colors — every -256color terminal and
-// mosh's cell model honors it — and base-16 only for terminals that
-// claim neither.
-func (s *Session) ColorDepth() render.ColorMode {
-	return render.ColorDepthFor(s.Term(), s.ColorTerm())
-}
-
-// ClientVersion returns the client's SSH identification string (e.g.
-// "SSH-2.0-OpenSSH_10.4") from the RFC 4253 banner exchange — the
-// ssh-surface user agent for telemetry.
-func (s *Session) ClientVersion() string {
-	return string(s.ch.t.vPeer)
-}
-
-// OnResize installs the pty-size handler (fired on every window-change
-// request, e.g. app.Resize).
-func (s *Session) OnResize(f func(cols, rows int)) {
-	s.ch.mu.Lock()
-	s.ch.onResize = f
-	s.ch.mu.Unlock()
-}
-
-// Done is closed when the client goes away (disconnect, channel close or
-// transport error).
-func (s *Session) Done() <-chan struct{} { return s.ch.done }
-
-// Close ends the session: EOF + channel close, then the connection.
-func (s *Session) Close() error { return s.ch.shutdown() }
-
 // defaultPostAuthWait is the fallback for Server.PostAuthWait: how long
 // a post-KEX connection may sit with no session channel (see there).
 const defaultPostAuthWait = 60 * time.Second
@@ -203,154 +94,6 @@ const defaultPostAuthWait = 60 * time.Second
 // grinding out failures is pure abuse; past the cap it gets a
 // DISCONNECT instead of an infinite reply loop.
 const maxAuthTries = 20
-
-var errChannelClosed = errors.New("sshd: channel closed")
-
-// channel is the server side of the single session channel. Locking:
-// mu guards every mutable field — window, owe, cols/rows, term, env,
-// feed, onResize and probe — plus the FIFO handoffs that hang off them
-// (cond wakes window-blocked writers; closeOnce+done make shutdown
-// idempotent and observable). Fields read before the session starts
-// (t, srv, conn, maxPkt, wait) are set once at open and never written
-// again, so they need no lock.
-type channel struct {
-	t    *transport
-	srv  *Server
-	conn net.Conn
-
-	mu          sync.Mutex
-	cond        *sync.Cond
-	window      int // client's receive window for our CHANNEL_DATA
-	maxPkt      int // client's max packet size
-	owe         int // inbound bytes consumed but not yet window-adjusted
-	feed        func([]byte)
-	onResize    func(cols, rows int)
-	term        string
-	cols        int
-	rows        int
-	env         map[string]string
-	shelled     bool // shell request seen
-	execStarted bool // mosh-handshake exec seen
-	remoteGone  bool
-	sendErr     bool
-
-	// Color-depth probe state (termprobe.go): created at the shell
-	// request (not pty-req — see channelRequest), when the session may
-	// first talk to the terminal.
-	probe *termProbe
-	wait  time.Duration // per-session ProbeWait, copied at channel open
-
-	closeOnce sync.Once
-	done      chan struct{}
-}
-
-// rxWindow is the 2MB receive window advertised at channel open —
-// generous for a keystrokes-only input path. adjustFloor is exactly
-// half of it: owed inbound bytes are replenished once they reach the
-// halfway mark (OpenSSH's own adjust-at-half policy), so the client
-// always retains ≥1MB of credit. A human typing never crosses the
-// floor — zero adjust packets for ordinary play — while a multi-
-// megabyte paste still gets its window back long before it could stall.
-const (
-	rxWindow    = 1 << 21
-	adjustFloor = rxWindow / 2
-)
-
-// addOwed records inbound bytes the handler consumed and reports
-// whether the receive window needs replenishing now.
-func (c *channel) addOwed(n int) bool {
-	c.mu.Lock()
-	c.owe += n
-	flush := c.owe >= adjustFloor
-	c.mu.Unlock()
-	return flush
-}
-
-// takeOwed claims every owed byte as one WINDOW_ADJUST payload (nil if
-// nothing is owed). Called only from the control pump.
-func (c *channel) takeOwed() []byte {
-	c.mu.Lock()
-	n := c.owe
-	c.owe = 0
-	c.mu.Unlock()
-	if n <= 0 {
-		return nil
-	}
-	w := &buf{}
-	w.u8(msgWindowAdjust)
-	w.u32(0)
-	w.u32(uint32(n))
-	return w.b
-}
-
-func (c *channel) shutdown() error {
-	c.closeOnce.Do(func() {
-		c.mu.Lock()
-		c.remoteGone = true
-		c.sendErr = true
-		c.cond.Broadcast()
-		c.mu.Unlock()
-		// Complete the wire teardown BEFORE closing done: serveConn
-		// closes the connection once done is signaled, and closing with
-		// writes in flight turns the FIN into an RST.
-		// A well-behaved session ends with an exit status (ssh(1) exits
-		// 255 without one), then EOF and the channel close.
-		es := &buf{}
-		es.u8(msgChannelRequest)
-		es.u32(0)
-		es.cstr("exit-status")
-		es.boolean(false)
-		es.u32(0)
-		c.t.writePacket(es.b)
-		c.t.writePacket([]byte{msgChannelEOF, 0, 0, 0, 0})
-		w := &buf{}
-		w.u8(msgChannelClose)
-		w.u32(0)
-		c.t.writePacket(w.b)
-		close(c.done)
-		// Give the client a moment to process the channel close before
-		// the FIN — slamming TCP shut at the same instant makes ssh(1)
-		// report "connection closed by remote host" instead of exiting
-		// cleanly. If the client closes first, the reader notices.
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			c.conn.Close()
-		}()
-	})
-	return nil
-}
-
-func (c *channel) write(p []byte) (int, error) {
-	sent := 0
-	for len(p) > 0 {
-		c.mu.Lock()
-		for c.window <= 0 && !c.remoteGone {
-			c.cond.Wait()
-		}
-		if c.remoteGone || c.sendErr {
-			c.mu.Unlock()
-			return sent, errChannelClosed
-		}
-		n := min(len(p), c.maxPkt, c.window)
-		c.window -= n
-		c.mu.Unlock()
-
-		w := &buf{}
-		w.u8(msgChannelData)
-		w.u32(0) // our channel id
-		w.str(p[:n])
-		if err := c.t.writePacket(w.b); err != nil {
-			c.mu.Lock()
-			c.sendErr = true
-			c.cond.Broadcast()
-			c.mu.Unlock()
-			return sent, err
-		}
-		p = p[n:]
-		sent += n
-	}
-	return sent, nil
-}
 
 // conn is one client connection past the initial handshake.
 type conn struct {
@@ -363,144 +106,9 @@ type conn struct {
 	// only, capped at maxAuthTries.
 	authFails int
 
-	// Control lane: the reader goroutine never writes to the socket
-	// once the session may be producing frames. A synchronous write
-	// there — a window adjust, a keepalive reply — would queue behind
-	// the wmu-held frame chunk stuck on a full kernel send buffer (up
-	// to writeTimeoutSec), stalling every later inbound packet too:
-	// keystrokes, the client's own window adjusts, disconnects.
-	// Replies go through ctlQ, owed adjusts through ch.owe (both
-	// lossless — a dropped adjust would wedge the client after 2MB, a
-	// dropped ChannelSuccess hangs ssh(1) on a want-reply request),
-	// both sent by pumpControl. Input handling stays pure: read → feed.
-	ctlMu sync.Mutex
-	ctlQ  []ctlMsg // FIFO of replies, sync markers, keepalives
-
-	// ctlWake wakes the pump (cap 1, edge). adjustSig is the
-	// "owed ≥ adjustFloor" edge and hands the pump the channel
-	// pointer itself, so no goroutine ever reads c.ch across the
-	// reader's single write of it (openChannel).
-	ctlWake   chan struct{}
-	adjustSig chan *channel
-	dead      chan struct{} // closed when serveConn returns
-}
-
-// ctlMsg is one control-lane item: a packet to write, or (pkt nil) a
-// sync marker — closed by the pump once every earlier item is written.
-type ctlMsg struct {
-	pkt  []byte
-	done chan struct{}
-	drop bool // keepalive-class: droppable at capacity
-}
-
-// ctlKeepaliveCap bounds queued keepalive-class items: losing a
-// keepalive reply costs a disconnect at worst (recoverable), and once
-// a round of them sits unwritten, TCP itself is the backpressure.
-// ctlMax is the hard FIFO bound for everything lossless; reaching it
-// means the link is dead in practice, so the connection is torn down
-// (a reconnect) rather than risking unbounded memory.
-const (
-	ctlKeepaliveCap = 8
-	ctlMax          = 1024
-)
-
-// writeControl hands a reply packet to the control pump: lossless.
-// writeControlDrop is the keepalive-class variant, droppable at
-// capacity. Window adjusts use neither; they ride the lossless owed
-// counter.
-func (c *conn) writeControl(pkt []byte) {
-	c.sendControl(ctlMsg{pkt: pkt})
-}
-
-func (c *conn) writeControlDrop(pkt []byte) {
-	c.sendControl(ctlMsg{pkt: pkt, drop: true})
-}
-
-// sendControl enqueues one item, never blocking. Keepalive-class items
-// are dropped once the queue holds a full round of them; everything
-// else queues without loss until ctlMax, where the connection is
-// closed instead — ssh(1) waits forever on a missing reply to a
-// want-reply request (a silent hang, worse than a disconnect), so the
-// reply lane must never drop. The dying connection also releases the
-// backlog: ctlMax queued packets (and their buffers) are trimmed and
-// sync-marker waiters unblocked immediately, not held until the
-// handlers wind down.
-func (c *conn) sendControl(m ctlMsg) {
-	c.ctlMu.Lock()
-	if m.drop && len(c.ctlQ) >= ctlKeepaliveCap {
-		c.ctlMu.Unlock()
-		return
-	}
-	if len(c.ctlQ) >= ctlMax {
-		for _, old := range c.ctlQ {
-			if old.done != nil {
-				close(old.done)
-			}
-		}
-		c.ctlQ = nil
-		c.ctlMu.Unlock()
-		c.srv.Log.Printf("session %s: control queue overflow, closing", c.t.conn.RemoteAddr())
-		c.t.conn.Close()
-		return
-	}
-	c.ctlQ = append(c.ctlQ, m)
-	c.ctlMu.Unlock()
-	select {
-	case c.ctlWake <- struct{}{}:
-	default:
-	}
-}
-
-// syncControl waits until the pump has written every item queued before
-// it. Used only at session start (shell/exec), where the wire is quiet:
-// it pins request replies ahead of the handler's first output without
-// ever putting the reader back on the socket. Post-session-start use
-// would be a bug — a congested pump would stall inbound processing.
-func (c *conn) syncControl() {
-	done := make(chan struct{})
-	c.sendControl(ctlMsg{done: done})
-	select {
-	case <-done:
-	case <-c.dead:
-	}
-}
-
-// pumpControl is the connection's control writer — with the session's
-// frame writer, the only goroutine that writes once play has started.
-// It dies with the connection: serveConn closes dead, and a failing
-// write (conn already closing elsewhere) also tears it down.
-func (c *conn) pumpControl() {
-	for {
-		select {
-		case <-c.dead:
-			return
-		case ch := <-c.adjustSig:
-			if pkt := ch.takeOwed(); pkt != nil {
-				if err := c.t.writePacket(pkt); err != nil {
-					c.t.conn.Close()
-					return
-				}
-			}
-		case <-c.ctlWake:
-			c.ctlMu.Lock()
-			q := c.ctlQ
-			c.ctlQ = nil
-			c.ctlMu.Unlock()
-			for _, m := range q {
-				if m.done != nil {
-					close(m.done)
-					continue
-				}
-				if m.pkt == nil {
-					continue
-				}
-				if err := c.t.writePacket(m.pkt); err != nil {
-					c.t.conn.Close()
-					return
-				}
-			}
-		}
-	}
+	// controlLane carries every post-session control write (see
+	// control.go for the model).
+	controlLane
 }
 
 // ListenAndServe runs the server until the listener fails.
@@ -647,11 +255,9 @@ func splitLines(s string) []string {
 func (s *Server) serveConn(nc net.Conn) {
 	defer nc.Close()
 	c := &conn{
-		t:         newTransport(nc),
-		srv:       s,
-		ctlWake:   make(chan struct{}, 1),
-		adjustSig: make(chan *channel, 1),
-		dead:      make(chan struct{}),
+		t:           newTransport(nc),
+		srv:         s,
+		controlLane: newControlLane(),
 	}
 	defer close(c.dead)
 
@@ -672,7 +278,7 @@ func (s *Server) serveConn(nc net.Conn) {
 
 	// Authenticated (by not authenticating). Clear the handshake deadline
 	// and start the control lane — from here on the reader goroutine
-	// never writes to the socket (see conn's control-lane comment).
+	// never writes to the socket (see control.go).
 	// The write side stays unbounded, but the read side keeps one last
 	// deadline: a connection that never opens its session channel holds
 	// a goroutine and a transport while being invisible to the session

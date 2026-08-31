@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/Daviey/mario/render"
 )
 
 // Terminal color-depth probing.
@@ -240,44 +238,6 @@ func daDecision(da2, da3 string) (decided, trueColor bool) {
 		}
 	}
 	return false, false
-}
-
-// decideColorTerm resolves the COLORTERM value for a game the server
-// is about to start: an explicit env request wins, then the TERM
-// family (render.TrueColorTerm), then the DA2/DA3 probe. Empty means
-// the 16-color palette.
-func (ch *channel) decideColorTerm() string {
-	if v := ch.envColorTerm(); v != "" {
-		return v
-	}
-	if render.TrueColorTerm(ch.termValue()) {
-		return "truecolor"
-	}
-	if p := ch.probeRef(); p != nil {
-		if decided, ok := p.result(ch.probeWait()); decided && ok {
-			return "truecolor"
-		}
-	}
-	return ""
-}
-
-func (ch *channel) termValue() string {
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
-	return ch.term
-}
-
-func (ch *channel) probeRef() *termProbe {
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
-	return ch.probe
-}
-
-func (ch *channel) probeWait() time.Duration {
-	if w := ch.wait; w > 0 {
-		return w
-	}
-	return defaultProbeWait
 }
 
 // indexByteSeq finds the first occurrence of sep in b.

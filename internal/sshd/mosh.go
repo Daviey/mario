@@ -244,11 +244,3 @@ func moshEnv(inherited []string, term, colorTerm string) []string {
 	}
 	return out
 }
-
-// envColorTerm returns the COLORTERM the client sent as an env request
-// (e.g. ssh -o SendEnv=COLORTERM), "" when none.
-func (c *channel) envColorTerm() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.env["COLORTERM"]
-}
