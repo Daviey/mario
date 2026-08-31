@@ -20,8 +20,11 @@ DIST      := dist
 WEBDIST   := $(DIST)/web
 LDFLAGS   := -s -w -X github.com/Daviey/mario/render.Version=$(VERSION)
 
-# Every release target: OS, ARCH, binary suffix.
-TARGETS := linux/amd64   \
+# Every release target: OS, ARCH, binary suffix. This list mirrors the
+# release.yml build matrix one-for-one (17 pairs) — keep in sync: a new
+# target needs both (a Makefile rule AND a matrix entry), plus the
+# release job's asset globs.
+ TARGETS := linux/amd64   \
            linux/arm64   \
            linux/riscv64 \
            linux/arm     \
@@ -41,7 +44,7 @@ TARGETS := linux/amd64   \
 
 GOFLAGS := CGO_ENABLED=0
 
-.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) deb/amd64 deb/arm64 deb/riscv64 deb/arm deb/386 rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386 efi efi-initrd efi-qemu efi-qemu-ovmf iso iso-qemu
+.PHONY: all build release check test race cover vet fmt fmtcheck run demo clean web web-serve deb rpm apk ipa app appimage shots $(TARGETS) efi efi-initrd efi-qemu efi-qemu-ovmf iso iso-qemu
 
 all: build
 
@@ -70,33 +73,23 @@ release:
 # hicolor icon + desktop entry. PKGVERSION strips git describe's leading v.
 PKGVERSION := $(patsubst v%,%,$(VERSION))
 
-deb/amd64: linux/amd64
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch amd64 \
-		-bin $(DIST)/$(BINARY)-linux-amd64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_amd64.deb
+# Arch contracts differ per tool, one pattern rule per format keyed by
+# the GOARCH target name (matching the release.yml matrix's
+# `make deb/${{ matrix.goarch }}`): tools/mkdeb takes the DEBIAN arch
+# name (arm→armhf, 386→i386), while tools/mkrpm takes the GOARCH and
+# maps to the RPM arch internally. Artifact names are load-bearing —
+# mario_<ver>_<debarch>.deb / mario_<ver>_<rpmarch>.rpm — because the
+# release.yml asset globs and the dist/mario-* binary globs key off
+# them; the underscore forms never collide with the binary globs.
+DEB_ARCHES := amd64=amd64 arm64=arm64 riscv64=riscv64 arm=armhf 386=i386
+RPM_ARCHES := amd64=x86_64 arm64=aarch64 riscv64=riscv64 arm=armhfp 386=i386
+debarch = $(word 2,$(subst =, ,$(filter $(1)=%,$(DEB_ARCHES))))
+rpmarch = $(word 2,$(subst =, ,$(filter $(1)=%,$(RPM_ARCHES))))
 
-deb/arm64: linux/arm64
+deb/%: linux/%
 	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch arm64 \
-		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_arm64.deb
-
-deb/riscv64: linux/riscv64
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch riscv64 \
-		-bin $(DIST)/$(BINARY)-linux-riscv64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_riscv64.deb
-
-# Targets take the GOARCH name (matching the release.yml matrix's
-# `make deb/${{ matrix.goarch }}`); the Debian arch mapping (arm→armhf,
-# 386→i386) lives inside the recipe.
-deb/arm: linux/arm
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch armhf \
-		-bin $(DIST)/$(BINARY)-linux-arm -out $(DIST)/$(BINARY)_$(PKGVERSION)_armhf.deb
-
-deb/386: linux/386
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch i386 \
-		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.deb
+	$(GOFLAGS) go run ./tools/mkdeb -version $(VERSION) -arch $(call debarch,$*) \
+		-bin $(DIST)/$(BINARY)-linux-$* -out $(DIST)/$(BINARY)_$(PKGVERSION)_$(call debarch,$*).deb
 
 deb: deb/amd64 deb/arm64 deb/riscv64 deb/arm deb/386
 
@@ -104,32 +97,11 @@ deb: deb/amd64 deb/arm64 deb/riscv64 deb/arm deb/386
 # mkdeb, no rpm toolchain on the build host. Installs /usr/bin/mario
 # (Fedora has no /usr/games convention) + man6 + hicolor icon +
 # desktop entry. Output names use the RPM arch (x86_64, …) so they never
-# match the dist/mario-* binary globs. Targets take the GOARCH name;
-# the tool maps to the RPM architecture internally.
-rpm/amd64: linux/amd64
+# match the dist/mario-* binary globs.
+rpm/%: linux/%
 	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch amd64 \
-		-bin $(DIST)/$(BINARY)-linux-amd64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_x86_64.rpm
-
-rpm/arm64: linux/arm64
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch arm64 \
-		-bin $(DIST)/$(BINARY)-linux-arm64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_aarch64.rpm
-
-rpm/riscv64: linux/riscv64
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch riscv64 \
-		-bin $(DIST)/$(BINARY)-linux-riscv64 -out $(DIST)/$(BINARY)_$(PKGVERSION)_riscv64.rpm
-
-rpm/arm: linux/arm
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch arm \
-		-bin $(DIST)/$(BINARY)-linux-arm -out $(DIST)/$(BINARY)_$(PKGVERSION)_armhfp.rpm
-
-rpm/386: linux/386
-	@mkdir -p $(DIST)
-	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch 386 \
-		-bin $(DIST)/$(BINARY)-linux-386 -out $(DIST)/$(BINARY)_$(PKGVERSION)_i386.rpm
+	$(GOFLAGS) go run ./tools/mkrpm -version $(VERSION) -arch $* \
+		-bin $(DIST)/$(BINARY)-linux-$* -out $(DIST)/$(BINARY)_$(PKGVERSION)_$(call rpmarch,$*).rpm
 
 rpm: rpm/amd64 rpm/arm64 rpm/riscv64 rpm/arm rpm/386
 
@@ -301,24 +273,43 @@ web:
 	@mkdir -p $(DIST)/web
 	cp web/boot.js $(WEBDIST)/
 	GOOS=js GOARCH=wasm $(GOFLAGS) go build -ldflags "$(WEBLDFLAGS)" -o $(DIST)/web/mario.wasm ./cmd/web
+	# Tripwire for the a7e7a5f class: DefaultURL reaches the wasm only
+	# through the -X injection above (an undefined WEBLDFLAGS expands to
+	# nothing and the link succeeds without it), and no other compiled
+	# string contains the Supabase origin — so if the URL is not in the
+	# binary, the injection was dropped and this build would ship an
+	# OFFLINE leaderboard. Fail instead.
+	@grep -q 'supabase.co' dist/web/mario.wasm || { echo 'make web: WEBLDFLAGS broken — wasm missing Supabase URL' >&2; exit 1; }
 	cp web/manifest.webmanifest $(WEBDIST)/
 	# Narrow the CSP to exactly this project's origin (the source keeps the
 	# dev-friendly https://*.supabase.co wildcard; only dist narrows).
 	@supa_origin=$$(printf '%s' "$(SUPA_URL)" | sed -e 's|^[a-zA-Z]*://||' -e 's|/.*||'); \
 		sed "s|https://\*.supabase.co|https://$$supa_origin|" web/index.html > $(WEBDIST)/index.html
-	# Cache-bust the service worker per release: the deployed sw.js carries
-	# the git version as its CACHE name, so every deploy keys a fresh cache
-	# (activate drops older ones) instead of serving stale bytes forever.
-	# The sed matches the CACHE declaration by prefix — never a hardcoded
-	# version literal — and the grep fails the build when the stamp did
-	# not land, so a hand-edited sw.js cannot ship a stale cache name.
-	sed "s|^const CACHE = 'mario-[^']*';|const CACHE = 'mario-$(VERSION)';|" web/sw.js > $(WEBDIST)/sw.js
-	@grep -Fqx "const CACHE = 'mario-$(VERSION)';" $(WEBDIST)/sw.js || { echo "ERROR: sw.js CACHE stamp did not land (want const CACHE = 'mario-$(VERSION)';)" >&2; exit 1; }
 	cp -r web/icons $(WEBDIST)/
 	cp SECURITY.md $(WEBDIST)/
 	@wasm_exec=$$(find "$$(go env GOROOT)" -name wasm_exec.js -type f | head -n 1); \
 		[ -n "$$wasm_exec" ] || { echo "wasm_exec.js not found under GOROOT" >&2; exit 1; }; \
 		cp "$$wasm_exec" $(WEBDIST)/ && chmod u+w $(WEBDIST)/wasm_exec.js
+	# Service worker, stamped per release into the dist copy (web/sw.js is
+	# only the template): the CACHE name carries the git version, so every
+	# deploy keys a fresh cache (activate drops older ones) instead of
+	# serving stale bytes forever; and the ASSETS precache list is rebuilt
+	# from the actual dist/web file set, so a file the build ships can
+	# never be missing from the hand-maintained template list (it was,
+	# twice: SECURITY.md, apple-touch-icon.png). Both seds match their
+	# declaration by prefix — never a hardcoded literal — and the greps
+	# fail the build when a stamp did not land, so a hand-edited template
+	# cannot ship a stale cache name or a stale precache list.
+	@set -e; \
+		assets="'./'"; \
+		for f in $$(cd $(WEBDIST) && find . -type f ! -name sw.js | LC_ALL=C sort); do \
+			assets="$$assets, '$$f'"; \
+		done; \
+		sed -e "s|^const CACHE = 'mario-[^']*';|const CACHE = 'mario-$(VERSION)';|" \
+			-e "s|^const ASSETS = \[.*\];|const ASSETS = [$$assets];|" \
+			web/sw.js > $(WEBDIST)/sw.js; \
+		grep -Fqx "const CACHE = 'mario-$(VERSION)';" $(WEBDIST)/sw.js || { echo "ERROR: sw.js CACHE stamp did not land (want const CACHE = 'mario-$(VERSION)';)" >&2; exit 1; }; \
+		grep -Fqx "const ASSETS = [$$assets];" $(WEBDIST)/sw.js || { echo "ERROR: sw.js ASSETS stamp did not land" >&2; exit 1; }
 	@echo "static site in $(WEBDIST) — drop it on GitHub Pages (or any static host)"
 
 # Regenerate the README screenshots (docs/img) from the current build —

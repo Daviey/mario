@@ -5,17 +5,14 @@
 // fresh-looking (max-age) old shell. Everything else — POSTs, cross-origin
 // traffic like the Supabase leaderboard — passes straight through.
 const CACHE = 'mario-v0.2.0';
-const ASSETS = [
-  './',
-  './index.html',
-  './mario.wasm',
-  './wasm_exec.js',
-  './boot.js',
-  './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-maskable-512.png',
-];
+// Precache manifest. This hand-maintained line is only the fallback for
+// serving web/ directly in dev; `make web` REWRITES this exact line in
+// the dist/web copy from the actual built file listing (see the web
+// target), so nothing the build ships — SECURITY.md,
+// icons/apple-touch-icon.png, future additions — can be missing here.
+// Keep it roughly in sync anyway; the grep after the stamp fails the
+// build if the rewrite misses.
+const ASSETS = ['./', './index.html', './mario.wasm', './wasm_exec.js', './boot.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './SECURITY.md'];
 
 self.addEventListener('install', (e) => {
   // One failed fetch must not brick the install: tolerate each entry.
