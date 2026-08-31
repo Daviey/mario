@@ -222,6 +222,9 @@ func ParseInputs(archHelp, outHelp string, args ...string) (*Inputs, error) {
 	fs.StringVar(&in.Bin, "bin", "", "path to the built static binary")
 	fs.StringVar(&in.Pkgdir, "pkgdir", "packaging", "directory holding mario.6, mario.desktop, copyright")
 	fs.StringVar(&in.Out, "out", "", outHelp)
+	if len(args) == 0 {
+		args = os.Args[1:] // no explicit args: the tool main's own CLI
+	}
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
