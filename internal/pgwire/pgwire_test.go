@@ -56,10 +56,11 @@ func rowDesc(names ...string) []byte {
 	binary.BigEndian.PutUint16(body, uint16(len(names)))
 	for _, n := range names {
 		body = append(body, n...)
-		body = append(body, 0)          // name terminator
-		body = append(body, 0, 0, 0, 0) // table oid, attnum (zeros — ignored)
-		body = append(body, 0, 0, 0, 0) // type oid, typlen/mod
-		body = append(body, 0, 0, 0, 0, 0, 0)
+		body = append(body, 0) // name terminator
+		// table oid, attnum, type oid, typlen, typmod, format code —
+		// exactly rowDescFieldTail bytes, all zeros: the client keeps
+		// only the names.
+		body = append(body, make([]byte, rowDescFieldTail)...)
 	}
 	return frame('T', body)
 }
@@ -106,6 +107,11 @@ type fakeServer struct {
 	tlsMode  string
 	tlsConf  *tls.Config
 	onQuery  func(sql string) [][]byte
+	// wantApp, when set, is asserted against the startup message's
+	// application_name inside the serve goroutine — a mismatch fails the
+	// connection with an ErrorResponse, which keeps the assertion
+	// race-detector-clean (no cross-goroutine state).
+	wantApp string
 
 	t         *testing.T
 	startOnce sync.Once
@@ -240,7 +246,7 @@ func (fs *fakeServer) readStartup(conn net.Conn, br *bufio.Reader) string {
 		fs.errf(conn, "08P01", "unsupported protocol version")
 		return ""
 	}
-	user := ""
+	user, app := "", ""
 	rest := body[4:]
 	for len(rest) > 1 {
 		i := bytes.IndexByte(rest, 0)
@@ -256,7 +262,14 @@ func (fs *fakeServer) readStartup(conn net.Conn, br *bufio.Reader) string {
 		if key == "user" {
 			user = string(rest[:i])
 		}
+		if key == "application_name" {
+			app = string(rest[:i])
+		}
 		rest = rest[i+1:]
+	}
+	if fs.wantApp != "" && app != fs.wantApp {
+		fs.errf(conn, "08P01", fmt.Sprintf("application_name %q, want %q", app, fs.wantApp))
+		return ""
 	}
 	if user != fs.user {
 		fs.errf(conn, "28000", fmt.Sprintf("unknown user %q", user))
@@ -468,9 +481,18 @@ func TestQueryValues(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	rows, err := c.Query(ctx, "SELECT * FROM t")
+	rows, cols, err := c.Query(ctx, "SELECT * FROM t")
 	if err != nil {
 		t.Fatalf("query: %v", err)
+	}
+	wantCols := []string{"name", "num", "note", "blob"}
+	if len(cols) != len(wantCols) {
+		t.Fatalf("got %d column names %v, want %d", len(cols), cols, len(wantCols))
+	}
+	for i, want := range wantCols {
+		if cols[i] != want {
+			t.Errorf("column %d name = %q, want %q", i, cols[i], want)
+		}
 	}
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))
@@ -521,7 +543,7 @@ func TestMD5Auth(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	rows, err := c.Query(ctx, "SELECT 'ok' AS v")
+	rows, _, err := c.Query(ctx, "SELECT 'ok' AS v")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -544,7 +566,7 @@ func TestScramAuth(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	rows, err := c.Query(ctx, "SELECT 'ok' AS v")
+	rows, _, err := c.Query(ctx, "SELECT 'ok' AS v")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -567,7 +589,7 @@ func TestErrorResponse(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	_, err = c.Query(ctx, "SELECT * FROM scores")
+	_, _, err = c.Query(ctx, "SELECT * FROM scores")
 	if err == nil {
 		t.Fatal("query must fail")
 	}
@@ -644,7 +666,7 @@ func TestNullColumn(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	rows, err := c.Query(ctx, "SELECT NULL, 'x'")
+	rows, _, err := c.Query(ctx, "SELECT NULL, 'x'")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -710,12 +732,68 @@ func TestTLSConnect(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	rows, err := c.Query(ctx, "SELECT 1")
+	rows, _, err := c.Query(ctx, "SELECT 1")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if len(rows) != 1 || rows[0][0].String() != "tls ok" {
 		t.Fatalf("rows = %v", rows)
+	}
+}
+
+// TestTLSScramProductionPath is the one test that stacks every layer the
+// board.DBFromEnv production path uses — SSLRequest upgrade + SCRAM-SHA-256
+// exchange + full Connect→Query with column names — instead of exercising
+// them in isolation (TestTLSConnect and TestScramAuth). It also pins the
+// application_name default and its -dump-replays override, so a regression
+// in any single layer shows up on the exact shape production runs.
+func TestTLSScramProductionPath(t *testing.T) {
+	fs := newFake(t, "scram")
+	fs.tlsMode = "accept"
+	fs.tlsConf = &tls.Config{Certificates: []tls.Certificate{selfSignedCert(t)}}
+	fs.wantApp = defaultAppName
+	fs.onQuery = func(sql string) [][]byte {
+		return [][]byte{rowDesc("v"), dataRow([]byte("prod ok")), cmdTag("SELECT 1"), readyQuery()}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cfg := fs.cfg()
+	cfg.TLS = &tls.Config{InsecureSkipVerify: true} // require-mode, like DBFromEnv
+	c, err := Connect(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	rows, cols, err := c.Query(ctx, "SELECT 'prod ok' AS v")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if len(rows) != 1 || rows[0][0].String() != "prod ok" {
+		t.Fatalf("rows = %v, want one row with \"prod ok\"", rows)
+	}
+	if len(cols) != 1 || cols[0] != "v" {
+		t.Fatalf("cols = %v, want [v]", cols)
+	}
+	// The override half: a fresh server asserting the custom name against
+	// its startup message. A new server (not a field flip on fs) because
+	// the fake's contract is configure-before-start — see start().
+	fs2 := newFake(t, "scram")
+	fs2.tlsMode = "accept"
+	fs2.tlsConf = &tls.Config{Certificates: []tls.Certificate{selfSignedCert(t)}}
+	fs2.wantApp = "mario-dump-replays"
+	fs2.onQuery = fs.onQuery
+	cfg2 := fs2.cfg()
+	cfg2.TLS = &tls.Config{InsecureSkipVerify: true} // require-mode, like DBFromEnv
+	cfg2.AppName = fs2.wantApp
+	c2, err := Connect(ctx, cfg2)
+	if err != nil {
+		t.Fatalf("connect with AppName override: %v", err)
+	}
+	defer c2.Close()
+	if _, _, err := c2.Query(ctx, "SELECT 1"); err != nil {
+		t.Fatalf("query after override: %v", err)
 	}
 }
 
@@ -737,7 +815,7 @@ func TestQueryContextCancel(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer c.Close()
-	if _, err := c.Query(ctx, "SELECT 1"); err == nil {
+	if _, _, err := c.Query(ctx, "SELECT 1"); err == nil {
 		t.Fatal("query must fail when the context deadline passes")
 	} else if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("err = %v, want wrapped context deadline error", err)
@@ -745,7 +823,7 @@ func TestQueryContextCancel(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("query took %v; ctx deadline not honored", elapsed)
 	}
-	if _, err := c.Query(context.Background(), "SELECT 1"); err == nil {
+	if _, _, err := c.Query(context.Background(), "SELECT 1"); err == nil {
 		t.Fatal("conn must be dead after ctx cancellation")
 	}
 }

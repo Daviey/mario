@@ -30,19 +30,25 @@ import (
 )
 
 const (
-	protoVersion   = 196608 // 3.0
-	sslRequestCode = 80877103
-	defaultTimeout = 10 * time.Second
-	appName        = "mario-verify"
-	maxMessageLen  = 1 << 28 // 256 MiB sanity cap against corrupt streams
+	protoVersion     = 196608 // 3.0
+	sslRequestCode   = 80877103
+	defaultTimeout   = 10 * time.Second
+	defaultAppName   = "mario-verify" // Config.AppName fallback
+	rowDescFieldTail = 18             // bytes after each RowDescription name: table OID, attnum, type OID, typlen, typmod, format
+	maxMessageLen    = 1 << 28        // 256 MiB sanity cap against corrupt streams
 )
 
 // Config for one connection.
 type Config struct {
-	Addr           string // "host:port"
-	User           string
-	Password       string
-	Database       string
+	Addr     string // "host:port"
+	User     string
+	Password string
+	Database string
+	// AppName is sent as the startup message's application_name.
+	// Empty keeps the "mario-verify" default; `mario -dump-replays`
+	// sessions may override it so the two connection populations are
+	// distinguishable in pg_stat_activity.
+	AppName        string
 	TLS            *tls.Config   // nil = plaintext; non-nil = SSLRequest upgrade first
 	ConnectTimeout time.Duration // 0 = 10s default
 }
@@ -149,12 +155,16 @@ func (c *Conn) startup(ctx context.Context, cfg Config) error {
 	release := c.guard(ctx)
 	defer release()
 
+	app := cfg.AppName
+	if app == "" {
+		app = defaultAppName
+	}
 	body := make([]byte, 0, 64)
 	body = binary.BigEndian.AppendUint32(body, protoVersion)
 	for _, kv := range [][2]string{
 		{"user", cfg.User},
 		{"database", cfg.Database},
-		{"application_name", appName},
+		{"application_name", app},
 	} {
 		body = append(body, kv[0]...)
 		body = append(body, 0)
@@ -296,17 +306,21 @@ func (c *Conn) skipToReady(ctx context.Context) error {
 	}
 }
 
-// Query runs one simple-query SQL statement, returning all rows.
-func (c *Conn) Query(ctx context.Context, sql string) ([][]Value, error) {
-	rows, _, err := c.simpleQuery(ctx, sql)
-	return rows, err
+// Query runs one simple-query SQL statement, returning all rows plus the
+// column names from the result's RowDescription. Statements that produce
+// no description (DDL, UPDATE) return a nil name slice; when one call
+// carries several statements the last description wins, mirroring how
+// the CommandComplete tag is already handled.
+func (c *Conn) Query(ctx context.Context, sql string) ([][]Value, []string, error) {
+	rows, cols, _, err := c.simpleQuery(ctx, sql)
+	return rows, cols, err
 }
 
 // Exec runs one statement, returning the CommandComplete tag and its
 // affected-rows count ("UPDATE 3" -> "UPDATE", 3; "SELECT 12" ->
 // "SELECT", 12; tags without a count -> count 0).
 func (c *Conn) Exec(ctx context.Context, sql string) (tag string, count int64, err error) {
-	_, tag, err = c.simpleQuery(ctx, sql)
+	_, _, tag, err = c.simpleQuery(ctx, sql)
 	if err != nil {
 		return "", 0, err
 	}
@@ -325,25 +339,29 @@ func (c *Conn) Close() error {
 }
 
 // simpleQuery sends one Query message and collects DataRows until
-// ReadyForQuery.
-func (c *Conn) simpleQuery(ctx context.Context, sql string) (rows [][]Value, tag string, err error) {
+// ReadyForQuery. cols carries the last RowDescription's column names.
+func (c *Conn) simpleQuery(ctx context.Context, sql string) (rows [][]Value, cols []string, tag string, err error) {
 	release := c.guard(ctx)
 	defer release()
 
 	if err := c.writeMsg(ctx, 'Q', append([]byte(sql), 0)); err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	for {
 		typ, payload, err := c.readMessage()
 		if err != nil {
-			return nil, "", c.fail(ctx, "query", err)
+			return nil, nil, "", c.fail(ctx, "query", err)
 		}
 		switch typ {
-		case 'T': // RowDescription — payload fully read, fields ignored
+		case 'T': // RowDescription — keep the names, skip the per-field metadata
+			cols, err = parseRowDescription(payload)
+			if err != nil {
+				return nil, nil, "", err
+			}
 		case 'D':
 			row, err := parseDataRow(payload)
 			if err != nil {
-				return nil, "", err
+				return nil, nil, "", err
 			}
 			rows = append(rows, row)
 		case 'C': // CommandComplete
@@ -352,9 +370,9 @@ func (c *Conn) simpleQuery(ctx context.Context, sql string) (rows [][]Value, tag
 			tag = ""
 		case 'N': // NoticeResponse — ignored
 		case 'Z': // ReadyForQuery (1-byte tx status)
-			return rows, tag, nil
+			return rows, cols, tag, nil
 		case 'E':
-			return nil, "", pgError(payload)
+			return nil, nil, "", pgError(payload)
 		default: // async/unknown messages — ignored
 		}
 	}
@@ -386,6 +404,28 @@ func parseDataRow(p []byte) ([]Value, error) {
 		off += l
 	}
 	return row, nil
+}
+
+// parseRowDescription extracts the column names from a RowDescription
+// payload. Each field is its name followed by rowDescFieldTail bytes of
+// table/type metadata no caller needs; a field set that stops early is a
+// protocol error, not a partial result.
+func parseRowDescription(p []byte) ([]string, error) {
+	if len(p) < 2 {
+		return nil, errors.New("pgwire: short row description")
+	}
+	n := int(binary.BigEndian.Uint16(p))
+	cols := make([]string, 0, n)
+	off := 2
+	for range n {
+		end := bytes.IndexByte(p[off:], 0)
+		if end < 0 || off+end+1+rowDescFieldTail > len(p) {
+			return nil, errors.New("pgwire: truncated row description")
+		}
+		cols = append(cols, string(p[off:off+end]))
+		off += end + 1 + rowDescFieldTail
+	}
+	return cols, nil
 }
 
 // parseTag splits a CommandComplete tag into its command name and
