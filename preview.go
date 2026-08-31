@@ -17,10 +17,7 @@ import (
 // and one ANSI frame is written (for visual checks, debugging and the
 // CLI's -ui-preview flag).
 func UIPreview(w io.Writer, mode string, colors render.ColorMode) error {
-	g := engine.NewGame(engine.DefaultLevels(), 40, engine.LevelHeight)
-	for t := range 6000 {
-		g.Update(ui.ScriptInput(t))
-	}
+	g := playScript(engine.DefaultLevels(), 40, demoTicks)
 	if g.Score == 0 {
 		return errors.New("demo script scored 0; cannot preview")
 	}

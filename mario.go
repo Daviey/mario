@@ -108,6 +108,18 @@ type App struct {
 	sound        func(string)    // optional per-event sound notification (Options.Sound)
 }
 
+// clampViewport is the viewport policy New and Resize share: 16..60
+// tiles wide, at least 4 tall, and (when maxH > 0) never taller than
+// the level. The engine bounds anything else.
+func clampViewport(viewW, viewH, maxH int) (int, int) {
+	viewW = min(max(viewW, 16), 60)
+	viewH = max(viewH, 4)
+	if maxH > 0 {
+		viewH = min(viewH, maxH)
+	}
+	return viewW, viewH
+}
+
 // New builds an App from opts and draws nothing yet.
 func New(opts *Options) *App {
 	if opts == nil {
@@ -121,22 +133,11 @@ func New(opts *Options) *App {
 	if viewW == 0 {
 		viewW = 40
 	}
-	if viewW < 16 {
-		viewW = 16
-	}
-	if viewW > 60 {
-		viewW = 60
-	}
 	viewH := opts.ViewH
 	if viewH == 0 {
 		viewH = engine.LevelHeight
 	}
-	if viewH < 4 {
-		viewH = 4
-	}
-	if viewH > levels[0].Height {
-		viewH = levels[0].Height
-	}
+	viewW, viewH = clampViewport(viewW, viewH, levels[0].Height)
 
 	mapper := opts.Mapper
 	if mapper == nil {
@@ -210,15 +211,7 @@ func (a *App) Feed(b []byte) { a.router.Feed(b) }
 // while another Steps: the change is applied on the next Step, and the
 // next drawn frame repaints in full at the new size (render.Diff).
 func (a *App) Resize(viewW, viewH int) {
-	if viewW < 16 {
-		viewW = 16
-	}
-	if viewW > 60 {
-		viewW = 60
-	}
-	if viewH < 4 {
-		viewH = 4
-	}
+	viewW, viewH = clampViewport(viewW, viewH, 0)
 	a.resizeMu.Lock()
 	a.resizeW, a.resizeH = viewW, viewH
 	a.resizeMu.Unlock()

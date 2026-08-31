@@ -50,6 +50,22 @@ func readLevelRows(r io.Reader) ([]string, error) {
 	return rows, sc.Err()
 }
 
+// demoTicks is the scripted demo's settled length: comfortably past
+// the script's game over, which the UI previews rely on (they need a
+// finished run with a nonzero score).
+const demoTicks = 6000
+
+// playScript runs the deterministic demo script on a fresh game with a
+// viewW-tile viewport for n ticks and returns the game — the shared
+// engine behind -demo and the UI previews.
+func playScript(levels []*engine.Level, viewW, n int) *engine.Game {
+	g := engine.NewGame(levels, viewW, engine.LevelHeight)
+	for t := range n {
+		g.Update(ui.ScriptInput(t))
+	}
+	return g
+}
+
 // RunDemo plays a deterministic scripted session with no terminal
 // needed. A nil or empty levels slice falls back to the built-in set,
 // matching New's "nil means default levels" rule.
@@ -57,10 +73,7 @@ func RunDemo(w io.Writer, levels []*engine.Level, colors render.ColorMode, ticks
 	if len(levels) == 0 {
 		levels = engine.DefaultLevels()
 	}
-	g := engine.NewGame(levels, 20, engine.LevelHeight)
-	for t := range ticks {
-		g.Update(ui.ScriptInput(t))
-	}
+	g := playScript(levels, 20, ticks)
 	fmt.Fprintf(w, "demo: ticks=%d score=%d coins=%d lives=%d state=%s level=%s\n",
 		ticks, g.Score, g.CoinCount, g.Lives, g.State, g.LevelName())
 	fmt.Fprint(w, render.FrameANSI(g, render.NewPalette(colors)))
