@@ -66,6 +66,20 @@ type Level struct {
 	CoinSpawns   []Vec
 	PlantSpawns  []Vec     // piranha plants; Y is the pipe-mouth row
 	BarSpawns    []FireBar // castle fire bars; hub centre in tile coords
+
+	// Warps are this level's enterable pipes (see warp.go): press Down
+	// while standing on the mouth to travel. Nil on levels without one.
+	Warps []Warp
+}
+
+// Warp is one enterable pipe. X/Top locate the pipe in the level that
+// owns the warp (left column of the two-wide pipe, mouth row); Dest is
+// the destination level — nil means the run's main level — whose pipe
+// at DestX/DestTop is the one the player rises back out of.
+type Warp struct {
+	X, Top         int
+	Dest           *Level
+	DestX, DestTop int
 }
 
 // At returns the tile at a grid position. Out-of-level sides act as solid
@@ -189,9 +203,9 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 		}
 	}
 
-	if l.FlagX < 0 {
-		return nil, fmt.Errorf("level %q: no flag", name)
-	}
+	// A level without a flag is legal: it is a warp room (or an arena)
+	// that play never ends by pole — FlagX stays -1 and Update's flag
+	// grab, the castle walk and the renderer's castle all no-op on it.
 	if !playerSet {
 		l.PlayerStart = Vec{1, float64(l.Height-3) + 1 - SmallH}
 	}

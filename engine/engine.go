@@ -11,9 +11,9 @@ import "math"
 //
 // Down is a reserved replay bit: the recording wire format (replay.go
 // maskOf) freezes it as bit 3, so it must never be reclaimed or
-// renumbered — that would rewrite every existing recording. It has no
-// gameplay effect during play (there is no crouch); the title screen
-// merely counts it among its start keys.
+// renumbered — that would rewrite every existing recording. In play it
+// is the pipe-travel key: its rising edge while standing on an enterable
+// pipe mouth sinks the player in (warp.go). There is still no crouch.
 type Input struct {
 	Left, Right, Up, Down, Run            bool
 	Quit, Pause, Restart, Suicide, AnyKey bool
@@ -30,6 +30,8 @@ const (
 	StateTitle State = iota
 	StateWorldCard
 	StatePlaying
+	StatePipeIn
+	StatePipeOut
 	StateFlagSlide
 	StateWalkCastle
 	StateScoreTick
@@ -48,6 +50,10 @@ func (s State) String() string {
 		return "world-card"
 	case StatePlaying:
 		return "playing"
+	case StatePipeIn:
+		return "pipe-in"
+	case StatePipeOut:
+		return "pipe-out"
 	case StateFlagSlide:
 		return "flag-slide"
 	case StateWalkCastle:
@@ -132,6 +138,16 @@ type Game struct {
 	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
 	prevIn     Input // previous tick's input, for rising/falling edges
 	curIn      Input // current tick's input (stomp bounce reads held jump)
+
+	// Pipe-warp state (see warp.go): the stash of the main-level world
+	// while the player is in a room, the live world per room template,
+	// the room currently occupied, and the warp in flight.
+	savedWorld   *worldState
+	roomWorlds   map[*Level]*worldState
+	roomTemplate *Level
+	inRoom       bool
+	pending      *Warp
+	pipeTop      int
 }
 
 // clampViewport narrows a viewport to the level set so the camera can
@@ -254,6 +270,10 @@ func (g *Game) Update(in Input) {
 		} else {
 			g.updatePlaying(in)
 		}
+	case StatePipeIn:
+		g.updatePipeIn()
+	case StatePipeOut:
+		g.updatePipeOut()
 	case StateFlagSlide:
 		g.updateFlagSlide()
 		g.updateParticles()
@@ -391,16 +411,29 @@ func (g *Game) updatePlaying(in Input) {
 		g.throwFireball()
 	}
 
+	// Pipe travel: Down on an enterable pipe mouth sinks the player in
+	// (warp.go). Rising edge only, and it consumes the tick — the press
+	// must not also move the player.
+	if in.Down && !g.prevIn.Down && g.Player.Grounded {
+		if w := g.warpUnder(g.Player); w != nil {
+			g.beginPipeIn(w)
+			return
+		}
+	}
+
 	g.updatePlayer(in)
 	if g.State != StatePlaying {
 		return
 	}
 
-	if g.checkpoint < 0 && g.Player.Pos.X >= g.Level.CheckpointX {
+	// The checkpoint is a main-level concept: a room's computed fallback
+	// must never be mistaken for reaching it.
+	if !g.inRoom && g.checkpoint < 0 && g.Player.Pos.X >= g.Level.CheckpointX {
 		g.checkpoint = g.Level.CheckpointX
 	}
 
-	if g.Player.Pos.X+g.Player.W >= float64(g.Level.FlagX)+0.3 {
+	// Flagless levels (warp rooms) never end by pole.
+	if g.Level.FlagX >= 0 && g.Player.Pos.X+g.Player.W >= float64(g.Level.FlagX)+0.3 {
 		g.grabFlag()
 		return
 	}
@@ -576,10 +609,17 @@ func (g *Game) kill() {
 }
 
 // updateCamera tracks the player, which sits CameraAnchor of the viewport
-// width from the camera's left edge, clamped to the level's span.
+// width from the camera's left edge, clamped to the level's span. A level
+// narrower than the viewport (warp rooms, which sit outside the
+// clampViewport minimum) centres instead: the room reads as a lit cellar
+// in the dark, not a strip pinned to one edge.
 const CameraAnchor = 0.35
 
 func (g *Game) updateCamera() {
+	if half := float64(g.Level.Width-g.ViewW) / 2; half < 0 {
+		g.CameraX = half
+		return
+	}
 	target := g.Player.Pos.X - float64(g.ViewW)*CameraAnchor
 	if target < 0 {
 		target = 0
@@ -591,7 +631,39 @@ func (g *Game) updateCamera() {
 }
 
 func (g *Game) loadLevel(i int, power PowerLevel) {
-	src := g.Levels[i]
+	lvl := instantiate(g.Levels[i])
+
+	g.Level = lvl
+	g.levelIndex = i
+	g.Time = StartTime
+	g.CameraX = 0
+	g.bumps = map[int]int{}
+	g.checkpoint = -1
+	g.Hurry = false
+	g.HurryT = 0
+	g.FlagDrop = 0
+	g.CastleFlag = 0
+	g.InCastle = false
+
+	// A level load starts the visit over: any warp room state from the
+	// previous visit goes with it.
+	g.savedWorld = nil
+	g.roomWorlds = nil
+	g.roomTemplate = nil
+	g.inRoom = false
+	g.pending = nil
+
+	g.spawnEntities(lvl)
+	g.Player = newPlayer(lvl.PlayerStart, power)
+	g.Paused = false
+	g.stateTimer = 0
+	g.clearSpawnThreats()
+}
+
+// instantiate builds the live, mutable copy of a level template: a fresh
+// tile grid (used blocks, broken bricks never corrupt the source) and
+// copied spawn lists. loadLevel and warp rooms share it.
+func instantiate(src *Level) *Level {
 	lvl := &Level{
 		Name:        src.Name,
 		Width:       src.Width,
@@ -609,19 +681,12 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	lvl.CoinSpawns = append([]Vec(nil), src.CoinSpawns...)
 	lvl.PlantSpawns = append([]Vec(nil), src.PlantSpawns...)
 	lvl.BarSpawns = append([]FireBar(nil), src.BarSpawns...)
+	lvl.Warps = append([]Warp(nil), src.Warps...)
+	return lvl
+}
 
-	g.Level = lvl
-	g.levelIndex = i
-	g.Time = StartTime
-	g.CameraX = 0
-	g.bumps = map[int]int{}
-	g.checkpoint = -1
-	g.Hurry = false
-	g.HurryT = 0
-	g.FlagDrop = 0
-	g.CastleFlag = 0
-	g.InCastle = false
-
+// spawnEntities builds the live entity sets from a level's spawn lists.
+func (g *Game) spawnEntities(lvl *Level) {
 	g.Enemies = nil
 	for _, s := range lvl.GoombaSpawns {
 		g.Enemies = append(g.Enemies, newGoomba(s))
@@ -645,10 +710,6 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	g.FireFlowers = nil
 	g.Fireballs = nil
 	g.Particles = nil
-	g.Player = newPlayer(lvl.PlayerStart, power)
-	g.Paused = false
-	g.stateTimer = 0
-	g.clearSpawnThreats()
 }
 
 func (g *Game) cleanup() {

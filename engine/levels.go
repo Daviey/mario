@@ -212,6 +212,37 @@ func level1() *Level {
 	b.StairsUp(126, 8)
 	b.StairsDown(135, 8)
 	b.Flag(150)
+	l := mustLevel("1-1", b)
+
+	// The first pipe is SMB 1-1's bonus-cellar pipe: Down on its mouth
+	// trades the surface for the coin cache below, and the cellar's exit
+	// pipe surfaces at the far pipe — past the plant pipe and the hidden
+	// 1-UP, exactly the shortcut the original pays for exploring.
+	room := level1Room()
+	l.Warps = []Warp{{X: 28, Top: GroundTop - 2, Dest: room, DestX: 2, DestTop: GroundTop - 2}}
+	room.Warps = []Warp{{X: 30, Top: GroundTop - 2, Dest: nil, DestX: 41, DestTop: GroundTop - 3}}
+	return l
+}
+
+// level1Room is 1-1's underground bonus cellar: a brick-lined pocket
+// under the surface with a coin cache, pipe in on the left, pipe out on
+// the right. It has no flag — play ends only by travelling or dying,
+// and the level-1 index (and the leaderboard's level column) stay with
+// the surface.
+func level1Room() *Level {
+	b := NewBuilder(34, LevelHeight)
+	b.Theme(ThemeUnderground)
+	b.Ground(0, 33)
+	b.Ceiling()
+	for y := 1; y < GroundTop; y++ { // brick walls close the cellar
+		b.Set(0, y, 'B')
+		b.Set(33, y, 'B')
+	}
+	b.Pipe(2, 2)  // entry: the player rises out of this mouth
+	b.Pipe(30, 2) // exit: Down here returns to the surface
+	b.Coins(11, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21)
+	b.Coins(9, 12, 13, 14, 15, 16)
+	b.Set(6, 12, 'M')
 	return mustLevel("1-1", b)
 }
 
