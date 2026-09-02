@@ -164,10 +164,11 @@ type Game struct {
 	flagTopY   float64 // pole-slide start height (drives FlagDrop)
 	fireworks  bool    // flag-slide fireworks already awarded this slide
 	bumps      map[int]int
-	bridgeCols []int // bridge columns left to sweep in StateBridgeFall
-	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
-	prevIn     Input // previous tick's input, for rising/falling edges
-	curIn      Input // current tick's input (stomp bounce reads held jump)
+	coinBricks map[int]*coinBrick // live multi-coin bricks, keyed by tile index
+	bridgeCols []int              // bridge columns left to sweep in StateBridgeFall
+	ceilBuf    []int              // moveY rising-collision column scratch, reused per tick
+	prevIn     Input              // previous tick's input, for rising/falling edges
+	curIn      Input              // current tick's input (stomp bounce reads held jump)
 
 	// Pipe-warp state (see warp.go): the stash of the main-level world
 	// while the player is in a room, the live world per room template,
@@ -801,6 +802,7 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	}
 	g.CameraX = 0
 	g.bumps = map[int]int{}
+	g.coinBricks = seedCoinBricks(lvl)
 	g.checkpoint = -1
 	g.Hurry = false
 	g.HurryT = 0
@@ -1005,6 +1007,39 @@ func (g *Game) decayBumps() {
 			g.bumps[k] = v - 1
 		}
 	}
+	// Multi-coin windows close here too: the brick spends to Used when
+	// the first bump's clock runs out, coins or not.
+	for k, cb := range g.coinBricks {
+		if cb.timer == 0 {
+			continue
+		}
+		cb.timer--
+		if cb.timer <= 0 {
+			g.Level.Set(k%g.Level.Width, k/g.Level.Width, Used)
+			delete(g.coinBricks, k)
+		}
+	}
+}
+
+// coinBrick is the live state of one multi-coin brick.
+type coinBrick struct {
+	coins int
+	timer int // 0 = window not open yet; the first bump opens it
+}
+
+// seedCoinBricks arms every multi-coin brick of a freshly loaded level.
+func seedCoinBricks(l *Level) map[int]*coinBrick {
+	var m map[int]*coinBrick
+	for i, t := range l.Tiles {
+		if t != BrickCoin {
+			continue
+		}
+		if m == nil {
+			m = map[int]*coinBrick{}
+		}
+		m[i] = &coinBrick{coins: MultiCoinCount}
+	}
+	return m
 }
 
 // BumpActive reports whether a tile is currently playing its bump animation.

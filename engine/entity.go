@@ -115,6 +115,14 @@ const (
 	BlooberScore     = 200 // bloober: fireball or star only
 )
 
+// Multi-coin bricks (SMB1's ten-coin block): a coin per bump until the
+// count runs out or the first bump's window closes, then the brick
+// spends to Used.
+const (
+	MultiCoinCount = 10
+	MultiCoinTicks = 250 // ~4.2s from the first bump
+)
+
 // stompLadder is the consecutive-airborne-stomp score ladder; once past
 // the end, every further stomp in the same chain is a 1-UP.
 var stompLadder = [...]int{100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000}

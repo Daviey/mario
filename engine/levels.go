@@ -278,7 +278,7 @@ func level2() *Level {
 	b.Set(10, 9, '?')
 	b.Pipe(14, 3)
 	b.Set(18, 12, 'G')
-	b.Set(22, 9, 'B')
+	b.Set(22, 9, 'C') // multi-coin brick leads the row: ten coins or ~4s of bumping
 	b.Set(23, 9, '?')
 	b.Set(24, 9, 'U')
 	b.Set(25, 9, 'B')
@@ -804,6 +804,7 @@ func level9() *Level {
 
 	// The goomba bridge with the hidden 1-UP above it.
 	b.Fill(36, 9, 42, 9, 'B')
+	b.Set(40, 9, 'C') // the bridge's multi-coin brick, under the goombas' feet
 	b.Set(37, 8, 'G')
 	b.Set(39, 8, 'G')
 	b.Set(41, 8, 'G')

@@ -227,6 +227,26 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 			g.spawnBlockMushroom(tx, ty, MushLife)
 		}
 		g.emit("bump")
+	case BrickCoin:
+		// The ten-coin brick never breaks from below, small or super —
+		// it pays a coin per bump until count or clock runs out.
+		cb := g.coinBricks[idx]
+		if cb == nil {
+			g.Level.Set(tx, ty, Used)
+		} else {
+			if cb.timer == 0 {
+				cb.timer = MultiCoinTicks // the first bump opens the window
+			}
+			cb.coins--
+			g.addCoin()
+			g.spawnCoinPop(float64(tx)+0.35, float64(ty))
+			g.bumps[idx] = BumpAnimTicks
+			g.emit("bump")
+			if cb.coins <= 0 {
+				g.Level.Set(tx, ty, Used)
+				delete(g.coinBricks, idx)
+			}
+		}
 	case Brick:
 		if p.Power >= PowerSuper {
 			g.Level.Set(tx, ty, Empty)

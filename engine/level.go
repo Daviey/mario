@@ -39,12 +39,13 @@ const (
 	FlagPole
 	FlagTop
 	TileBridge // castle boss bridge: solid plank over the lava pool
+	BrickCoin  // multi-coin brick: pays per bump until count or clock runs out
 )
 
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
+	case Ground, Brick, BrickCoin, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
 		return true
 	}
 	return false
@@ -178,6 +179,7 @@ var tileChars = map[byte]Tile{
 	' ': Empty,
 	'#': Ground,
 	'B': Brick,
+	'C': BrickCoin,
 	'?': Question,
 	'U': QuestionMush,
 	'f': QuestionFire,
@@ -193,7 +195,7 @@ var tileChars = map[byte]Tile{
 
 // ParseLevel builds a level from ASCII rows. Tile characters:
 //
-//	' ' empty    '#' ground   'B' brick   '?' question (coin)
+//	' ' empty    '#' ground   'B' brick   'C' multi-coin brick   '?' question (coin)
 //	'U' question (mushroom)   'f' question (fire flower)
 //	'S' question (star)       'P' pipe     'L' lava (castle)
 //	'H' hidden coin block     '1' hidden 1-UP block (bump from below only)

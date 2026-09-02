@@ -215,7 +215,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 			switch t {
 			case engine.Ground:
 				drawGround(f, p, x, y, tx, ty, g.Level.At(tx, ty-1) != engine.Ground)
-			case engine.Brick:
+			case engine.Brick, engine.BrickCoin: // the ten-coin brick is disguised as a plain brick
 				drawBrick(f, p, x, y, tx)
 			case engine.Question, engine.QuestionMush, engine.QuestionStar:
 				drawQuestion(f, p, x, y, g.Tick%48 < 24)

@@ -37,6 +37,7 @@ type worldState struct {
 	bossFires  []*BossFire
 	particles  []*Particle
 	bumps      map[int]int
+	coinBricks map[int]*coinBrick
 	checkpoint float64
 
 	// SMB1-fidelity sets (contract S4): the castle and water hazards and
@@ -66,6 +67,7 @@ func (g *Game) stashWorld() *worldState {
 		bossFires:  g.BossFires,
 		particles:  g.Particles,
 		bumps:      g.bumps,
+		coinBricks: g.coinBricks,
 		checkpoint: g.checkpoint,
 
 		lifts:      g.Lifts,
@@ -92,6 +94,7 @@ func (g *Game) applyWorld(w *worldState) {
 	g.BossFires = w.bossFires
 	g.Particles = w.particles
 	g.bumps = w.bumps
+	g.coinBricks = w.coinBricks
 	g.checkpoint = w.checkpoint
 
 	g.Lifts = w.lifts
@@ -194,6 +197,7 @@ func (g *Game) roomFor(t *Level) *worldState {
 	w := &worldState{
 		level:      lvl,
 		bumps:      map[int]int{},
+		coinBricks: seedCoinBricks(lvl),
 		checkpoint: -1,
 	}
 	w.enemies = buildEnemies(lvl)

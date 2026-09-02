@@ -221,7 +221,7 @@ func (g *Game) shellSmashBricks(e *Enemy, vx float64) bool {
 	y1 := int(math.Floor(e.Pos.Y + e.H - 0.05))
 	broke := false
 	for ty := y0; ty <= y1; ty++ {
-		if g.Level.At(col, ty) != Brick {
+		if t := g.Level.At(col, ty); t != Brick && t != BrickCoin {
 			continue
 		}
 		g.Level.Set(col, ty, Empty)
