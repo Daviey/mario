@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.12.0 — 2026-09-02
+
+Respawn-safety hardening: checkpoints now account for enemies that walk in after respawn, and leap-spawn hazards get a grace window, ending lethal respawn loops for good.
+
+## Highlights
+
+- Checkpoints pick positions a full walk-in window clear of enemy spawns, so a guard that reaches the respawn point shortly after the world card can no longer kill the player on arrival.
+- Cheep-cheep leapers are suppressed for one card-window after a respawn and gated by an open-fall check, so fish never rise through approach ground.
+
+## Added
+
+- Respawn-safety regression tests covering idle-respawn survival across levels and walk-in berth behavior (`engine/respawn_safety_test.go`).
+
+## Changed
+
+- `computeCheckpoint` now skips spawn threats over a wider berth, including the walk-in distance enemies travel during the card window.
+- Respawn grace (`Game.respawnGrace`) suppresses leaping cheeps for one card-window after respawn.
+
+## Fixed
+
+- Fixed respawn loops where a walker spawned just outside the immediate spawn box reached the checkpoint within one card window and drained all remaining lives.
+- Hidden-block, plant and fire-bar spawn-threat checks now also wipe new hazard types (bloopers, hammer bros, hammers, cheeps, podoboos) on respawn.
+
+## Note for players
+
+- This release includes an engine change (`board.EngineVersion` bump): older leaderboard replays may be re-verified or marked invalid against the current build.
+
+
 ## v0.11.0 — 2026-09-02
 
 A major SMB1 fidelity release: worlds 1–3 complete with twelve levels, new enemies, lifts, springboards, and castle endings.
