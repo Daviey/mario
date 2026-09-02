@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.11.0 — 2026-09-02
+
+A major SMB1 fidelity release: worlds 1–3 complete with twelve levels, new enemies, lifts, springboards, and castle endings.
+
+## Highlights
+- Full SMB1 worlds 1–3: twelve levels including underwater 2-2, bridge 2-3, and castles 1-4/3-4
+- New enemies and hazards: hammer bros, bloopers, cheep cheeps, podobos, Bowser
+- Toad/princess castle endings and a large sprite/palette overhaul
+
+## Added
+- Twelve new levels across worlds 1–3, incl. underwater 2-2, bridge 2-3, castles 1-4 and 3-4
+- Hammer bros with hammers, underwater bloopers and cheep cheeps, bridge leaping cheeps
+- Bowser boss (hops, fire breath, axe bridge collapse) in castle levels
+- Lifts (vertical/horizontal/flimsy/pulley) and springboards
+- Podoboos and new hazard types
+- Toad/princess retainer cutscene endings after castle walks
+- Expanded underground warp rooms and level-warp skips
+- Extensive new engine, physics, render fidelity, and regression tests
+
+## Changed
+- Reworked level data and parsing (~800-line levels.go rework)
+- Player physics and enemy behavior updates for fidelity
+- Larger palette and sprite set, richer world rendering
+
+## Packaging
+- Updated README and refreshed screenshots
+
+
+
 ## v0.10.0 — 2026-09-02
 
 This release adds the Bowser boss fight at the end of world 2-4 and overhauls leaderboard verification to correct mismatched scores and hide invalid rows instead of deleting them.
