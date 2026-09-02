@@ -122,16 +122,180 @@ func TestParaStompDemotesToKoopa(t *testing.T) {
 
 func TestWorldTwoThemes(t *testing.T) {
 	levels := DefaultLevels()
-	if len(levels) != 7 {
-		t.Fatalf("default levels = %d, want 7", len(levels))
+	if len(levels) != 12 {
+		t.Fatalf("default levels = %d, want 12", len(levels))
 	}
-	for i, want := range []Theme{ThemeOverworld, ThemeUnderground, ThemeOverworld, ThemeOverworld,
-		ThemeUnderground, ThemeSky, ThemeCastle} {
+	for i, want := range []Theme{ThemeOverworld, ThemeUnderground, ThemeOverworld, ThemeCastle,
+		ThemeOverworld, ThemeUnderwater, ThemeSky, ThemeCastle,
+		ThemeOverworld, ThemeOverworld, ThemeSky, ThemeCastle} {
 		if levels[i].Theme != want {
 			t.Errorf("level %d theme = %v, want %v", i, levels[i].Theme, want)
 		}
 	}
-	if levels[6].BarSpawns == nil {
-		t.Error("castle level has no fire bars")
+	if levels[7].BarSpawns == nil || levels[11].BarSpawns == nil {
+		t.Error("castle levels have no fire bars")
+	}
+}
+
+func TestPodobooKillsEvenWithStar(t *testing.T) {
+	// Rises on its hash phase and kills on touch — star included.
+	for _, star := range []int{0, 600} {
+		g := newGame(t, buildLevel(t, 60))
+		pd := newPodoboo(10, 12)
+		g.Podoboos = append(g.Podoboos, pd)
+		g.Player.Star = star
+		g.Player.Pos = Vec{10.2, GroundTop - SmallH}
+		g.Player.Vel = Vec{}
+		dead := false
+		for i := range 2 * (150 + 60) {
+			g.Update(Input{})
+			g.updatePodoboos()
+			if g.State == StateDying {
+				dead = true
+				break
+			}
+			_ = i
+		}
+		if !dead {
+			t.Fatalf("podoboo never killed the player (star=%d)", star)
+		}
+		if g.Lives != StartLives-1 {
+			t.Errorf("lives = %d (star=%d)", g.Lives, star)
+		}
+	}
+}
+
+func TestPodobooRestsBelowSurfaceBetweenLeaps(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	pd := newPodoboo(10, 12)
+	g.Podoboos = append(g.Podoboos, pd)
+	rose := false
+	for range 400 {
+		g.Tick++
+		g.updatePodoboos()
+		if pd.Pos.Y < pd.BaseY {
+			rose = true
+		}
+	}
+	if !rose {
+		t.Error("podoboo never rose out of the lava")
+	}
+	if pd.Pos.Y > pd.BaseY+PodobooRestDrop+0.01 {
+		t.Errorf("podoboo sank past its rest depth: y=%f", pd.Pos.Y)
+	}
+}
+
+func TestLeapingCheepSpawnerAndStomp(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	g.Level.CheepLeaping = true
+	g.Level.CheepStopX = 40
+	g.Player.Pos.X = 30
+	g.Player.Invincible = 1 << 30 // spawner smoke: ignore contact
+	spawned := 0
+	for range 300 {
+		g.Tick++
+		g.updateCheeps()
+		if n := g.aliveCheeps(true); n > spawned {
+			spawned = n
+		}
+		if n := g.aliveCheeps(true); n > CheepLeapCap {
+			t.Fatalf("leaping cheeps over cap: %d", n)
+		}
+	}
+	if spawned == 0 {
+		t.Fatal("leap spawner never fired")
+	}
+
+	// A directly placed leaper is stompable mid-air for the flat 200.
+	g = newGame(t, buildLevel(t, 60))
+	c := &Cheep{Pos: Vec{20, 10}, Vel: Vec{CheepLeapVelX, 0.1}, W: CheepW, H: CheepH, Red: true, Leaping: true}
+	g.Cheeps = append(g.Cheeps, c)
+	dropPlayer(g, 20, 9.2) // feet land inside the cheep's stomp window
+	g.Player.Vel.Y = 0.2
+	for range 3 {
+		g.updateCheeps()
+	}
+	if !c.Gone {
+		t.Fatal("leaping cheep was not stomped")
+	}
+	if g.Score != CheepScore {
+		t.Errorf("score = %d, want %d", g.Score, CheepScore)
+	}
+	if g.Player.Vel.Y >= 0 {
+		t.Error("player did not bounce off the stomp")
+	}
+}
+
+func TestCheepFireballAndSwimContact(t *testing.T) {
+	// Fireball clears any cheep for the flat 200.
+	g := newGame(t, buildLevel(t, 60))
+	c := &Cheep{Pos: Vec{20, 8}, Vel: Vec{-CheepRedSpeed, 0}, W: CheepW, H: CheepH, Red: true}
+	g.Cheeps = append(g.Cheeps, c)
+	g.Fireballs = append(g.Fireballs, &Fireball{Pos: Vec{20.1, 8.1}, Vel: Vec{FireballSpeed, 0}})
+	g.updateCheeps()
+	if !c.Gone || !g.Fireballs[0].Gone {
+		t.Fatal("fireball did not clear the cheep")
+	}
+	if g.Score != CheepScore {
+		t.Errorf("score = %d, want %d", g.Score, CheepScore)
+	}
+
+	// A swimmer's contact hurts even from above (no stomp underwater).
+	g = newGame(t, buildLevel(t, 60))
+	g.Level.Underwater = true
+	c = &Cheep{Pos: Vec{20, 12}, Vel: Vec{-CheepRedSpeed, 0}, W: CheepW, H: CheepH, Red: true}
+	g.Cheeps = append(g.Cheeps, c)
+	dropPlayer(g, 20, 12.1) // overlapping the swimmer: contact, never a stomp
+	g.Player.Vel.Y = 0.2
+	for range 3 {
+		g.updateCheeps()
+	}
+	if g.State != StateDying {
+		t.Fatalf("state = %v, want dying (swim cheep contact is never a stomp)", g.State)
+	}
+}
+
+func TestBlooberLungesTowardPlayer(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	b := newBloober(Vec{20, 8})
+	g.Bloopers = append(g.Bloopers, b)
+	minY := b.Pos.Y
+	for range 300 {
+		g.updateBloopers()
+		if b.Pos.Y < minY {
+			minY = b.Pos.Y
+		}
+	}
+	if minY >= 8 {
+		t.Error("bloober never lunged upward")
+	}
+	if b.Pos.X >= 20 {
+		t.Errorf("bloober did not home toward the player: x=%f", b.Pos.X)
+	}
+}
+
+func TestBlooberFireballAndStar(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	b := newBloober(Vec{20, 8})
+	g.Bloopers = append(g.Bloopers, b)
+	g.Fireballs = append(g.Fireballs, &Fireball{Pos: Vec{20.1, 8.3}, Vel: Vec{FireballSpeed, 0}})
+	g.updateBloopers()
+	if !b.Gone {
+		t.Fatal("fireball did not clear the bloober")
+	}
+	if g.Score != BlooberScore {
+		t.Errorf("score = %d, want %d", g.Score, BlooberScore)
+	}
+
+	g = newGame(t, buildLevel(t, 60))
+	b = newBloober(Vec{2.1, 12})
+	g.Bloopers = append(g.Bloopers, b)
+	g.Player.Star = 600
+	g.updateBloopers()
+	if !b.Gone {
+		t.Fatal("star did not clear the bloober")
+	}
+	if g.Score != BlooberScore {
+		t.Errorf("score = %d, want %d", g.Score, BlooberScore)
 	}
 }

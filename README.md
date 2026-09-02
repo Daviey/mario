@@ -28,7 +28,7 @@
   <img src="docs/img/demo.gif" alt="Gameplay: running and jumping through World 1-1, stomping goombas, bumping blocks" />
 </p>
 
-Seven hand-built levels across two worlds and four themes (overworld, underground, sky, castle), with mushrooms, fire flowers, star power, hidden blocks, piranha plants, paratroopas, fire bars and lava. All of it drawn as **truecolor pixel art using half-block terminal glyphs**: two square pixels per character cell, a custom 3×5 arcade font for the HUD, and a 16-color fallback for basic terminals.
+Twelve hand-built levels across three worlds and six looks (overworld, underground, underwater, sky, night, castle) — a faithful run through SMB1's worlds 1-3: the warp-zone cellar and vertical lifts of 1-2, the fake-Bowser castles (1-4, 2-4, 3-4 — each an impostor that reveals its true self under fire), the bloober-and-cheep underwater 2-2 with its downward currents, the leaping-cheep bridge of 2-3, the night world 3 with its hammer bros, springboards and balance-lift athletic 3-3, and the princess waiting at the end of 3-4. Mushrooms, fire flowers, star power, hidden blocks, piranha plants, paratroopas, fire bars, podoboos and lava throughout. All of it drawn as **truecolor pixel art using half-block terminal glyphs**: two square pixels per character cell, a custom 3×5 arcade font for the HUD, and a 16-color fallback for basic terminals.
 
 The engine is **fully deterministic**: no randomness, no wall clock, so the same input sequence always reproduces the same game. The online leaderboard is built on that property; every score is verified by replay.
 

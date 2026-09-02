@@ -322,8 +322,8 @@ shots:
 	dist/shots/shots -scene title -out dist/shots/title.ansi
 	dist/shots/shots -scene play -level 1 -tick 600 -out dist/shots/overworld.ansi
 	dist/shots/shots -scene play -level 2 -tick 600 -out dist/shots/underground.ansi
-	dist/shots/shots -scene play -level 6 -tick 900 -out dist/shots/sky.ansi
-	dist/shots/shots -scene play -level 7 -tick 700 -out dist/shots/castle.ansi
+	dist/shots/shots -scene play -level 7 -tick 900 -out dist/shots/sky.ansi
+	dist/shots/shots -scene play -level 4 -tick 700 -out dist/shots/castle.ansi
 	dist/shots/shots -scene board -out dist/shots/board.ansi
 	@for f in title overworld underground sky castle board; do \
 		python3 tools/shots/ansi2png.py dist/shots/$$f.ansi docs/img/$$f.png 8 || exit 1; \

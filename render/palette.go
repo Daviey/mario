@@ -203,6 +203,35 @@ func castleTheme(p *Palette) *Palette {
 	return &q
 }
 
+// underwaterTheme re-skins the swim world (2-2): open blue water where
+// the sky was, teal waterbed terrain — a distinct read from the
+// underground's black-at-the-top, and no water overlay pass anywhere
+// (contract S9: the palette IS the water).
+func underwaterTheme(p *Palette) *Palette {
+	q := *p
+	q.Sky = color(0x2038EC, 12)
+	q.GroundLight = color(0xB8E8E0, 14)
+	q.GroundMid = color(0x38A0B0, 14)
+	q.GroundDark = color(0x145868, 4)
+	q.BrickLight = color(0x78D8D0, 14)
+	q.BrickDark = color(0x1C6878, 4)
+	q.Cloud = color(0x3050C8, 4)
+	return &q
+}
+
+// nightTheme re-skins the world-3 levels: dark navy sky and dark-blue
+// hills. Applied AFTER the level's own theme (an athletic night level
+// keeps its sandstone ledges under the navy sky; see paletteFor).
+func nightTheme(p *Palette) *Palette {
+	q := *p
+	q.Sky = color(0x101840, 4)
+	q.Cloud = color(0x2E3B66, 4)
+	q.Green = color(0x1C3A8C, 4) // hills and bushes go dark blue
+	q.GreenLight = color(0x3050B0, 12)
+	q.GreenDark = color(0x12246A, 4)
+	return &q
+}
+
 // themedCache memoizes themed palettes per (base palette, theme): the
 // theme used to be rebuilt — a full Palette copy — every frame. Keys
 // are palette contents, not pointers: NewPalette output depends only on
@@ -214,6 +243,7 @@ var themedCache sync.Map // themeKey -> *Palette
 type themeKey struct {
 	p     Palette
 	theme engine.Theme
+	night bool // world-3 night pass stacks on top of any theme
 }
 
 // paletteFor returns the palette for the current level's theme, built
@@ -228,10 +258,24 @@ func paletteFor(g *engine.Game, p *Palette) *Palette {
 		build = skyTheme
 	case engine.ThemeCastle:
 		build = castleTheme
+	case engine.ThemeUnderwater:
+		build = underwaterTheme
 	default:
+		build = nil
+	}
+	if g.Level.Night {
+		inner := build
+		build = func(q *Palette) *Palette {
+			if inner != nil {
+				q = inner(q)
+			}
+			return nightTheme(q)
+		}
+	}
+	if build == nil {
 		return p
 	}
-	k := themeKey{*p, g.Level.Theme}
+	k := themeKey{*p, g.Level.Theme, g.Level.Night}
 	if v, ok := themedCache.Load(k); ok {
 		return v.(*Palette)
 	}

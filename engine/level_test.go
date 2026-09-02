@@ -28,7 +28,16 @@ func buildLevel(t *testing.T, w int, mods ...func(*Builder)) *Level {
 	for _, m := range mods {
 		m(b)
 	}
-	return mustParse(t, b.Rows()...)
+	l, err := ParseLevel("test", b.Rows())
+	if err != nil {
+		t.Fatalf("ParseLevel: %v", err)
+	}
+	// mustLevel's out-of-band carries (levels.go), mirrored so tests can
+	// place lifts, springs and currents through the builder.
+	l.LiftSpawns = b.lifts
+	l.SpringSpawns = b.springs
+	l.Currents = b.currents
+	return l
 }
 
 // newGame starts a playing game on one level with a 40-tile viewport.
@@ -101,7 +110,7 @@ func TestParseLevelErrors(t *testing.T) {
 	if _, err := ParseLevel("e", []string{"", ""}); err == nil {
 		t.Error("empty rows: want error")
 	}
-	if _, err := ParseLevel("e", []string{"z#", " F"}); err == nil {
+	if _, err := ParseLevel("e", []string{"&#", " F"}); err == nil {
 		t.Error("unknown char: want error")
 	}
 	// Flagless levels are legal (warp rooms); FlagX stays -1.
@@ -192,12 +201,22 @@ func TestDefaultLevelsValid(t *testing.T) {
 		if l.Height != LevelHeight {
 			t.Errorf("level %d: height %d", i, l.Height)
 		}
-		goal := l.GoalX()
-		if goal <= 10 || goal >= l.Width-4 {
+		// Goal: this level's flag/axe, or — for levels whose exit is a
+		// warp room (2-2's underwater pipe) — the goal inside the room.
+		goalLevel, goal := l, l.GoalX()
+		if goal < 0 {
+			for _, w := range l.Warps {
+				if w.Dest != nil && w.Dest.GoalX() >= 0 {
+					goalLevel, goal = w.Dest, w.Dest.GoalX()
+					break
+				}
+			}
+		}
+		if goal <= 10 || goal >= goalLevel.Width-4 {
 			t.Errorf("level %d: goal at %d", i, goal)
 		}
-		if !l.At(goal, GroundTop).Solid() {
-			t.Errorf("level %d: no ground under goal", i)
+		if !goalLevel.At(goal, GroundTop).Solid() {
+			t.Errorf("level %d: no ground under goal (goal=%d)", i, goal)
 		}
 		// Player starts standing on solid ground, not inside a tile.
 		sx, sy := int(l.PlayerStart.X), int(l.PlayerStart.Y+SmallH)
@@ -222,13 +241,25 @@ func TestDefaultLevelsValid(t *testing.T) {
 		if maxRun > MaxPitWidth {
 			t.Errorf("level %d: pit of width %d exceeds jump range", i, maxRun)
 		}
+		walkers := append(append(append(append([]Vec{}, l.GoombaSpawns...), l.KoopaSpawns...), l.ParaSpawns...),
+			append(append(append(l.BuzzySpawns, l.KoopaRedSpawns...), l.ParaRedSpawns...), l.BlooberSpawns...)...)
+		walkers = append(walkers, l.HammerSpawns...)
 		// No entity spawns inside solid tiles.
-		for _, e := range append(append(append([]Vec{}, l.GoombaSpawns...), l.KoopaSpawns...), l.ParaSpawns...) {
+		for _, e := range walkers {
 			if l.At(int(e.X+0.45), int(e.Y+0.45)).Solid() {
 				t.Errorf("level %d: enemy spawn inside solid at %v", i, e)
 			}
 		}
-		if n := len(l.GoombaSpawns) + len(l.KoopaSpawns) + len(l.ParaSpawns); n < 5 {
+		// Hostility floor: placed walkers, plus castle hazards and the
+		// 2-3 leap spawner (whose cheeps are runtime-spawned, not placed).
+		hostiles := len(walkers)
+		if l.CheepLeaping {
+			hostiles += 5
+		}
+		if l.Theme == ThemeCastle {
+			hostiles += len(l.BarSpawns) + len(l.PodobooSpawns)
+		}
+		if hostiles < 5 {
 			t.Errorf("level %d: too few enemies", i)
 		}
 		// Every plant spawn sits on a pipe mouth (its marker cell is the
@@ -260,7 +291,7 @@ func TestLoadLevelCopiesTiles(t *testing.T) {
 func TestLevelNameAndIndex(t *testing.T) {
 	levels := DefaultLevels()
 	g := NewGame(levels, 40, LevelHeight)
-	for i, want := range []string{"1-1", "1-2", "1-3", "2-1", "2-2", "2-3", "2-4"} {
+	for i, want := range []string{"1-1", "1-2", "1-3", "1-4", "2-1", "2-2", "2-3", "2-4", "3-1", "3-2", "3-3", "3-4"} {
 		if g.LevelIndex() != i || g.LevelName() != want {
 			t.Errorf("level %d: got %d/%s, want %d/%s", i, g.LevelIndex(), g.LevelName(), i, want)
 		}
@@ -299,6 +330,12 @@ func snapshot(g *Game) string {
 	}
 	for _, pa := range g.Particles {
 		fmt.Fprintf(&sb, "|pa(%.2f,%.2f,%d,%d)", pa.Pos.X, pa.Pos.Y, pa.Kind, pa.Life)
+	}
+	for _, l := range g.Lifts {
+		fmt.Fprintf(&sb, "|lf(%.3f,%.3f,%d,%d,%v)", l.X, l.Y, l.Kind, l.StandTicks, l.Gone)
+	}
+	for _, s := range g.Springs {
+		fmt.Fprintf(&sb, "|sp(%.3f,%.3f,%d)", s.X, s.Y, s.Compress)
 	}
 	return sb.String()
 }

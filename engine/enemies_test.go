@@ -411,3 +411,266 @@ func TestEnemyUpdateIgnoresGone(t *testing.T) {
 		t.Error("cleanup kept gone enemy")
 	}
 }
+
+func TestBuzzyFireproof(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	e := newBuzzy(Vec{20, GroundTop - KoopaH})
+	g.Enemies = append(g.Enemies, e)
+	fb := &Fireball{Pos: Vec{20.1, 12.5}, Vel: Vec{FireballSpeed, 0}}
+	g.Fireballs = append(g.Fireballs, fb)
+	run(g, 1, Input{})
+	if !fb.Gone { // cleanup drops the corpse; assert on the pointer
+		t.Error("fireball was not absorbed by the fireproof shell")
+	}
+	if e.State != EnemyWalking || e.Kind != KindBuzzy {
+		t.Errorf("buzzy affected by the fireball: state=%v kind=%v", e.State, e.Kind)
+	}
+	if g.Score != 0 {
+		t.Errorf("absorb paid score: %d", g.Score)
+	}
+}
+
+func TestBuzzyStompMakesShell(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	e := newBuzzy(Vec{20, GroundTop - KoopaH})
+	g.Enemies = append(g.Enemies, e)
+	dropPlayer(g, 20, 8)
+	for range 60 {
+		if e.State != EnemyWalking {
+			break
+		}
+		g.Update(Input{})
+	}
+	if e.State != EnemyShell {
+		t.Fatalf("buzzy state = %v, want shell", e.State)
+	}
+	if e.H != GoombaH {
+		t.Errorf("buzzy shell box H = %f, want %f", e.H, GoombaH)
+	}
+	if g.Score != StompScore {
+		t.Errorf("score = %d, want %d", g.Score, StompScore)
+	}
+}
+
+func TestRedKoopaTurnsAtLedge(t *testing.T) {
+	// The pit spans 24-30; ground holds to col 23. A red koopa on the
+	// ledge walking right must turn at the edge and stay up; a green
+	// one marches off and falls.
+	mk := func(red bool) *Game {
+		l := buildLevel(t, 60, func(b *Builder) {
+			b.Fill(24, GroundTop, 30, LevelHeight-1, ' ')
+		})
+		g := newGame(t, l)
+		var e *Enemy
+		if red {
+			e = newKoopaRed(Vec{20, GroundTop - KoopaH})
+		} else {
+			e = newKoopa(Vec{20, GroundTop - KoopaH})
+		}
+		e.Dir = 1 // walk toward the pit
+		g.Enemies = append(g.Enemies, e)
+		return g
+	}
+
+	g := mk(true)
+	e := g.Enemies[len(g.Enemies)-1]
+	flipped := false
+	for range 900 {
+		g.Update(Input{})
+		if e.Dir == -1 {
+			flipped = true
+		}
+		if e.Pos.Y > GroundTop-KoopaH+0.05 {
+			t.Fatalf("red koopa walked off the ledge: y=%f", e.Pos.Y)
+		}
+		if e.Gone {
+			t.Fatal("red koopa fell out of the world")
+		}
+	}
+	if !flipped {
+		t.Error("red koopa never turned at the ledge")
+	}
+
+	gg := mk(false)
+	ge := gg.Enemies[len(gg.Enemies)-1]
+	for i := 0; i < 900 && !ge.Gone; i++ {
+		gg.Update(Input{})
+	}
+	if !ge.Gone {
+		t.Error("green koopa did not fall into the pit")
+	}
+}
+
+func TestRedParaBobsAroundBaseY(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	e := newParaRed(Vec{20, 9})
+	g.Enemies = append(g.Enemies, e)
+	minY, maxY := e.Pos.Y, e.Pos.Y
+	x0 := e.Pos.X
+	for range 1200 {
+		g.Update(Input{})
+		if e.Pos.Y < minY {
+			minY = e.Pos.Y
+		}
+		if e.Pos.Y > maxY {
+			maxY = e.Pos.Y
+		}
+	}
+	if minY < 9-ParaRedRange-0.1 || maxY > 9+ParaRedRange+0.1 {
+		t.Errorf("red para escaped its band: y in [%f,%f], want within %.1f±%f",
+			minY, maxY, 9.0, ParaRedRange+0.1)
+	}
+	if minY > 9-ParaRedRange+0.1 || maxY < 9+ParaRedRange-0.1 {
+		t.Errorf("red para did not use its full band: y in [%f,%f]", minY, maxY)
+	}
+	if e.Pos.X != x0 {
+		t.Errorf("red para drifted horizontally: %f -> %f", x0, e.Pos.X)
+	}
+}
+
+func TestRedParaStompDemotesToRedKoopa(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	e := newParaRed(Vec{20, 9})
+	g.Enemies = append(g.Enemies, e)
+	dropPlayer(g, 20, 5)
+	for range 120 {
+		if e.Kind != KindPara {
+			break
+		}
+		g.Update(Input{})
+	}
+	if e.Kind != KindKoopa {
+		t.Fatalf("red para kind = %v, want demoted koopa", e.Kind)
+	}
+	if !e.Red {
+		t.Error("demoted red para lost its Red flag")
+	}
+}
+
+func TestUnderwaterContactNeverStomps(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') }))
+	g.Level.Underwater = true
+	e := g.Enemies[0]
+	// Feet inside the goomba's box while falling: on land a stomp, in
+	// water a hit. Direct overlap keeps the test independent of the
+	// slow swim fall.
+	dropPlayer(g, 20, 11.4)
+	g.Player.Vel.Y = 0.2
+	run(g, 10, Input{})
+	if g.State != StateDying {
+		t.Fatalf("state = %v, want dying (underwater contact always hurts)", g.State)
+	}
+	if e.State != EnemyWalking {
+		t.Errorf("goomba was stomped underwater: state=%v", e.State)
+	}
+}
+
+func TestUnderwaterStarStillKills(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'G') }))
+	g.Level.Underwater = true
+	e := g.Enemies[0]
+	g.Player.Star = 600
+	g.Player.Pos = Vec{19.2, 12}
+	run(g, 5, Input{Right: true})
+	if e.State != EnemyFlipped {
+		t.Errorf("star did not kill underwater: state=%v", e.State)
+	}
+	if g.State != StatePlaying {
+		t.Errorf("state = %v, want playing", g.State)
+	}
+}
+
+func TestHammerBroPatrolsAndThrows(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	b := newHammerBro(Vec{20, GroundTop - HammerBroH})
+	g.HammerBros = append(g.HammerBros, b)
+	minX, maxX := b.Pos.X, b.Pos.X
+	for range 400 {
+		g.updateHammerBros()
+		g.updateHammers()
+		if b.Pos.X < minX {
+			minX = b.Pos.X
+		}
+		if b.Pos.X > maxX {
+			maxX = b.Pos.X
+		}
+	}
+	if minX < 20-HammerBroPatrol-0.01 || maxX > 20+HammerBroPatrol+0.01 {
+		t.Errorf("hammer bro escaped his patrol: x in [%f,%f]", minX, maxX)
+	}
+	if len(g.Hammers) == 0 {
+		t.Error("hammer bro never threw a hammer")
+	}
+	for _, h := range g.Hammers {
+		if h.Vel.X == 0 && h.Vel.Y == 0 {
+			t.Error("hammer spawned without velocity")
+		}
+	}
+}
+
+func TestHammerBroStompKill(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	b := newHammerBro(Vec{20, GroundTop - HammerBroH})
+	g.HammerBros = append(g.HammerBros, b)
+	dropPlayer(g, 20, GroundTop-HammerBroH-0.8) // feet inside the bro's stomp window
+	g.Player.Vel.Y = 0.1
+	for range 3 {
+		g.updateHammerBros()
+	}
+	if b.State != broDead {
+		t.Fatalf("hammer bro state = %v, want dead", b.State)
+	}
+	if g.Score != HammerBroScore {
+		t.Errorf("score = %d, want %d", g.Score, HammerBroScore)
+	}
+	if g.Player.Vel.Y >= 0 {
+		t.Error("player did not bounce off the stomp")
+	}
+}
+
+func TestShellKillsHammerBro(t *testing.T) {
+	g := newGame(t, buildLevel(t, 60))
+	b := newHammerBro(Vec{20, GroundTop - HammerBroH})
+	g.HammerBros = append(g.HammerBros, b)
+	sh := newKoopa(Vec{18, GroundTop - KoopaH})
+	sh.State = EnemyShellMoving
+	sh.Dir = 1
+	g.Enemies = append(g.Enemies, sh)
+	for i := 0; i < 20 && b.State != broDead; i++ {
+		g.updateEnemies() // the shell must actually slide into him
+		g.updateHammerBros()
+	}
+	if b.State != broDead {
+		t.Fatalf("hammer bro state = %v, want dead by shell", b.State)
+	}
+	if g.Score != HammerBroScore {
+		t.Errorf("score = %d, want %d", g.Score, HammerBroScore)
+	}
+}
+
+func TestHammerHurtsAndStarSwats(t *testing.T) {
+	// Plain contact hurts: a small player dies.
+	g := newGame(t, buildLevel(t, 60))
+	g.Hammers = append(g.Hammers, &Hammer{Pos: Vec{g.Player.Pos.X, 12}, Vel: Vec{HammerThrowVelX, HammerThrowVelY}})
+	for range 2 {
+		g.updateHammers()
+	}
+	if g.State != StateDying {
+		t.Fatalf("state = %v, want dying (hammer contact)", g.State)
+	}
+
+	// Star power swats it for the flat 100 instead.
+	g = newGame(t, buildLevel(t, 60))
+	g.Player.Star = 600
+	h := &Hammer{Pos: Vec{g.Player.Pos.X, 12}, Vel: Vec{HammerThrowVelX, HammerThrowVelY}}
+	g.Hammers = append(g.Hammers, h)
+	for range 2 {
+		g.updateHammers()
+	}
+	if !h.Gone {
+		t.Error("star did not swat the hammer")
+	}
+	if g.Score != HammerScore {
+		t.Errorf("score = %d, want %d", g.Score, HammerScore)
+	}
+}

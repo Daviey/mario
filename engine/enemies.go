@@ -3,7 +3,10 @@ package engine
 import "math"
 
 // updateEnemies advances every enemy one tick and resolves shell kills.
+// Red-koopa ledge probing and buzzy fireball absorption run here too
+// (enemyGrounded / absorbFireballsOnBuzzy below).
 func (g *Game) updateEnemies() {
+	g.absorbFireballsOnBuzzy()
 	bottom := float64(g.Level.Height) + 2
 	shellSliding := false // set when any live enemy is a sliding shell
 	for _, e := range g.Enemies {
@@ -26,10 +29,36 @@ func (g *Game) updateEnemies() {
 				e.Gone = true
 			}
 		default:
+			// Red paratroopas fly in place: no gravity, no walking,
+			// just the vertical bob around BaseY. Timer carries the
+			// flight direction sign (it is the hop charge it
+			// replaces), reversed at the BaseY±ParaRedRange ends.
+			if e.Kind == KindPara && e.Red {
+				if e.Pos.Y <= e.BaseY-ParaRedRange {
+					e.Timer = 1
+				}
+				if e.Pos.Y >= e.BaseY+ParaRedRange {
+					e.Timer = -1
+				}
+				e.Pos.Y += float64(e.Timer) * ParaRedFlyVel
+				e.WalkDist += ParaRedFlyVel
+				continue
+			}
 			var vx float64
 			switch e.State {
 			case EnemyWalking:
 				vx = float64(e.Dir) * EnemyWalk
+				// A red koopa never walks off a ledge: grounded,
+				// it probes the ground ahead of its leading foot
+				// and turns before the drop (green koopas march
+				// straight off).
+				if e.Red && g.enemyGrounded(e) {
+					ax := e.Pos.X + e.W/2 + float64(e.Dir)*(e.W/2+0.3)
+					ty := int(math.Floor(e.Pos.Y + e.H + 0.5))
+					if !g.solidAt(int(math.Floor(ax)), ty) {
+						e.Dir = -e.Dir
+					}
+				}
 			case EnemyShellMoving:
 				vx = float64(e.Dir) * ShellSpeed
 				shellSliding = true
@@ -116,6 +145,12 @@ func (g *Game) playerEnemyInteractions() {
 			g.emit("stomp")
 			continue
 		}
+		// Underwater there is no stomping (S6): star power still kills,
+		// every other contact just hurts.
+		if g.Level.Underwater {
+			g.hurtPlayer()
+			continue
+		}
 		stomping := p.Vel.Y > 0.02 && (p.Pos.Y+p.H) < (e.Pos.Y+e.H*StompBodyFrac)
 		switch {
 		case stomping && e.State == EnemyWalking:
@@ -128,8 +163,8 @@ func (g *Game) playerEnemyInteractions() {
 				// koopa (a second stomp makes the shell, as usual).
 				e.Kind = KindKoopa
 			default:
-				// Koopa: the shell keeps the koopa's feet planted (the
-				// shell box is goomba-sized).
+				// Koopa and buzzy beetle: the shell keeps the feet
+				// planted (the shell box is goomba-sized).
 				e.State = EnemyShell
 				e.Pos.Y += e.H - GoombaH
 				e.H = GoombaH
@@ -178,4 +213,41 @@ func (g *Game) kickShell(e *Enemy) {
 		e.Dir = -1
 	}
 	g.emit("kick")
+}
+
+// enemyGrounded reports whether any solid tile sits directly under an
+// enemy's feet span — the red koopa's ledge probe needs it.
+func (g *Game) enemyGrounded(e *Enemy) bool {
+	ty := int(math.Floor(e.Pos.Y + e.H + skin))
+	x0 := int(math.Floor(e.Pos.X + skin))
+	x1 := int(math.Floor(e.Pos.X + e.W - skin))
+	for tx := x0; tx <= x1; tx++ {
+		if g.solidAt(tx, ty) {
+			return true
+		}
+	}
+	return false
+}
+
+// absorbFireballsOnBuzzy kills any fireball touching a live buzzy
+// beetle — the shell is fireproof in every state, so the fireball dies
+// with no effect and no score (S7). The fireball-vs-enemy loop lives in
+// items.go, outside this worker's files, so the absorption runs here one
+// step earlier in the tick: updateEnemies precedes updateFireballs, and
+// an absorbed fireball is already Gone before that loop could pay the
+// kill. (A later guard in items.go would be redundant, not conflicting.)
+func (g *Game) absorbFireballsOnBuzzy() {
+	for _, e := range g.Enemies {
+		if e.Gone || e.Kind != KindBuzzy || e.State == EnemySquashed || e.State == EnemyFlipped {
+			continue
+		}
+		for _, fb := range g.Fireballs {
+			if fb.Gone {
+				continue
+			}
+			if overlap(fb.Pos.X, fb.Pos.Y, FireballW, FireballH, e.Pos.X, e.Pos.Y, e.W, e.H) {
+				fb.Gone = true
+			}
+		}
+	}
 }

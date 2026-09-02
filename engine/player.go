@@ -11,6 +11,12 @@ func (g *Game) updatePlayer(in Input) {
 	if in.Run {
 		accel, maxV = RunAccel, MaxRun
 	}
+	if g.Level.Underwater {
+		maxV = WaterMaxWalk
+		if in.Run {
+			maxV = WaterMaxRun
+		}
+	}
 	if !p.Grounded {
 		accel *= AirFactor
 	}
@@ -52,35 +58,51 @@ func (g *Game) updatePlayer(in Input) {
 		g.spawnDustPuff(p.Pos.X+p.W/2+float64(p.Facing)*0.3, p.Pos.Y+p.H-0.05)
 	}
 
-	// Jumping: edge detection, jump buffer and coyote time.
+	// Jumping: edge detection, jump buffer and coyote time. Underwater
+	// the same key is a swim stroke — a fixed upward impulse on the
+	// press edge with none of the ground machinery (no coyote time, no
+	// buffer, no variable height, no dust, no stretch pose).
 	jumpPressed := in.Up && !g.prevIn.Up
 	jumpReleased := !in.Up && g.prevIn.Up
-	if jumpPressed {
-		p.jumpBuffer = JumpBufferTicks
-	} else if p.jumpBuffer > 0 {
-		p.jumpBuffer--
-	}
-	if p.Grounded {
-		p.groundTimer = 0
+	if g.Level.Underwater {
+		if jumpPressed {
+			p.Vel.Y = SwimStrokeVel
+			g.emit("jump")
+		}
 	} else {
-		p.groundTimer++
-	}
-	if p.jumpBuffer > 0 && p.groundTimer <= CoyoteTicks {
-		p.Vel.Y = JumpVel
-		p.jumping = true
-		p.Grounded = false
-		p.jumpBuffer = 0
-		p.groundTimer = CoyoteTicks + 1 // consume coyote so the jump cannot re-fire
-		p.StretchT = StretchPoseTicks
-		g.spawnDustPuff(p.Pos.X+p.W/2-0.15, p.Pos.Y+p.H)
-		g.spawnDustPuff(p.Pos.X+p.W/2+0.15, p.Pos.Y+p.H)
-		g.emit("jump")
-	}
-	if jumpReleased && p.jumping && p.Vel.Y < JumpCut {
-		p.Vel.Y = JumpCut
-	}
-	if p.Vel.Y > 0 {
-		p.jumping = false
+		if jumpPressed {
+			p.jumpBuffer = JumpBufferTicks
+		} else if p.jumpBuffer > 0 {
+			p.jumpBuffer--
+		}
+		if p.Grounded {
+			p.groundTimer = 0
+		} else {
+			p.groundTimer++
+		}
+		if p.jumpBuffer > 0 && p.groundTimer <= CoyoteTicks {
+			// A jump off a fully compressed springboard is the big
+			// bounce (2× apex); anything less is an ordinary hop.
+			jv := JumpVel
+			if s := g.springUnder(p); s != nil && s.Compress >= SpringFullTicks {
+				jv = SpringJumpVel
+			}
+			p.Vel.Y = jv
+			p.jumping = true
+			p.Grounded = false
+			p.jumpBuffer = 0
+			p.groundTimer = CoyoteTicks + 1 // consume coyote so the jump cannot re-fire
+			p.StretchT = StretchPoseTicks
+			g.spawnDustPuff(p.Pos.X+p.W/2-0.15, p.Pos.Y+p.H)
+			g.spawnDustPuff(p.Pos.X+p.W/2+0.15, p.Pos.Y+p.H)
+			g.emit("jump")
+		}
+		if jumpReleased && p.jumping && p.Vel.Y < JumpCut {
+			p.Vel.Y = JumpCut
+		}
+		if p.Vel.Y > 0 {
+			p.jumping = false
+		}
 	}
 	if p.Invincible > 0 {
 		p.Invincible--
@@ -95,13 +117,36 @@ func (g *Game) updatePlayer(in Input) {
 		p.SquashT--
 	}
 
-	// Gravity and integration.
+	// Gravity and integration. In water: the gentle sink plus any
+	// current drag, clamped to the water terminal velocity (the drag
+	// itself rides on top of the clamp, so a current sinks a swimmer
+	// past his own terminal — 2-2's pits are earned that way).
 	rising := p.Vel.Y < -0.01
-	p.Vel.Y += Gravity
+	if g.Level.Underwater {
+		p.Vel.Y = min(p.Vel.Y+WaterGravity, WaterMaxFall)
+		if g.inCurrent(p) {
+			p.Vel.Y += CurrentDrag
+		}
+	} else {
+		p.Vel.Y += Gravity
+	}
 	if g.moveX(&p.Pos, p.W, p.H, p.Vel.X) {
 		p.Vel.X = 0
 	}
 	landed, ceilTy, ceilCols := g.moveY(&p.Pos, p.W, p.H, p.Vel.Y)
+	// Platforms are solid from the top only: a body still falling after
+	// the tile pass lands on any lift or springboard top it overlaps.
+	// Rising bodies never match (liftUnder/springUnder), so a jump from
+	// below passes straight through.
+	if !landed && p.Vel.Y >= 0 {
+		if l := g.liftUnder(p); l != nil {
+			p.Pos.Y = l.Y - p.H
+			landed = true
+		} else if s := g.springUnder(p); s != nil {
+			p.Pos.Y = s.Y - p.H
+			landed = true
+		}
+	}
 	p.Grounded = landed
 	if landed {
 		fall := p.Vel.Y

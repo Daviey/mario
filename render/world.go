@@ -3,6 +3,7 @@ package render
 import (
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/Daviey/mario/engine"
@@ -32,6 +33,15 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	if title || g.Demo {
 		titleEls = titleTextEls(f, g)
 	}
+	// Retainer cutscene (castle levels with a Toad/Princess): the world
+	// gives way to the castle-interior room for the exchange, then play
+	// resumes through the score tick. Checked before the sky dressing —
+	// the room repaints the whole frame anyway.
+	if g.State == engine.StateRetainer {
+		drawRetainerScene(f, g, p, rc)
+		drawOverlayPx(f, g, p, nil)
+		return f
+	}
 	drawDecorations(f, g, p, rc, ox, oy, bandsFromEls(f, titleEls))
 	if title {
 		// Title screen: clean sky, decorations and the ground strip only,
@@ -52,6 +62,8 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawMushrooms(f, g, p, rc, camX, camY)
 	drawFlowers(f, g, p, rc, camX, camY)
 	drawTilesPx(f, g, p, camX, camY, ox, oy)
+	drawLifts(f, g, p, rc, camX, camY) // platforms under the actors
+	drawSprings(f, g, p, rc, camX, camY)
 	drawAxe(f, g, p, rc, ox, oy)
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
@@ -60,6 +72,11 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawBossFires(f, g, p, rc, camX, camY)
 	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
+	drawPodoboos(f, g, p, rc, camX, camY)
+	drawCheeps(f, g, p, rc, camX, camY)
+	drawBloopers(f, g, p, rc, camX, camY)
+	drawHammerBros(f, g, p, rc, camX, camY)
+	drawHammers(f, g, p, rc, camX, camY)
 	if !pipeWarp {
 		drawPlayerPx(f, g, p, rc, camX, camY)
 	}
@@ -121,8 +138,11 @@ func FrameANSI(g *engine.Game, p *Palette, ui ...*ScoreUI) string {
 func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 	ox, oy int, bands [][4]int) {
 	switch g.Level.Theme {
-	case engine.ThemeUnderground, engine.ThemeCastle:
-		return // no sky dressing underground or inside the castle
+	case engine.ThemeUnderground, engine.ThemeCastle, engine.ThemeUnderwater:
+		return // no sky dressing underground, inside the castle, or under water
+	}
+	if g.Level.Underwater {
+		return // the swim regime is all water — clouds would read as foam
 	}
 	// Only the overworld grows hills and bushes; the sky world keeps its
 	// clouds but floats over open air.
@@ -321,26 +341,40 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 		case engine.EnemySquashed, engine.EnemyFlipped:
 			f.Fill(cx-3, bottom-2, 6, 2, p.GoombaFlat)
 		case engine.EnemyShell, engine.EnemyShellMoving:
-			art := sprShell
+			art, cols := sprShell, rc
+			switch {
+			case e.Kind == engine.KindBuzzy:
+				cols = buzzyShellColors(p) // the indigo shell
+			case e.Red:
+				cols = koopaRedColors(p)
+			}
 			if e.State == engine.EnemyShellMoving {
 				// motion streaks behind the shell
 				dx := -e.Dir * 4
 				f.Set(cx+dx, bottom-3, p.White)
 				f.Set(cx+dx+e.Dir, bottom-3, p.White)
 			}
-			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
+			f.DrawSprite(art, cols, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		default:
-			art := sprGoomba
-			walk := sprGoombaWalk
-			if e.Kind == engine.KindKoopa {
+			art, walk, cols := sprGoomba, sprGoombaWalk, rc
+			switch e.Kind {
+			case engine.KindKoopa:
 				art, walk = sprKoopa, sprKoopaWalk
-			} else if e.Kind == engine.KindPara {
+				if e.Red {
+					art, walk, cols = sprKoopaRed, sprKoopaRedWalk, koopaRedColors(p)
+				}
+			case engine.KindPara:
 				art, walk = sprPara, sprParaWalk
+				if e.Red {
+					art, walk, cols = sprParaRed, sprParaRedWalk, koopaRedColors(p)
+				}
+			case engine.KindBuzzy:
+				art, walk = sprBuzzy, sprBuzzyWalk
 			}
 			if int(e.WalkDist/engine.EnemyFrameLen)%2 == 1 {
 				art = walk
 			}
-			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
+			f.DrawSprite(art, cols, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		}
 	}
 }
@@ -449,6 +483,124 @@ func drawFireballs(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX
 	}
 }
 
+// drawPodoboos paints the lava fireballs (contract S7/S9): bright orbs
+// with flame tails, bottom-centre anchored like the enemies. A pod
+// resting below its pool surface (Pos past BaseY+1) draws nothing —
+// the lava already is the resting state it would sit inside.
+func drawPodoboos(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, pd := range g.Podoboos {
+		if pd.Gone || pd.Pos.Y > pd.BaseY+1 {
+			continue
+		}
+		cx := int(math.Round((pd.Pos.X + pd.W/2 - camX) * Pix))
+		bottom := int(math.Round((pd.Pos.Y + pd.H - camY) * Pix))
+		f.DrawSprite(sprPodoboo, rc, cx-sprW(sprPodoboo)/2, bottom-sprH(sprPodoboo), false, 1)
+	}
+}
+
+// drawCheeps paints cheep cheeps, centre-anchored on the fish box: red
+// or gray, swimming or leaping. They face their travel direction — the
+// art looks right, a left-moving fish flips.
+func drawCheeps(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, c := range g.Cheeps {
+		if c.Gone {
+			continue
+		}
+		art, cols := sprCheep, rc
+		if !c.Red {
+			art, cols = sprCheepGray, cheepGrayColors(p)
+		}
+		cx := int(math.Round((c.Pos.X + c.W/2 - camX) * Pix))
+		cy := int(math.Round((c.Pos.Y + c.H/2 - camY) * Pix))
+		f.DrawSprite(art, cols, cx-sprW(art)/2, cy-sprH(art)/2, c.Vel.X < 0, 1)
+	}
+}
+
+// drawBloopers paints the underwater squid, bottom-anchored so the
+// tentacles hang at the box's foot.
+func drawBloopers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, bl := range g.Bloopers {
+		if bl.Gone {
+			continue
+		}
+		cx := int(math.Round((bl.Pos.X + bl.W/2 - camX) * Pix))
+		bottom := int(math.Round((bl.Pos.Y + bl.H - camY) * Pix))
+		f.DrawSprite(sprBloober, rc, cx-sprW(sprBloober)/2, bottom-sprH(sprBloober), bl.Vel.X < 0, 1)
+	}
+}
+
+// drawHammerBros paints the armoured koopas: the stride frame follows
+// the bro's own clock, so the waddle is a pure function of state like
+// every other walk cycle.
+func drawHammerBros(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, hb := range g.HammerBros {
+		if hb.Gone {
+			continue
+		}
+		art := sprHammerBro
+		if (hb.Clock/8)%2 == 1 {
+			art = sprHammerBroWalk
+		}
+		cx := int(math.Round((hb.Pos.X + hb.W/2 - camX) * Pix))
+		bottom := int(math.Round((hb.Pos.Y + hb.H - camY) * Pix))
+		f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), hb.Dir < 0, 1)
+	}
+}
+
+// drawHammers paints thrown hammers as a spinning read: the art flips
+// on the hammer's rotation counter, the same trick the fireball spin
+// pulls off the world tick. A 0.5×0.5 box centres the 5×5 art.
+func drawHammers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, hm := range g.Hammers {
+		if hm.Gone {
+			continue
+		}
+		cx := int(math.Round((hm.Pos.X + 0.25 - camX) * Pix)) // 0.25 = W/2 of the 0.5 box
+		cy := int(math.Round((hm.Pos.Y + 0.25 - camY) * Pix))
+		f.DrawSprite(sprHammer, rc, cx-sprW(sprHammer)/2, cy-sprH(sprHammer)/2, (hm.Rot/4)%2 == 1, 1)
+	}
+}
+
+// drawLifts paints the rideable platforms (contract S8/S9): the fixed
+// 4×2 platform chunk, stamped side by side until the lift's pixel
+// width is covered and centred on it, so any W reads as one mushroom
+// platform. Flimsy lifts get the pale plank art.
+func drawLifts(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, l := range g.Lifts {
+		if l.Gone {
+			continue
+		}
+		art := sprLift
+		if l.Kind == engine.LiftFlimsy {
+			art = sprLiftFlimsy
+		}
+		px := int(math.Round((l.X - camX) * Pix))
+		py := int(math.Round((l.Y - camY) * Pix))
+		wpx := int(math.Round(l.W * Pix))
+		aw := sprW(art)
+		n := (wpx + aw - 1) / aw
+		x0 := px + (wpx-n*aw)/2
+		for i := range n {
+			f.DrawSprite(art, rc, x0+i*aw, py, false, 1)
+		}
+	}
+}
+
+// drawSprings paints springboards: the compressed coil frame whenever
+// the engine counts a rider's weight on it (Compress > 0), anchored at
+// the solid top box's corner.
+func drawSprings(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, s := range g.Springs {
+		art := sprSpring
+		if s.Compress > 0 {
+			art = sprSpringDown
+		}
+		x := int(math.Round((s.X - camX) * Pix))
+		y := int(math.Round((s.Y - camY) * Pix))
+		f.DrawSprite(art, rc, x+(Pix-sprW(art))/2, y, false, 1)
+	}
+}
+
 // drawWorldCard paints the "WORLD 1-2  x3" interstitial over black.
 func drawWorldCard(f *Frame, g *engine.Game, p *Palette) {
 	f.Fill(0, 0, f.W, f.H, Color{})
@@ -485,39 +637,87 @@ func drawPlayerPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX,
 	f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), pl.Facing < 0, 1)
 }
 
+// variantColors builds a copy of the rune palette with per-rune
+// overrides — the shared body of the re-skin caches (fire mario, the
+// axe blink, red koopas, gray cheeps, buzzy shells, the princess
+// gown). Cached maps are read-only by convention (see runeColors).
+func variantColors(p *Palette, cache *sync.Map, over map[rune]Color) map[rune]Color {
+	if v, ok := cache.Load(*p); ok {
+		return v.(map[rune]Color)
+	}
+	rc := map[rune]Color{}
+	for k, v := range runeColors(p) {
+		rc[k] = v
+	}
+	for k, v := range over {
+		rc[k] = v
+	}
+	cache.Store(*p, rc)
+	return rc
+}
+
 // fireRuneColors re-skins mario art as fire mario: white cap and shirt,
 // red overalls. Cached per palette contents, like runeColorsCache.
 var fireRuneCache sync.Map // Palette -> map[rune]Color
 
 func fireRuneColors(p *Palette) map[rune]Color {
-	if v, ok := fireRuneCache.Load(*p); ok {
-		return v.(map[rune]Color)
-	}
-	rc := map[rune]Color{}
-	for k, v := range runeColors(p) {
-		rc[k] = v
-	}
-	rc['R'] = p.White
-	rc['B'] = p.FlagRed
-	fireRuneCache.Store(*p, rc)
-	return rc
+	return variantColors(p, &fireRuneCache, map[rune]Color{
+		'R': p.White,
+		'B': p.FlagRed,
+	})
 }
 
 // axeDimColors swaps the axe blade to pale gold — the blink partner of
 // white. Cached per palette contents, like fireRuneColors.
 var axeDimCache sync.Map // Palette -> map[rune]Color
-
 func axeDimColors(p *Palette) map[rune]Color {
-	if v, ok := axeDimCache.Load(*p); ok {
-		return v.(map[rune]Color)
-	}
-	rc := map[rune]Color{}
-	for k, v := range runeColors(p) {
-		rc[k] = v
-	}
-	rc['W'] = p.GoldLight
-	axeDimCache.Store(*p, rc)
-	return rc
+	return variantColors(p, &axeDimCache, map[rune]Color{
+		'W': p.GoldLight,
+	})
+}
+
+// koopaRedColors re-skins koopa/para/shell art as the red variant
+// (contract S2 'R'/'r'): shell greens go to the red family.
+var koopaRedCache sync.Map // Palette -> map[rune]Color
+
+func koopaRedColors(p *Palette) map[rune]Color {
+	return variantColors(p, &koopaRedCache, map[rune]Color{
+		'G': p.FlagRed,
+		'E': color(0xFF8878, 9),
+		'g': color(0x8C1410, 1),
+	})
+}
+
+// cheepGrayColors re-skins the cheep art gray for the slower gray
+// variant (manual wins on the speed call).
+var cheepGrayCache sync.Map // Palette -> map[rune]Color
+
+func cheepGrayColors(p *Palette) map[rune]Color {
+	return variantColors(p, &cheepGrayCache, map[rune]Color{
+		'R': color(0xA8B0C0, 7),
+	})
+}
+
+// buzzyShellColors re-skins the shared shell art as the buzzy's indigo
+// shell (contract S9: shell reuse of sprShell with dark cols).
+var buzzyShellCache sync.Map // Palette -> map[rune]Color
+
+func buzzyShellColors(p *Palette) map[rune]Color {
+	return variantColors(p, &buzzyShellCache, map[rune]Color{
+		'G': p.Overall, // the buzzy art's indigo
+		'g': p.Dark,
+	})
+}
+
+// princessColors re-skins the princess art: the 'R' gown rune becomes
+// pink (no pink swatch exists in the base palette — this is the one
+// place a costume color is introduced).
+var princessCache sync.Map // Palette -> map[rune]Color
+
+func princessColors(p *Palette) map[rune]Color {
+	return variantColors(p, &princessCache, map[rune]Color{
+		'R': color(0xF070A8, 13),
+	})
 }
 
 // starPhaseKey identifies one flicker phase of the star re-skin.
@@ -603,4 +803,128 @@ func marioArt(pl *engine.Player) []string {
 		}
 		return sprMarioSmall
 	}
+}
+
+//
+// The retainer cutscene (contract S5/S9): the castle interior where the
+// saved Mushroom Retainer (or, after the last castle, the Princess)
+// delivers the arcade-text message. Rendered purely from engine state —
+// the player's walk-in position, the NPC's level-fixed spot and the
+// world tick drive everything.
+//
+
+// Retainer cutscene lines. The arcade charset has no comma (pinned
+// deviation), so the canonical punctuation lives only in the manual.
+const (
+	retainerTextToad     = "THANK YOU MARIO BUT OUR PRINCESS IS IN ANOTHER CASTLE!"
+	retainerTextPrincess = "THANK YOU MARIO YOUR QUEST IS OVER"
+	retainerTextPress    = "PRESS ANY KEY"
+)
+
+// drawRetainerScene paints the castle-interior room: black air, a
+// barred window, a stone floor, the retainer at RetainerAt and the
+// player walking in — plus the word-wrapped message. The camera is
+// recomputed from the cast's positions (the level camera may sit
+// anywhere after the bridge), keeping the scene a pure function of
+// state.
+func drawRetainerScene(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color) {
+	feetRow := g.Level.RetainerAt.Y      // the NPC's feet cell
+	floorTop := float64(feetRow+1) * Pix // world px of the floor surface
+	camY := floorTop/Pix - (float64(f.H)-Pix)/Pix
+	mid := (g.Player.Pos.X + g.Player.W/2 + float64(g.Level.RetainerAt.X)) / 2
+	camX := mid - float64(f.W)/(2*Pix)
+	if camX < 0 {
+		camX = 0
+	}
+	if m := float64(g.Level.Width) - float64(f.W)/Pix; camX > m {
+		camX = m
+	}
+	floorY := int(math.Round(floorTop - camY*Pix))
+
+	// Layout first: the message word-wrapped to the room's width, so the
+	// window can hang below it on whatever wall is left. The princess
+	// adds the blinking prompt — her castle is the end of the quest.
+	msg := retainerTextToad
+	if g.Level.Retainer == 2 {
+		msg = retainerTextPrincess
+	}
+	lines := wrapTextPx(msg, f.W-8, 1)
+	pressRow := 3 + 7*len(lines) + 2
+
+	// The room: themed castle air and stone (the level is a castle, so p
+	// is already castle-skinned), with a barred window lighting the wall
+	// below the message.
+	f.Fill(0, 0, f.W, f.H, p.Sky)
+	textY := 3
+	for _, ln := range lines {
+		drawCenterPx(f, textY, ln, p.White, 1)
+		textY += 7
+	}
+	if g.Level.Retainer == 2 {
+		// The prompt blinks, but its row is always RESERVED — the window
+		// below must not bounce with the blink phase.
+		if g.Tick%40 < 28 {
+			drawCenterPx(f, pressRow, retainerTextPress, p.GoldLight, 1)
+		}
+		textY = pressRow + 7
+	}
+	ww, wh := Pix*2, Pix+2
+	wx, wy := f.W/2-ww/2, textY+1
+	if floorY-sprH(sprPrincess)-2 > wy+wh { // only when the wall has room
+		f.Fill(wx, wy, ww, wh, p.GroundDark)
+		f.Fill(wx+ww/2, wy, 1, wh, p.GroundMid)
+		f.Fill(wx, wy+wh/2, ww, 1, p.GroundMid)
+	}
+	f.Fill(0, floorY, f.W, 1, p.GroundLight)
+	f.Fill(0, floorY+1, f.W, f.H-floorY-1, p.GroundMid)
+	for x := range f.W { // staggered stone seams below the surface
+		f.Set(x, floorY+3+(x/6%2)*2, p.GroundDark)
+	}
+
+	// The retainer: Toad for the impostor castles, the Princess after
+	// the real final one. RetainerAt is the feet cell, so the sprite
+	// bottom sits on the floor surface.
+	npc, cols := sprToad, rc
+	if g.Level.Retainer == 2 {
+		npc, cols = sprPrincess, princessColors(p)
+	}
+	nx := int(math.Round((float64(g.Level.RetainerAt.X) + 0.5 - camX) * Pix))
+	f.DrawSprite(npc, cols, nx-sprW(npc)/2, floorY-sprH(npc), false, 1)
+
+	// The player walks in from the door — drawn directly (not via
+	// drawPlayerPx) because InCastle is set and this room IS where he
+	// reappears.
+	pl := g.Player
+	art := marioArt(pl)
+	pcx := int(math.Round((pl.Pos.X + pl.W/2 - camX) * Pix))
+	pbottom := int(math.Round((pl.Pos.Y + pl.H - camY) * Pix))
+	f.DrawSprite(art, playerRuneColors(p, pl.Power == engine.PowerFire, pl.Star > 0, g.Tick),
+		pcx-sprW(art)/2, pbottom-sprH(art), pl.Facing < 0, 1)
+
+	// (text drawn above, before the window was placed under it)
+}
+
+// wrapTextPx greedily wraps s on spaces into lines that each fit maxW
+// pixels at the given scale; a single word wider than maxW keeps its
+// own line (the font's '?' fallback covers anything unprintable).
+func wrapTextPx(s string, maxW, scale int) []string {
+	words := strings.Split(s, " ")
+	var lines []string
+	cur := ""
+	for _, w := range words {
+		cand := w
+		if cur != "" {
+			cand = cur + " " + w
+		}
+		if cur != "" && textWidthPx(cand, scale) > maxW {
+			lines = append(lines, cur)
+			cur = w
+			continue
+		}
+		cur = cand
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
 }

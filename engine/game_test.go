@@ -455,3 +455,116 @@ func TestDeathFreezeFrameHoldsPose(t *testing.T) {
 		t.Fatalf("death arc did not launch after the freeze: y %f, want above %f", g.Player.Pos.Y, y)
 	}
 }
+
+// --- SMB1-fidelity engine features (contract S5, S12, S1) ---
+
+func TestRetainerSceneFlow(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
+	l.Retainer = 1
+	l.RetainerAt = Vec{50, GroundTop - 1}
+	g := newGame(t, l)
+	if StateRetainer.String() != "retainer" {
+		t.Errorf("StateRetainer.String() = %q, want %q", StateRetainer.String(), "retainer")
+	}
+	g.Player.Pos = Vec{37, 13 - SmallH}
+	g.Player.Vel.X = MaxRun
+	run(g, 24, Input{Right: true, Run: true})
+
+	// The castle dwell leads to the retainer scene, not the countdown.
+	for i := 0; i < 600 && g.State != StateRetainer; i++ {
+		g.Update(Input{})
+	}
+	if g.State != StateRetainer {
+		t.Fatalf("never reached the retainer scene: state=%v", g.State)
+	}
+	if !g.RetainerShown {
+		t.Error("RetainerShown not set when the scene began")
+	}
+	// The player walks to his mark beside the retainer.
+	stop := l.RetainerAt.X - 1.5
+	for i := 0; i < 120 && g.State == StateRetainer && g.Player.Pos.X < stop; i++ {
+		g.Update(Input{})
+	}
+	if g.State != StateScoreTick {
+		t.Fatalf("state = %v after reaching the mark, want score-tick", g.State)
+	}
+	if g.Player.Pos.X > stop+0.1 {
+		t.Errorf("player overshot the mark: x=%f stop=%f", g.Player.Pos.X, stop)
+	}
+	// The scene ends with the clear event and the run continues to win.
+	runClear(g)
+	if g.State != StateWin {
+		t.Errorf("state = %v after the retainer scene, want win", g.State)
+	}
+}
+
+func TestRetainerAnyKeySkips(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
+	l.Retainer = 2 // the princess variant takes the same path
+	l.RetainerAt = Vec{56, GroundTop - 1}
+	g := newGame(t, l)
+	g.Player.Pos = Vec{37, 13 - SmallH}
+	g.Player.Vel.X = MaxRun
+	run(g, 24, Input{Right: true, Run: true})
+	for i := 0; i < 600 && g.State != StateRetainer; i++ {
+		g.Update(Input{})
+	}
+	if g.State != StateRetainer {
+		t.Fatalf("never reached the retainer scene: state=%v", g.State)
+	}
+	g.Update(Input{AnyKey: true})
+	if g.State != StateScoreTick {
+		t.Fatalf("state = %v after AnyKey, want score-tick", g.State)
+	}
+	found := false
+	for _, ev := range g.Events {
+		found = found || ev == "clear"
+	}
+	if !found {
+		t.Errorf("events = %v, want a clear event on scene end", g.Events)
+	}
+}
+func TestFlagFireworksOnLuckyDigit(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
+	g := newGame(t, l)
+	g.Player.Pos = Vec{37, 13 - SmallH}
+	g.Player.Vel.X = MaxRun
+	g.Time = 301 // last digit 1: three bursts
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
+	if g.State != StateWin {
+		t.Fatalf("state = %v, want win", g.State)
+	}
+	// Ground grab pays the minimum pole bonus (100); the fireworks add
+	// three bursts and the countdown cashes all 301 units.
+	if want := 100 + 3*FireworksScore + 301*TimeBonusPerUnit; g.Score != want {
+		t.Errorf("score = %d, want %d (100 flag + 3×%d fireworks + 301-unit countdown)",
+			g.Score, want, FireworksScore)
+	}
+}
+
+func TestNoFireworksOnFlatDigit(t *testing.T) {
+	l := buildLevel(t, 60, func(b *Builder) { b.Flag(40) })
+	g := newGame(t, l)
+	g.Player.Pos = Vec{37, 13 - SmallH}
+	g.Player.Vel.X = MaxRun
+	g.Time = 300 // last digit 0: no fireworks
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
+	if want := 100 + 300*TimeBonusPerUnit; g.Score != want {
+		t.Errorf("score = %d, want %d (no fireworks on digit 0)", g.Score, want)
+	}
+}
+
+func TestLevelTimeFieldHonored(t *testing.T) {
+	l := buildLevel(t, 60)
+	l.Time = 400
+	g := newGame(t, l)
+	if g.Time != 400 {
+		t.Errorf("time = %d, want 400 (level-declared timer)", g.Time)
+	}
+	g2 := newGame(t, buildLevel(t, 60))
+	if g2.Time != StartTime {
+		t.Errorf("time = %d, want default %d", g2.Time, StartTime)
+	}
+}
