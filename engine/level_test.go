@@ -104,8 +104,9 @@ func TestParseLevelErrors(t *testing.T) {
 	if _, err := ParseLevel("e", []string{"Z#", " F"}); err == nil {
 		t.Error("unknown char: want error")
 	}
-	if _, err := ParseLevel("e", []string{"###", "###"}); err == nil {
-		t.Error("missing flag: want error")
+	// Flagless levels are legal (warp rooms); FlagX stays -1.
+	if l, err := ParseLevel("e", []string{"###", "###"}); err != nil || l.FlagX != -1 {
+		t.Errorf("flagless level: err=%v flagX=%d, want nil error and -1", err, l.FlagX)
 	}
 }
 

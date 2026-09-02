@@ -344,7 +344,12 @@ func (g *Game) EndDemo() {
 
 // respawn reloads the level after a death, honoring the checkpoint.
 func (g *Game) respawn() {
+	// Dying inside a warp room: the checkpoint that counts is the main
+	// level's — the room's own is an artifact of its fallback column.
 	cp := g.checkpoint
+	if g.inRoom && g.savedWorld != nil {
+		cp = g.savedWorld.checkpoint
+	}
 	g.loadLevel(g.levelIndex, PowerSmall)
 	if cp >= 0 {
 		g.checkpoint = cp

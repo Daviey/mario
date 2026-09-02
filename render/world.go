@@ -40,6 +40,13 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 		drawOverlayPx(f, g, p, titleEls)
 		return f
 	}
+	// During a pipe warp the player sinks into / rises out of the pipe:
+	// drawing him under the tiles lets the pipe mouth occlude him, the
+	// same trick the plants use.
+	pipeWarp := g.State == engine.StatePipeIn || g.State == engine.StatePipeOut
+	if pipeWarp {
+		drawPlayerPx(f, g, p, rc, camX, camY)
+	}
 	drawPlants(f, g, p, rc, camX, camY) // under the pipes: the pipe occludes
 	drawCastleAt(f, g, p, ox, oy)
 	drawMushrooms(f, g, p, rc, camX, camY)
@@ -50,7 +57,9 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
 	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
-	drawPlayerPx(f, g, p, rc, camX, camY)
+	if !pipeWarp {
+		drawPlayerPx(f, g, p, rc, camX, camY)
+	}
 	drawOverlayPx(f, g, p, titleEls)
 	return f
 }
@@ -122,16 +131,19 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 				f.DrawSprite(sprCloud, rc, x, y, false, 1)
 			}
 		}
-		if overworld && HillAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
+		if overworld && HillAt(tx) && spanGrounded(g, tx, sprW(sprHill)) {
 			f.DrawSprite(sprHill, rc, tx*Pix-ox, engine.GroundTop*Pix-oy-sprH(sprHill), false, 1)
 		}
-		if overworld && BushAt(tx) && g.Level.At(tx, engine.GroundTop).Solid() {
+		if overworld && BushAt(tx) && spanGrounded(g, tx, sprW(sprBush)) {
 			f.DrawSprite(sprBush, rc, tx*Pix-ox, engine.GroundTop*Pix-oy-sprH(sprBush), false, 1)
 		}
 	}
 }
 
 func drawCastleAt(f *Frame, g *engine.Game, p *Palette, ox, oy int) {
+	if g.Level.FlagX < 0 {
+		return // flagless levels (warp rooms) have no goal castle
+	}
 	c0, cy, _, _ := castleRect(g)
 	x, y := c0*Pix-ox, cy*Pix-oy
 	drawCastle(f, p, x, y)

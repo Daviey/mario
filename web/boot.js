@@ -373,6 +373,7 @@
     powerup: () => arp([523, 659, 784, 1046, 1318, 1568], 0.055, 0.4),
     oneup: () => arp([659, 784, 659, 523, 587, 784], 0.09, 0.4),
     die: () => note('square', 600, 100, 0.6, ac.currentTime, 0.5),
+    pipe: () => note('square', 500, 120, 0.35, ac.currentTime, 0.45), // the warp slurp
     flag: () => note('square', 1000, 200, 0.5, ac.currentTime, 0.45),
     clear: () => arp([523, 523, 523, 659, 784, 1046], 0.09, 0.45),
     tick: () => note('square', 1319, 1319, 0.03, ac.currentTime, 0.15),

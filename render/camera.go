@@ -35,17 +35,31 @@ func castleRect(g *engine.Game) (x0, y0, w, h int) {
 	return x0, 9, w, 4
 }
 
+// spanGrounded reports whether every tile column a sprite of pixel width
+// w covers holds solid ground at the ground row. Bushes and hills sit ON
+// the terrain: one whose right half overhangs a pit reads as solid
+// footing exactly where a jump is required (live report 2026-09-02 —
+// the gates used to check the anchor column only).
+func spanGrounded(g *engine.Game, tx, w int) bool {
+	for x := tx; x < tx+(w+Pix-1)/Pix; x++ {
+		if !g.Level.At(x, engine.GroundTop).Solid() {
+			return false
+		}
+	}
+	return true
+}
+
 // cloudBlocked reports whether a cloud anchored at tx on sky row row would
 // touch solid tiles or the goal castle. Blocked clouds are skipped so they
 // never slice behind level geometry — clouds only ever draw on open sky.
 func cloudBlocked(g *engine.Game, tx, row int) bool {
-	for x := tx; x < tx+3; x++ { // sprCloud spans 12px = 3 tiles
+	for x := tx; x < tx+sprW(sprCloud)/Pix; x++ { // sprCloud spans 18px = 6 tiles
 		if g.Level.At(x, row) != engine.Empty {
 			return true
 		}
 	}
 	cx, cy, cw, ch := castleRect(g)
-	if row >= cy && row < cy+ch && tx+3 > cx && tx < cx+cw {
+	if row >= cy && row < cy+ch && tx+sprW(sprCloud)/Pix > cx && tx < cx+cw {
 		return true
 	}
 	return false

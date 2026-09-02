@@ -12,6 +12,16 @@ func TestDefaultLevelsCoinsReachable(t *testing.T) {
 		if bad := unreachableCoins(l); len(bad) > 0 {
 			t.Errorf("%s: unreachable coins at %v", l.Name, bad)
 		}
+		// Warp rooms are part of the level's contract: their coins must
+		// be collectable from the room's own spawn too.
+		for _, w := range l.Warps {
+			if w.Dest == nil {
+				continue
+			}
+			if bad := unreachableCoins(w.Dest); len(bad) > 0 {
+				t.Errorf("%s room: unreachable coins at %v", l.Name, bad)
+			}
+		}
 	}
 }
 
@@ -36,6 +46,19 @@ func TestDefaultLevelsFlagReachable(t *testing.T) {
 	for _, l := range DefaultLevels() {
 		if !flagReachable(l) {
 			t.Errorf("%s: flag at column %d unreachable from the spawn by a small player", l.Name, l.FlagX)
+		}
+		// Rooms have no flag by construction; the enterable pipe must
+		// still exist as real pipe tiles at the wired mouth.
+		for _, w := range l.Warps {
+			if l.At(w.X, w.Top) != Pipe || l.At(w.X+1, w.Top) != Pipe {
+				t.Errorf("%s: warp mouth at (%d,%d) is not pipe tiles", l.Name, w.X, w.Top)
+			}
+			if w.Dest == nil {
+				continue
+			}
+			if w.Dest.At(w.DestX, w.DestTop) != Pipe || w.Dest.At(w.DestX+1, w.DestTop) != Pipe {
+				t.Errorf("%s room: warp mouth at (%d,%d) is not pipe tiles", l.Name, w.DestX, w.DestTop)
+			}
 		}
 	}
 }

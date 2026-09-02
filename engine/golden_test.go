@@ -15,8 +15,10 @@ import (
 // without a bump fails here, long before it can diverge a replay.
 
 // levelDigest FNV-hashes every byte that defines a level's gameplay: the
-// tile grid, every spawn list in a fixed order, the flag column and the
-// player start. It deliberately excludes the display name.
+// tile grid, every spawn list in a fixed order, the flag column, the
+// player start and the warp table (destination coordinates only — the
+// room itself is pinned separately). It deliberately excludes the
+// display name.
 func levelDigest(l *Level) uint64 {
 	h := fnv.New64a()
 	for _, t := range l.Tiles {
@@ -36,6 +38,9 @@ func levelDigest(l *Level) uint64 {
 		fmt.Fprintf(h, "|%v,%v", fb.X, fb.Y)
 	}
 	fmt.Fprintf(h, "|flag=%d,start=%v", l.FlagX, l.PlayerStart)
+	for _, w := range l.Warps {
+		fmt.Fprintf(h, "|warp=%d,%d,dst=%d,%d,room=%v", w.X, w.Top, w.DestX, w.DestTop, w.Dest != nil)
+	}
 	return h.Sum64()
 }
 
@@ -45,7 +50,8 @@ func TestLevelBytesPinnedToEngineVersion(t *testing.T) {
 		level *Level
 		want  uint64
 	}{
-		{"1-1", level1(), 0x1d797ae0096ba9b5},
+		{"1-1", level1(), 0x7ae96555a5fb2dd8},
+		{"1-1 cellar", level1Room(), 0x7771631684718c21},
 		{"daily 2026-02-03", DailyLevelFor(2026, 2, 3), 0x1a8e7be7c146cfee},
 	} {
 		got := levelDigest(tc.level)

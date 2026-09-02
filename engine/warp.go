@@ -140,9 +140,9 @@ func (g *Game) roomFor(t *Level) *worldState {
 	}
 	lvl := instantiate(t)
 	w := &worldState{
-		level:     lvl,
-		enemies:   nil,
-		bumps:     map[int]int{},
+		level:      lvl,
+		enemies:    nil,
+		bumps:      map[int]int{},
 		checkpoint: -1,
 	}
 	for _, s := range lvl.GoombaSpawns {
