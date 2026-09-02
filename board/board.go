@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.09.03a" // respawn-safety: walk-in checkpoint berths, leap-spawn grace/open-fall gate, wipe covers new hazards; pre-bump recordings diverge
+const EngineVersion = "2026.09.03b" // shell smash: sliding shells break plain bricks (SMB1); pre-bump recordings diverge
 
 // Client is a configured PostgREST endpoint.
 type Client struct {

@@ -64,7 +64,7 @@ func (g *Game) updateEnemies() {
 				shellSliding = true
 			}
 			e.Vel.Y = applyGravity(e.Vel.Y, Gravity)
-			if vx != 0 && g.moveX(&e.Pos, e.W, e.H, vx) {
+			if vx != 0 && g.moveX(&e.Pos, e.W, e.H, vx) && !g.shellSmashBricks(e, vx) {
 				e.Dir = -e.Dir
 			}
 			landed, _, _ := g.moveY(&e.Pos, e.W, e.H, e.Vel.Y)
@@ -197,6 +197,41 @@ func (g *Game) bouncePlayer() {
 	if g.curIn.Up {
 		p.Vel.Y = JumpVel
 	}
+}
+
+// shellSmashBricks resolves a sliding shell's wall hit, SMB1 style:
+// plain bricks in the shell's body span shatter — paying the brick
+// score, throwing debris and flipping enemies standing on top, the
+// sideways twin of the super player's hitBlock path — and the shell
+// keeps sliding. Any other solid tile reverses it as before (a mixed
+// wall breaks its bricks, then reverses off the remainder on the next
+// tick). Call with e.Pos already pinned flush against the wall by
+// moveX.
+func (g *Game) shellSmashBricks(e *Enemy, vx float64) bool {
+	if e.State != EnemyShellMoving {
+		return false
+	}
+	var col int
+	if vx > 0 {
+		col = int(math.Floor(e.Pos.X + e.W + 0.05))
+	} else {
+		col = int(math.Floor(e.Pos.X - 0.05))
+	}
+	y0 := int(math.Floor(e.Pos.Y + 0.05))
+	y1 := int(math.Floor(e.Pos.Y + e.H - 0.05))
+	broke := false
+	for ty := y0; ty <= y1; ty++ {
+		if g.Level.At(col, ty) != Brick {
+			continue
+		}
+		g.Level.Set(col, ty, Empty)
+		g.Score += BrickScore
+		g.spawnDebris(col, ty)
+		g.emit("brick")
+		g.flipEnemiesOnBlock(col, ty)
+		broke = true
+	}
+	return broke
 }
 
 // kickShell sends an idle shell sliding away from the player.

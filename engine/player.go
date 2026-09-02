@@ -240,7 +240,13 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 	default:
 		return
 	}
-	// Enemies standing on the bumped block get flipped.
+	g.flipEnemiesOnBlock(tx, ty)
+}
+
+// flipEnemiesOnBlock flips every enemy standing on a bumped or broken
+// block — shared by the player's head-bump path and the shell's
+// sideways brick smash.
+func (g *Game) flipEnemiesOnBlock(tx, ty int) {
 	for _, e := range g.Enemies {
 		if e.Gone || e.State == EnemySquashed || e.State == EnemyFlipped {
 			continue
