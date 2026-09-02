@@ -221,10 +221,17 @@ func (g *Game) shellSmashBricks(e *Enemy, vx float64) bool {
 	y1 := int(math.Floor(e.Pos.Y + e.H - 0.05))
 	broke := false
 	for ty := y0; ty <= y1; ty++ {
-		if t := g.Level.At(col, ty); t != Brick && t != BrickCoin {
+		t := g.Level.At(col, ty)
+		if t != Brick && t != BrickCoin {
 			continue
 		}
 		g.Level.Set(col, ty, Empty)
+		if t == BrickCoin {
+			// The smash must also drop the live entry, or the decay
+			// loop later materializes a solid Used block in mid-air
+			// where the smashed brick stood (ghost-block regression).
+			delete(g.coinBricks, ty*g.Level.Width+col)
+		}
 		g.Score += BrickScore
 		g.spawnDebris(col, ty)
 		g.emit("brick")
