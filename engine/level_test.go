@@ -101,7 +101,7 @@ func TestParseLevelErrors(t *testing.T) {
 	if _, err := ParseLevel("e", []string{"", ""}); err == nil {
 		t.Error("empty rows: want error")
 	}
-	if _, err := ParseLevel("e", []string{"Z#", " F"}); err == nil {
+	if _, err := ParseLevel("e", []string{"z#", " F"}); err == nil {
 		t.Error("unknown char: want error")
 	}
 	// Flagless levels are legal (warp rooms); FlagX stays -1.
@@ -118,7 +118,7 @@ func TestParseLevelDefaultPlayerStart(t *testing.T) {
 }
 
 func TestTileSolid(t *testing.T) {
-	solid := []Tile{Ground, Brick, Question, QuestionMush, Used, Pipe}
+	solid := []Tile{Ground, Brick, Question, QuestionMush, Used, Pipe, TileBridge}
 	for _, tl := range solid {
 		if !tl.Solid() {
 			t.Errorf("Tile(%d).Solid() = false, want true", tl)
@@ -192,11 +192,12 @@ func TestDefaultLevelsValid(t *testing.T) {
 		if l.Height != LevelHeight {
 			t.Errorf("level %d: height %d", i, l.Height)
 		}
-		if l.FlagX <= 10 || l.FlagX >= l.Width-4 {
-			t.Errorf("level %d: flag at %d", i, l.FlagX)
+		goal := l.GoalX()
+		if goal <= 10 || goal >= l.Width-4 {
+			t.Errorf("level %d: goal at %d", i, goal)
 		}
-		if !l.At(l.FlagX, GroundTop).Solid() {
-			t.Errorf("level %d: no ground under flag", i)
+		if !l.At(goal, GroundTop).Solid() {
+			t.Errorf("level %d: no ground under goal", i)
 		}
 		// Player starts standing on solid ground, not inside a tile.
 		sx, sy := int(l.PlayerStart.X), int(l.PlayerStart.Y+SmallH)

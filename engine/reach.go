@@ -105,20 +105,26 @@ func unreachableCoins(l *Level) []Vec {
 }
 
 // flagReachable reports whether a small, unpowered player can reach the
-// goal flag from the spawn by ordinary play — the completability
-// contract every shippable level must satisfy: a level whose flag no
-// amount of running and jumping can touch is unwinnable. It flood-fills
-// the same standable-tile graph as unreachableCoins with the same
-// movement scripts (the engine's own updatePlayer), watching for the
-// engine's grab test: the player's right edge past FlagX+0.3.
+// level's goal — the flagpole, or the axe in the boss arena — from the
+// spawn by ordinary play: the completability contract every shippable
+// level must satisfy. A goal no amount of running and jumping can touch
+// makes the level unwinnable. It flood-fills the same standable-tile
+// graph as unreachableCoins with the same movement scripts (the
+// engine's own updatePlayer), watching for the engine's grab test: the
+// player's right edge past the goal column.
 func flagReachable(l *Level) bool {
+	goal := l.GoalX()
+	if goal < 0 {
+		return true // no goal (warp rooms): nothing to complete
+	}
 	g := NewGame([]*Level{l}, 40, 15)
 	g.Enemies = nil  // same fairness contract as the coin check: enemies
 	g.Plants = nil   // and hazards move, so completion must never depend
 	g.FireBars = nil // on where they happen to sit when the player arrives
 	g.CoinItems = nil
+	g.Bowsers = nil // the boss included
 
-	grabX := float64(l.FlagX) + 0.3 // updatePlaying's flag-grab threshold
+	grabX := float64(goal) + 0.5 // updatePlaying's goal-grab threshold
 	reached := false
 	visited := map[stand]bool{}
 	root := spawnSurface(l)
@@ -143,13 +149,13 @@ func flagReachable(l *Level) bool {
 	for len(queue) > 0 && !reached {
 		s := queue[0]
 		queue = queue[1:]
-		// Precision landings only matter near the flag (the final
+		// Precision landings only matter near the goal (the final
 		// staircase and the grab itself); far from it the transit set —
 		// full-speed jump or plain run — still crosses pits and mounts
 		// terrain everywhere.
-		nearFlag := abs(l.FlagX-s.tx) <= 14
+		nearGoal := abs(goal-s.tx) <= 14
 		var scripts [][2]int // {jumpAt, cutAt}; -1: never
-		if nearFlag {
+		if nearGoal {
 			scripts = [][2]int{
 				{0, -1}, {8, -1}, {16, -1}, // full jumps, three run-ups
 				{-1, -1},                 // plain run (walk-offs, falls)
@@ -159,7 +165,7 @@ func flagReachable(l *Level) bool {
 			scripts = [][2]int{{16, -1}, {-1, -1}}
 		}
 		runs := []bool{true, false}
-		if !nearFlag {
+		if !nearGoal {
 			runs = []bool{true}
 		}
 		for _, dir := range []int{-1, 1} {

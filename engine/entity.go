@@ -16,6 +16,8 @@ const (
 	FlowerW, FlowerH     = 0.9, 0.9
 	FireballW, FireballH = 0.45, 0.45
 	PlantW, PlantH       = 0.7, 1.35
+	BowserW, BowserH     = 1.9, 1.9 // the boss: a two-tile wall of shell
+	BossFireW, BossFireH = 0.9, 0.5
 	CoinSize             = 0.6
 	MushroomEmergeStep   = 0.85 / MushroomEmergeTicks
 	FlowerEmergeStep     = 0.85 / FlowerEmergeTicks
@@ -333,6 +335,58 @@ func (fb FireBar) BallPos(i, tick int) Vec {
 // is the law's home, not input.
 func (fb FireBar) MaxReach() float64 {
 	return FireBarHubClear + float64(FireBarLen)*FireBarBallGap + FireBarBallSize/2
+}
+
+// BowserState is the boss lifecycle.
+type BowserState uint8
+
+// Bowser lifecycle: on the bridge cycling hop and fire, mouth open
+// (the fire telegraph), then — support gone or killed — falling with no
+// collision, and finally sinking in the lava.
+const (
+	BowserIdle BowserState = iota
+	BowserMouth
+	BowserFalling
+	BowserSinking
+)
+
+// Bowser is the castle boss: hops and breathes fire on the bridge, dies
+// to five fireballs (or star power, or the axe) and never counts as a
+// stomp. His moods roll off bowserHash (bowser.go), so the whole fight
+// is a pure function of the tick stream.
+type Bowser struct {
+	Pos, Vel Vec
+	W, H     float64
+	Dir      int     // -1: faces the approaching player (left)
+	HomeX    float64 // patrol clamp origin (spawn X); clamps [HomeX-BowserPatrol, HomeX]
+	State    BowserState
+	Timer    int  // action countdown / sink countdown
+	Clock    int  // lifetime ticks: deterministic mood input
+	HP       int  // starts at BowserFireHP
+	Flash    int  // hit-flash countdown (render brightens)
+	Flipped  bool // killed by fireballs/star: render upside down
+	Gone     bool
+}
+
+func newBowser(spawn Vec) *Bowser {
+	return &Bowser{Pos: spawn, W: BowserW, H: BowserH, Dir: -1, HomeX: spawn.X, HP: BowserFireHP}
+}
+
+// dead reports whether the bowser is a corpse — killed by fireballs or
+// star (Flipped), or already dropping/sunk. Corpses deal no contact
+// damage and shrug off further fireballs.
+func (b *Bowser) dead() bool {
+	return b.Gone || b.Flipped || b.State == BowserFalling || b.State == BowserSinking
+}
+
+// BossFire is one breath of Bowser fire: flies flat or rides a sine
+// wave, burns the player on touch and persists through the hit.
+type BossFire struct {
+	Pos, Vel Vec
+	BaseY    float64 // wave centre
+	Wave     bool
+	Life     int
+	Gone     bool
 }
 
 // ParticleKind discriminates visual particles.

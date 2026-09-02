@@ -15,10 +15,10 @@ import (
 // without a bump fails here, long before it can diverge a replay.
 
 // levelDigest FNV-hashes every byte that defines a level's gameplay: the
-// tile grid, every spawn list in a fixed order, the flag column, the
-// player start and the warp table (destination coordinates only — the
-// room itself is pinned separately). It deliberately excludes the
-// display name.
+// tile grid, every spawn list in a fixed order, the flag and axe
+// columns, the player start and the warp table (destination coordinates
+// only — the room itself is pinned separately). It deliberately
+// excludes the display name.
 func levelDigest(l *Level) uint64 {
 	h := fnv.New64a()
 	for _, t := range l.Tiles {
@@ -34,10 +34,14 @@ func levelDigest(l *Level) uint64 {
 	vecs(l.ParaSpawns)
 	vecs(l.CoinSpawns)
 	vecs(l.PlantSpawns)
+	vecs(l.BowserSpawns)
 	for _, fb := range l.BarSpawns {
 		fmt.Fprintf(h, "|%v,%v", fb.X, fb.Y)
 	}
 	fmt.Fprintf(h, "|flag=%d,start=%v", l.FlagX, l.PlayerStart)
+	if l.AxeX >= 0 {
+		fmt.Fprintf(h, "|axe=%d,%d", l.AxeX, l.AxeY)
+	}
 	for _, w := range l.Warps {
 		fmt.Fprintf(h, "|warp=%d,%d,dst=%d,%d,room=%v", w.X, w.Top, w.DestX, w.DestTop, w.Dest != nil)
 	}

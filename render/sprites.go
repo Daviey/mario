@@ -81,6 +81,31 @@ func (f *Frame) DrawSprite(art []string, cols map[rune]Color, x, y int, flip boo
 	}
 }
 
+// drawSpriteVFlip stamps rune art vertically flipped — the rows stamp in
+// reverse order, the columns untouched — at (x, y), top-left anchored.
+// The upside-down corpse pose for bosses killed mid-air; flipH mirrors
+// horizontally, as in DrawSprite.
+func (f *Frame) drawSpriteVFlip(art []string, cols map[rune]Color, x, y int, flipH bool) {
+	w := sprW(art)
+	h := len(art)
+	for row, line := range art {
+		for col, r := range line {
+			if r == '.' {
+				continue
+			}
+			c, ok := cols[r]
+			if !ok {
+				continue
+			}
+			sx := col
+			if flipH {
+				sx = w - 1 - col
+			}
+			f.Set(x+sx, y+h-1-row, c)
+		}
+	}
+}
+
 // sprW is the sprite width in pixels (art columns).
 func sprW(art []string) int {
 	if len(art) == 0 {
@@ -478,6 +503,66 @@ var sprBush = []string{ // 9×2
 	"EGGGGGGGG",
 }
 
+// Bowser, the bridge boss: a 12×12 read of the SMB silhouette on a
+// 1.9×1.9 hitbox — domed green shell (G, E highlights, g shade) with a
+// top spike on the back-left, twin W horns, tan K hide, pale L belly
+// plates over an n seam, W claws, and a dark D brow over the eye. Faces
+// RIGHT; the renderer mirrors for his usual left-facing stance. Two
+// frames: mouth shut, and the open-jaw fire telegraph — D cavity with W
+// teeth top and bottom.
+var sprBowser = []string{ // mouth shut: D mouth line under the snout
+	"..W.....W.W.",
+	".GEGG..KKKKK",
+	"GEEGGGKDDKKK",
+	"GEGGGGKWDKKK",
+	"GGGGggKKKKKD",
+	"ggggg.KKDDDD",
+	"ggKKLLLLKKK.",
+	".gKLLLLLKKWW",
+	"..KKnnnnKK..",
+	"...KLLLLK...",
+	"...KKK.KKK..",
+	"...KKWW.KKWW",
+}
+
+var sprBowserFire = []string{ // mouth open: W teeth top and bottom of a D cavity
+	"..W.....W.W.",
+	".GEGG..KKKKK",
+	"GEEGGGKDDKKK",
+	"GEGGGGKWDKKK",
+	"GGGGggKKKKKD",
+	"ggggg.KKKWWW",
+	"ggKKLLDWDWDD",
+	".gKLLLKKKK..",
+	"..KKnnnnKK..",
+	"...KLLLLK...",
+	"...KKK.KKK..",
+	"...KKWW.KKWW",
+}
+
+var sprBossFire = []string{ // 5×4: R rim, Y core, W streak — spin frame A
+	".RRR.",
+	"RYYWR",
+	"RYWYR",
+	".RRR.",
+}
+
+var sprBossFireSpin = []string{ // 5×4: streak flipped — spin frame B
+	".RRR.",
+	"RYWYR",
+	"RYYWR",
+	".RRR.",
+}
+
+var sprAxe = []string{ // 5×6: wide silver blade on a brown wood handle
+	"WWWW.",
+	"LWWW.",
+	".WWW.",
+	"..nn.",
+	"..nn.",
+	"..nn.",
+}
+
 //
 // Tile pixel patterns. Each paints one tile (Pix×Pix) at pixel (x, y);
 // (tx, ty) are the tile's world coordinates, used for variation.
@@ -594,6 +679,21 @@ func drawLava(f *Frame, p *Palette, x, y, tx int, surface bool, tick int) {
 	f.Fill(x, y, Pix, 1, p.GoldLight)
 	if (tx+tick/10)%3 == 0 {
 		f.Set(x+2, y+2, p.GoldLight) // rising bubble
+	}
+}
+
+// drawBridge paints one bridge plank over the lava: warm timber, not the
+// castle's grey stone — a lit tan top edge, mid-brown body, dark seams
+// staggered by column parity so adjacent tiles break joints, and a
+// shadowed underside. The wood tones (Goomba/UsedBG) are untouched by
+// castleTheme, so the bridge reads as the one organic thing in the stone
+// room, exactly like SMB's bridge.
+func drawBridge(f *Frame, p *Palette, x, y, tx int) {
+	f.Fill(x, y, Pix, Pix, p.UsedBG)
+	f.Fill(x, y, Pix, 1, p.Goomba)     // lit plank top
+	f.Fill(x, y+Pix-1, Pix, 1, p.Dark) // rope shadow on the underside
+	for i := 2*(tx%2) + 1; i < Pix-1; i += 2 {
+		f.Fill(x+i, y+1, 1, Pix-2, p.Dark) // plank seams
 	}
 }
 

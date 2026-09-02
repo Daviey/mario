@@ -37,12 +37,13 @@ const (
 	HiddenLife // invisible block: only bumps from below, pays a 1-UP
 	FlagPole
 	FlagTop
+	TileBridge // castle boss bridge: solid plank over the lava pool
 )
 
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe:
+	case Ground, Brick, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
 		return true
 	}
 	return false
@@ -56,6 +57,7 @@ type Level struct {
 	Width, Height int
 	Tiles         []Tile
 	FlagX         int
+	AxeX, AxeY    int // the boss-arena goal marker ('x'); -1 when absent
 	Theme         Theme
 	CheckpointX   float64 // mid-level respawn column
 
@@ -66,6 +68,7 @@ type Level struct {
 	CoinSpawns   []Vec
 	PlantSpawns  []Vec     // piranha plants; Y is the pipe-mouth row
 	BarSpawns    []FireBar // castle fire bars; hub centre in tile coords
+	BowserSpawns []Vec     // boss spawns; feet planted on the row below the marker
 
 	// Warps are this level's enterable pipes (see warp.go): press Down
 	// while standing on the mouth to travel. Nil on levels without one.
@@ -114,6 +117,17 @@ func (l *Level) poleTopRow() int {
 	return FlagTopRow
 }
 
+// GoalX returns the level's goal column: the flagpole when the level
+// ends by pole, else the axe (the boss arena's goal). -1 when neither
+// exists (warp rooms) — the castle walk, the reachability check and the
+// renderer's castle all no-op on that.
+func (l *Level) GoalX() int {
+	if l.FlagX >= 0 {
+		return l.FlagX
+	}
+	return l.AxeX
+}
+
 var tileChars = map[byte]Tile{
 	' ': Empty,
 	'#': Ground,
@@ -128,6 +142,7 @@ var tileChars = map[byte]Tile{
 	'1': HiddenLife,
 	'F': FlagPole,
 	'T': FlagTop,
+	'b': TileBridge,
 }
 
 // ParseLevel builds a level from ASCII rows. Tile characters:
@@ -136,10 +151,12 @@ var tileChars = map[byte]Tile{
 //	'U' question (mushroom)   'f' question (fire flower)
 //	'S' question (star)       'P' pipe     'L' lava (castle)
 //	'H' hidden coin block     '1' hidden 1-UP block (bump from below only)
-//	'F' flag pole   'T' flag top
+//	'F' flag pole   'T' flag top   'b' bridge plank (solid, over lava)
 //	'G' goomba   'K' koopa   'W' flying koopa   'c' coin   'M' player start
 //	'V' piranha plant (on the pipe below its cell)
 //	'h' fire-bar hub (rotating hazard anchored at the cell centre)
+//	'Z' Bowser (feet planted on the row below the marker)
+//	'x' axe — the boss arena's goal (one per level; last one wins)
 //
 // Rows are padded with spaces to the width of the longest row. Entity
 // characters are removed from the tile grid and turned into spawn points.
@@ -163,6 +180,8 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 		Height: len(rows),
 		Tiles:  make([]Tile, w*len(rows)),
 		FlagX:  -1,
+		AxeX:   -1,
+		AxeY:   -1,
 	}
 	playerSet := false
 
@@ -188,6 +207,10 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 				l.CoinSpawns = append(l.CoinSpawns, Vec{float64(x) + 0.2, float64(y) + 0.2})
 			case 'V': // air cell above a pipe's left column
 				l.PlantSpawns = append(l.PlantSpawns, Vec{float64(x) + PlantCenterOffset, float64(y) + 1})
+			case 'Z': // Bowser: feet planted on the row below the marker
+				l.BowserSpawns = append(l.BowserSpawns, Vec{float64(x), float64(y) + 1 - BowserH})
+			case 'x': // the axe: the boss arena's goal (last one wins)
+				l.AxeX, l.AxeY = x, y
 			case 'F', 'T':
 				l.Tiles[y*w+x] = tileChars[ch]
 				if l.FlagX < 0 || x < l.FlagX {
@@ -265,6 +288,15 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 	}
 	for _, s := range l.PlantSpawns {
 		if math.Abs(s.X+PlantW/2-(colX+SmallW/2)) < (SmallW+PlantW)/2+0.25 {
+			return true
+		}
+	}
+	// A bowser is a two-tile wall of boss: an AABB test on both axes
+	// (centres closer than the half-extents summed) keeps a respawn
+	// column out of his spawn box.
+	for _, s := range l.BowserSpawns {
+		if math.Abs(s.X+BowserW/2-(colX+SmallW/2)) < (SmallW+BowserW)/2 &&
+			math.Abs(s.Y+BowserH/2-(float64(ground)-SmallH/2)) < (SmallH+BowserH)/2 {
 			return true
 		}
 	}

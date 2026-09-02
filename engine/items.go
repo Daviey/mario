@@ -101,8 +101,8 @@ func (g *Game) throwFireball() {
 	g.emit("fire")
 }
 
-// updateFireballs advances fireballs: gravity, ground bounces, wall and
-// enemy hits.
+// updateFireballs advances fireballs: gravity, ground bounces, wall,
+// enemy and boss hits.
 func (g *Game) updateFireballs() {
 	for _, fb := range g.Fireballs {
 		if fb.Gone {
@@ -155,6 +155,12 @@ func (g *Game) updateFireballs() {
 				fb.Gone = true
 				break
 			}
+		}
+		if fb.Gone {
+			continue
+		}
+		if g.fireballVsBowsers(fb) {
+			continue
 		}
 	}
 }

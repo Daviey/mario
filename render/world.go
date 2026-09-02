@@ -52,9 +52,12 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawMushrooms(f, g, p, rc, camX, camY)
 	drawFlowers(f, g, p, rc, camX, camY)
 	drawTilesPx(f, g, p, camX, camY, ox, oy)
+	drawAxe(f, g, p, rc, ox, oy)
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
 	drawEnemiesPx(f, g, p, rc, camX, camY, ox, oy)
+	drawBowsers(f, g, p, rc, camX, camY)
+	drawBossFires(f, g, p, rc, camX, camY)
 	drawFireBars(f, g, p, rc, camX, camY)
 	drawFireballs(f, g, p, rc, camX, camY)
 	if !pipeWarp {
@@ -141,8 +144,8 @@ func drawDecorations(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 }
 
 func drawCastleAt(f *Frame, g *engine.Game, p *Palette, ox, oy int) {
-	if g.Level.FlagX < 0 {
-		return // flagless levels (warp rooms) have no goal castle
+	if g.Level.GoalX() < 0 {
+		return // goalless levels (warp rooms) have no goal castle
 	}
 	c0, cy, _, _ := castleRect(g)
 	x, y := c0*Pix-ox, cy*Pix-oy
@@ -203,6 +206,8 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				drawPipe(f, p, x, y, col, g.Level.At(tx, ty-1) != engine.Pipe)
 			case engine.Lava:
 				drawLava(f, p, x, y, tx, g.Level.At(tx, ty-1) != engine.Lava, g.Tick)
+			case engine.TileBridge:
+				drawBridge(f, p, x, y, tx)
 			case engine.FlagPole:
 				drawFlagPole(f, p, x, y)
 			case engine.FlagTop:
@@ -235,6 +240,25 @@ func drawCoinItems(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 		cy := int(math.Round((c.Pos.Y + engine.CoinSize/2 - camY) * Pix))
 		f.DrawSprite(art, rc, cx-sprW(art)/2, cy-sprH(art)/2, false, 1)
 	}
+}
+
+// drawAxe paints the bridge-room axe — the goal marker when a level has
+// no flag. The blade blinks between white and pale gold on the question
+// block cadence so it reads as interactive against the black castle
+// sky, and it leaves the world once grabbed (every state past the
+// bridge-fall follows the grab).
+func drawAxe(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, ox, oy int) {
+	if g.Level.AxeX < 0 {
+		return
+	}
+	switch g.State {
+	case engine.StateBridgeFall, engine.StateWalkCastle, engine.StateScoreTick, engine.StateWin:
+		return // axe in hand: past the bridge
+	}
+	if g.Tick%48 >= 24 {
+		rc = axeDimColors(p)
+	}
+	f.DrawSprite(sprAxe, rc, g.Level.AxeX*Pix-ox, g.Level.AxeY*Pix-oy, false, 1)
 }
 
 func drawMushrooms(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
@@ -318,6 +342,52 @@ func drawEnemiesPx(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color,
 			}
 			f.DrawSprite(art, rc, cx-sprW(art)/2, bottom-sprH(art), e.Dir < 0, 1)
 		}
+	}
+}
+
+// drawBowsers paints the bridge boss, bottom-centre anchored like the
+// enemies: mouth open while telegraphing fire, hit sparkles while the
+// damage flash counts down, upside down once flipped dead. Sinking
+// corpses still draw; Gone ones do not.
+func drawBowsers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, b := range g.Bowsers {
+		if b.Gone {
+			continue
+		}
+		cx := int(math.Round((b.Pos.X + b.W/2 - camX) * Pix))
+		bottom := int(math.Round((b.Pos.Y + b.H - camY) * Pix))
+		art := sprBowser
+		if b.State == engine.BowserMouth {
+			art = sprBowserFire
+		}
+		x, y := cx-sprW(art)/2, bottom-sprH(art)
+		if b.Flipped {
+			f.drawSpriteVFlip(art, rc, x, y, b.Dir < 0)
+		} else {
+			f.DrawSprite(art, rc, x, y, b.Dir < 0, 1)
+		}
+		if b.Flash > 0 { // hit sparkles on the hide
+			f.Set(x+2, y+3, p.White)
+			f.Set(x+sprW(art)/2, y+6, p.White)
+			f.Set(x+sprW(art)-4, y+8, p.White)
+		}
+	}
+}
+
+// drawBossFires paints Bowser's breath on the same two-frame spin as
+// the player's fireballs, centre-anchored on the fire's box.
+func drawBossFires(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, bf := range g.BossFires {
+		if bf.Gone {
+			continue
+		}
+		art := sprBossFire
+		if (g.Tick/8)%2 == 1 {
+			art = sprBossFireSpin
+		}
+		cx := int(math.Round((bf.Pos.X + engine.BossFireW/2 - camX) * Pix))
+		cy := int(math.Round((bf.Pos.Y + engine.BossFireH/2 - camY) * Pix))
+		f.DrawSprite(art, rc, cx-sprW(art)/2, cy-sprH(art)/2, false, 1)
 	}
 }
 
@@ -430,6 +500,23 @@ func fireRuneColors(p *Palette) map[rune]Color {
 	rc['R'] = p.White
 	rc['B'] = p.FlagRed
 	fireRuneCache.Store(*p, rc)
+	return rc
+}
+
+// axeDimColors swaps the axe blade to pale gold — the blink partner of
+// white. Cached per palette contents, like fireRuneColors.
+var axeDimCache sync.Map // Palette -> map[rune]Color
+
+func axeDimColors(p *Palette) map[rune]Color {
+	if v, ok := axeDimCache.Load(*p); ok {
+		return v.(map[rune]Color)
+	}
+	rc := map[rune]Color{}
+	for k, v := range runeColors(p) {
+		rc[k] = v
+	}
+	rc['W'] = p.GoldLight
+	axeDimCache.Store(*p, rc)
 	return rc
 }
 

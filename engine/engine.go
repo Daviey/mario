@@ -24,8 +24,10 @@ type State int
 
 // The run lifecycle: Title → WorldCard → Playing, then on level clear
 // FlagSlide → WalkCastle → ScoreTick → the next level's WorldCard (or
-// Win after the last); a death detours through Dying → WorldCard
-// respawn, or GameOver when the lives run out.
+// Win after the last); the boss arena ends Playing through BridgeFall
+// (axe grab → bridge collapse → boss in the lava) into that same castle
+// walk; a death detours through Dying → WorldCard respawn, or GameOver
+// when the lives run out.
 const (
 	StateTitle State = iota
 	StateWorldCard
@@ -38,6 +40,7 @@ const (
 	StateDying
 	StateGameOver
 	StateWin
+	StateBridgeFall
 )
 
 // String returns the state's kebab-case name, as used in logs and debug
@@ -66,6 +69,8 @@ func (s State) String() string {
 		return "game-over"
 	case StateWin:
 		return "win"
+	case StateBridgeFall:
+		return "bridge-fall"
 	}
 	return "unknown"
 }
@@ -101,6 +106,8 @@ type Game struct {
 	Mushrooms    []*Mushroom
 	FireFlowers  []*FireFlower
 	Fireballs    []*Fireball
+	Bowsers      []*Bowser
+	BossFires    []*BossFire
 	Particles    []*Particle
 
 	Score     int
@@ -135,6 +142,7 @@ type Game struct {
 	checkpoint float64 // tile X of the mid-level respawn point; -1 unreached
 	flagTopY   float64 // pole-slide start height (drives FlagDrop)
 	bumps      map[int]int
+	bridgeCols []int // bridge columns left to sweep in StateBridgeFall
 	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
 	prevIn     Input // previous tick's input, for rising/falling edges
 	curIn      Input // current tick's input (stomp bounce reads held jump)
@@ -285,6 +293,10 @@ func (g *Game) Update(in Input) {
 	case StateScoreTick:
 		g.updateScoreTick()
 		g.updateParticles()
+	case StateBridgeFall:
+		g.updateBridgeFall()
+		g.updateParticles()
+		g.decayBumps()
 	case StateDying:
 		g.stateTimer--
 		if g.stateTimer > DyingTicks-DeathFreezeTicks {
@@ -374,17 +386,23 @@ func (g *Game) clearSpawnThreats() {
 		return !(e.Pos.X < p.Pos.X+p.W && e.Pos.X+e.W > p.Pos.X &&
 			e.Pos.Y < p.Pos.Y+p.H && e.Pos.Y+e.H > p.Pos.Y)
 	})
+	// The boss is a threat too: a respawn must never materialize inside
+	// his patrol box.
+	g.Bowsers = filter(g.Bowsers, func(b *Bowser) bool {
+		return !overlap(b.Pos.X, b.Pos.Y, b.W, b.H, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
 }
 
 // updatePlaying runs one live-play tick. The ordering is load-bearing and
 // must not be reshuffled: clock → suicide → fireballs → player physics →
-// checkpoint → flag grab → enemies/plants/bars/combats → lava → pickups →
-// particles → camera → pit → cleanup. The early returns are not optional
-// style — a kill (time-out, suicide, lava, fall-out) or a flag grab
-// invalidates every later step, which would otherwise read and mutate a
-// world the run has already left (dead players must not collect coins;
-// a flag grab ends combat mid-stride). Player physics itself can kill or
-// clear the level, hence its immediate re-check before the world moves.
+// checkpoint → flag/axe grab → enemies/plants/bars/combats → bowsers →
+// lava → pickups → particles → camera → pit → cleanup. The early returns
+// are not optional style — a kill (time-out, suicide, lava, fall-out) or
+// a goal grab (flag, axe) invalidates every later step, which would
+// otherwise read and mutate a world the run has already left (dead
+// players must not collect coins; a goal grab ends combat mid-stride).
+// Player physics itself can kill or clear the level, hence its immediate
+// re-check before the world moves.
 func (g *Game) updatePlaying(in Input) {
 	g.curIn = in
 
@@ -443,10 +461,19 @@ func (g *Game) updatePlaying(in Input) {
 		return
 	}
 
+	// The axe is the boss arena's goal: touching it collapses the bridge.
+	if g.Level.AxeX >= 0 && overlap(g.Player.Pos.X, g.Player.Pos.Y, g.Player.W, g.Player.H,
+		float64(g.Level.AxeX), float64(g.Level.AxeY), 1, 1) {
+		g.grabAxe()
+		return
+	}
 	g.updateEnemies()
 	g.updatePlants()
 	g.updateFireBars()
+	g.updateBowsers()
+	g.updateBossFires()
 	g.playerEnemyInteractions()
+	g.playerBowserInteractions()
 	if g.State != StatePlaying {
 		return
 	}
@@ -531,16 +558,17 @@ func (g *Game) updateFlagSlide() {
 	p.Facing = 1
 }
 
-// Castle-door geometry, in tile columns relative to the flagpole: the
-// walk-to-castle sequence ends when the player's centre reaches the door
-// column, with a force-entry column as the overshoot fallback.
+// Castle-door geometry, in tile columns relative to the level's goal
+// (flagpole, or the axe in the boss arena): the walk-to-castle sequence
+// ends when the player's centre reaches the door column, with a
+// force-entry column as the overshoot fallback.
 // render.castleRect (render/camera.go) derives its footprint FROM these
 // constants (door centre = two tiles inside the castle's left edge; the
 // castle's last column = CastleDoorPastX) — changing either const moves
 // the drawn castle with the door, no manual sync.
 const (
-	CastleDoorOffset = 5 // door centre column, relative to FlagX
-	CastleDoorPastX  = 7 // force door entry past this column, relative to FlagX
+	CastleDoorOffset = 5 // door centre column, relative to GoalX()
+	CastleDoorPastX  = 7 // force door entry past this column, relative to GoalX()
 )
 
 func (g *Game) updateWalkCastle() {
@@ -565,8 +593,8 @@ func (g *Game) updateWalkCastle() {
 	p.WalkDist += CastleWalkSpeed
 	g.updateCamera()
 
-	doorX := float64(g.Level.FlagX + CastleDoorOffset) // castle door centre
-	if p.Pos.X+p.W/2 >= doorX || p.Pos.X > float64(g.Level.FlagX+CastleDoorPastX) {
+	doorX := float64(g.Level.GoalX() + CastleDoorOffset) // castle door centre
+	if p.Pos.X+p.W/2 >= doorX || p.Pos.X > float64(g.Level.GoalX()+CastleDoorPastX) {
 		g.InCastle = true
 		g.stateTimer = CastleDwellTicks
 	}
@@ -674,6 +702,8 @@ func instantiate(src *Level) *Level {
 		Width:       src.Width,
 		Height:      src.Height,
 		FlagX:       src.FlagX,
+		AxeX:        src.AxeX,
+		AxeY:        src.AxeY,
 		Tiles:       make([]Tile, len(src.Tiles)),
 		PlayerStart: src.PlayerStart,
 		Theme:       src.Theme,
@@ -686,6 +716,7 @@ func instantiate(src *Level) *Level {
 	lvl.CoinSpawns = append([]Vec(nil), src.CoinSpawns...)
 	lvl.PlantSpawns = append([]Vec(nil), src.PlantSpawns...)
 	lvl.BarSpawns = append([]FireBar(nil), src.BarSpawns...)
+	lvl.BowserSpawns = append([]Vec(nil), src.BowserSpawns...)
 	lvl.Warps = append([]Warp(nil), src.Warps...)
 	return lvl
 }
@@ -711,6 +742,12 @@ func (g *Game) spawnEntities(lvl *Level) {
 	for _, s := range lvl.CoinSpawns {
 		g.CoinItems = append(g.CoinItems, &CoinItem{Pos: s})
 	}
+	g.Bowsers = nil
+	for _, s := range lvl.BowserSpawns {
+		g.Bowsers = append(g.Bowsers, newBowser(s))
+	}
+	g.BossFires = nil
+	g.bridgeCols = nil
 	g.Mushrooms = nil
 	g.FireFlowers = nil
 	g.Fireballs = nil
@@ -724,6 +761,8 @@ func (g *Game) cleanup() {
 	g.FireFlowers = filter(g.FireFlowers, func(f *FireFlower) bool { return !f.Gone })
 	g.Fireballs = filter(g.Fireballs, func(f *Fireball) bool { return !f.Gone })
 	g.Plants = filter(g.Plants, func(p *Plant) bool { return !p.Gone })
+	g.Bowsers = filter(g.Bowsers, func(b *Bowser) bool { return !b.Gone })
+	g.BossFires = filter(g.BossFires, func(f *BossFire) bool { return !f.Gone })
 }
 
 func (g *Game) decayBumps() {

@@ -387,6 +387,9 @@
       note('square', 660, 660, 0.05, t, 0.4); note('square', 880, 880, 0.05, t + 0.06, 0.4); },
     gameover: () => arp([523, 392, 330, 262], 0.2, 0.45),
     win: () => arp([523, 659, 784, 1046, 784, 1046], 0.12, 0.45),
+    bowser: () => note('square', 220, 110, 0.22, ac.currentTime, 0.5), // boss breath: low growl
+    bowserdie: () => arp([392, 330, 262, 196, 131], 0.09, 0.5),
+    axe: () => arp([988, 784, 659, 523, 659, 784, 1046], 0.07, 0.45),
   };
   const VIBE = { stomp: 20, coin: 10, powerup: 40, oneup: [30, 40, 30], die: 80 };
   const lastSfx = {};

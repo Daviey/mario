@@ -23,6 +23,7 @@ func CloudAt(tx int) (row int, ok bool) {
 }
 
 // castleRect is the goal castle's tile footprint, on rows 9..12. It is
+// anchored on the level's goal — flag pole or bridge axe (GoalX) — and
 // DERIVED from the engine's door geometry (engine.CastleDoorOffset /
 // CastleDoorPastX): the door centre sits two tiles inside the left edge
 // and the castle's last column is CastleDoorPastX, so the drawn castle
@@ -30,8 +31,9 @@ func CloudAt(tx int) (row int, ok bool) {
 // castle painter both derive from this one geometry so they can never
 // drift apart either.
 func castleRect(g *engine.Game) (x0, y0, w, h int) {
-	x0 = g.Level.FlagX + engine.CastleDoorOffset - 2
-	w = g.Level.FlagX + engine.CastleDoorPastX - x0 + 1
+	goal := g.Level.GoalX()
+	x0 = goal + engine.CastleDoorOffset - 2
+	w = goal + engine.CastleDoorPastX - x0 + 1
 	return x0, 9, w, 4
 }
 

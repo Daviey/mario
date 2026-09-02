@@ -25,6 +25,7 @@ var bellNever = map[string]bool{"jump": true, "tick": true, "pause": true}
 var bellForce = map[string]bool{
 	"die": true, "gameover": true, "win": true, "flag": true,
 	"clear": true, "oneup": true, "powerup": true, "star": true, "hurry": true,
+	"axe": true, "bowserdie": true,
 }
 
 // bellRinger turns sound events into BEL bytes on w.

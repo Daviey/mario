@@ -214,7 +214,7 @@ func TestLoadLevelsErrors(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.txt")
-	if err := os.WriteFile(bad, []byte("ZZZ\n"), 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte("zzz\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadLevels(bad); err == nil {

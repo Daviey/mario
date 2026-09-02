@@ -29,6 +29,8 @@ type worldState struct {
 	mushrooms  []*Mushroom
 	flowers    []*FireFlower
 	fireballs  []*Fireball
+	bowsers    []*Bowser
+	bossFires  []*BossFire
 	particles  []*Particle
 	bumps      map[int]int
 	checkpoint float64
@@ -45,6 +47,8 @@ func (g *Game) stashWorld() *worldState {
 		mushrooms:  g.Mushrooms,
 		flowers:    g.FireFlowers,
 		fireballs:  g.Fireballs,
+		bowsers:    g.Bowsers,
+		bossFires:  g.BossFires,
 		particles:  g.Particles,
 		bumps:      g.bumps,
 		checkpoint: g.checkpoint,
@@ -61,6 +65,8 @@ func (g *Game) applyWorld(w *worldState) {
 	g.Mushrooms = w.mushrooms
 	g.FireFlowers = w.flowers
 	g.Fireballs = w.fireballs
+	g.Bowsers = w.bowsers
+	g.BossFires = w.bossFires
 	g.Particles = w.particles
 	g.bumps = w.bumps
 	g.checkpoint = w.checkpoint
@@ -162,6 +168,11 @@ func (g *Game) roomFor(t *Level) *worldState {
 	for _, s := range lvl.CoinSpawns {
 		w.coins = append(w.coins, &CoinItem{Pos: s})
 	}
+	w.bowsers = nil
+	for _, s := range lvl.BowserSpawns {
+		w.bowsers = append(w.bowsers, newBowser(s))
+	}
+	w.bossFires = nil
 	if g.roomWorlds == nil {
 		g.roomWorlds = map[*Level]*worldState{}
 	}

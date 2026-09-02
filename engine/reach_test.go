@@ -39,13 +39,14 @@ func TestDailyLevelsCoinsReachable(t *testing.T) {
 }
 
 // Completability: every shippable level must be finishable. No other
-// test proves any level's flag reachable — the shape checks pin pits and
+// test proves any level's goal reachable — the shape checks pin pits and
 // stairs, the coin checks pin pickups, but only this proves the route
-// from spawn to flag exists under the real physics.
+// from spawn to the goal (flag, or the boss arena's axe) exists under
+// the real physics.
 func TestDefaultLevelsFlagReachable(t *testing.T) {
 	for _, l := range DefaultLevels() {
 		if !flagReachable(l) {
-			t.Errorf("%s: flag at column %d unreachable from the spawn by a small player", l.Name, l.FlagX)
+			t.Errorf("%s: goal at column %d unreachable from the spawn by a small player", l.Name, l.GoalX())
 		}
 		// Rooms have no flag by construction; the enterable pipe must
 		// still exist as real pipe tiles at the wired mouth.

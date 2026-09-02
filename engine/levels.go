@@ -585,7 +585,8 @@ func level6() *Level {
 	return mustLevel("2-3", b)
 }
 
-// level7 is the castle finale: grey stone, lava pools and fire bars.
+// level7 is the castle finale: grey stone, lava pools, fire bars — and
+// the boss bridge: Bowser between the player and the axe.
 func level7() *Level {
 	b := NewBuilder(170, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -644,9 +645,19 @@ func level7() *Level {
 	b.Set(136, 12, 'G')
 	b.Set(140, 12, 'W')
 	b.Set(144, 12, 'K')
-	b.Set(148, 12, 'G')
+	// Atop the boss-arena stair (the old floor cell at 148,12 is now
+	// inside the staircase).
+	b.Set(148, 9, 'G')
 
-	b.StairsUp(150, 8)
-	b.Flag(160)
+	// The boss arena: a short stair up, a bridge of planks over lava,
+	// Bowser patrolling it and the axe behind him. Touching the axe
+	// collapses the bridge and drops him in the pool (bowser.go).
+	b.StairsUp(146, 4)
+	b.Fill(150, 13, 157, 14, 'L') // the lava pool under the bridge
+	for x := 150; x <= 157; x++ {
+		b.Set(x, 13, 'b') // planks flush to the ledge at 158 — no notch to walk into
+	}
+	b.Set(154, 12, 'Z') // Bowser, planted on the bridge
+	b.Set(161, 12, 'x') // the axe: 2-4's true goal
 	return mustLevel("2-4", b)
 }
