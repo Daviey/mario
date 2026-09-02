@@ -38,6 +38,8 @@ func TestSmbSpriteDimensions(t *testing.T) {
 		{"sprPrincess", sprPrincess, 7, 12},
 		{"sprSpring", sprSpring, 7, 4},
 		{"sprSpringDown", sprSpringDown, 7, 4},
+		{"sprSpringHalf", sprSpringHalf, 7, 3},
+		{"sprSpringArmed", sprSpringArmed, 7, 3},
 		{"sprLift", sprLift, 4, 2},
 		{"sprLiftFlimsy", sprLiftFlimsy, 4, 2},
 	} {

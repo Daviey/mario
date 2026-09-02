@@ -713,6 +713,21 @@ var sprSpringDown = []string{ // 7×4: compressed coil (Compress > 0)
 	".DDDDD.",
 }
 
+// Squash stages for drawSprings, composed from the compressed frame:
+// bottom-anchored, one pixel shorter per stage, so compression reads as
+// geometry instead of four closing coil pixels (2026-09-02: the swap
+// alone was invisible in play, leaving the stand-then-launch mechanic
+// with no feedback).
+var sprSpringHalf = []string{ // 7×3: plate one pixel down on the closed coil
+	sprSpringDown[0], sprSpringDown[1], sprSpringDown[3],
+}
+
+var sprSpringArmed = []string{ // 7×3: full compression — gold plate, jump now
+	".LLLLL.",
+	sprSpringDown[1],
+	sprSpringDown[3],
+}
+
 // Lift platform art (S9): a fixed 4×2 mushroom-platform chunk, tiled
 // across the lift's width by drawLifts. The flimsy variant's pale plank
 // reads as the cheaper platform that falls out from under you.

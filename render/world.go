@@ -586,18 +586,25 @@ func drawLifts(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, ca
 	}
 }
 
-// drawSprings paints springboards: the compressed coil frame whenever
-// the engine counts a rider's weight on it (Compress > 0), anchored at
-// the solid top box's corner.
+// drawSprings paints springboards with a progressive, bottom-anchored
+// squash: the instant a rider's weight lands the board shortens a pixel
+// onto its closed coil (sprSpringHalf), and at full compression — the
+// big-bounce threshold — the plate goes gold (sprSpringArmed), the same
+// interactive tell as the bridge axe's blink. The 2026-09-02 report:
+// the old open/closed coil swap differed by four dark pixels and was
+// invisible in play.
 func drawSprings(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
 	for _, s := range g.Springs {
 		art := sprSpring
-		if s.Compress > 0 {
-			art = sprSpringDown
+		switch {
+		case s.Compress >= engine.SpringFullTicks:
+			art = sprSpringArmed
+		case s.Compress > 0:
+			art = sprSpringHalf
 		}
 		x := int(math.Round((s.X - camX) * Pix))
 		y := int(math.Round((s.Y - camY) * Pix))
-		f.DrawSprite(art, rc, x+(Pix-sprW(art))/2, y, false, 1)
+		f.DrawSprite(art, rc, x+(Pix-sprW(art))/2, y+sprH(sprSpring)-sprH(art), false, 1)
 	}
 }
 
