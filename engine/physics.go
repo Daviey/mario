@@ -4,6 +4,18 @@ import "math"
 
 const skin = 0.001 // inset applied when probing tile boundaries
 
+// Water physics (contract S6): the SMB1 swim regime. Every value is a
+// per-tick constant; the regime itself is keyed off Level.Underwater in
+// updatePlayer, not the theme, so a custom level can opt in.
+const (
+	WaterGravity  = 0.006 // gentle sink
+	WaterMaxFall  = 0.10  // sink terminal velocity
+	SwimStrokeVel = -0.20 // upward stroke impulse on the jump-key edge
+	WaterMaxWalk  = 0.065
+	WaterMaxRun   = 0.105
+	CurrentDrag   = 0.010 // extra per-tick vy inside a CurrentZone
+)
+
 // solidAt reports whether the tile at a grid position blocks movement.
 func (g *Game) solidAt(tx, ty int) bool {
 	return g.Level.At(tx, ty).Solid()
@@ -14,6 +26,18 @@ func (g *Game) solidAt(tx, ty int) bool {
 // (The player and flipped enemies are deliberately unclamped.)
 func applyGravity(vy, g float64) float64 {
 	return min(vy+g, MaxFall)
+}
+
+// inCurrent reports whether the player's centre sits inside one of the
+// level's downward-current zones (an inclusive tile-column span).
+func (g *Game) inCurrent(p *Player) bool {
+	cx := p.Pos.X + p.W/2
+	for _, z := range g.Level.Currents {
+		if cx >= float64(z.X0) && cx < float64(z.X1)+1 {
+			return true
+		}
+	}
+	return false
 }
 
 // moveX shifts a body horizontally by dx, stopping at the first solid tile.

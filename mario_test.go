@@ -148,8 +148,8 @@ func TestLoadLevelsDefault(t *testing.T) {
 	if !a.levelsTrust {
 		t.Fatal("default (nil) levels must keep runs replay-trusted")
 	}
-	if len(a.Game.Levels) != 7 {
-		t.Errorf("New defaulted to %d levels, want 7", len(a.Game.Levels))
+	if len(a.Game.Levels) != 12 {
+		t.Errorf("New defaulted to %d levels, want 12", len(a.Game.Levels))
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.txt")
@@ -214,7 +214,7 @@ func TestLoadLevelsErrors(t *testing.T) {
 	}
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.txt")
-	if err := os.WriteFile(bad, []byte("zzz\n"), 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte("&&&\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadLevels(bad); err == nil {

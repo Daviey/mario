@@ -564,6 +564,169 @@ var sprAxe = []string{ // 5×6: wide silver blade on a brown wood handle
 }
 
 //
+// SMB1-fidelity entity art (contract S9). All face RIGHT unless noted;
+// the renderer mirrors for left. Rune palette as everywhere else: see
+// runeColors plus the per-sprite color maps in world.go (gray cheep,
+// red koopa, pink princess, buzzy shell).
+//
+
+var sprPodoboo = []string{ // 6×6: lava fireball with a flame tail
+	".RRRR.",
+	"RYYYYR",
+	"RYYYYR",
+	".RRRR.",
+	"..YY..",
+	"...Y..",
+}
+
+var sprCheep = []string{ // 7×5 red, facing right: fin, eye, white belly
+	"..RRR..",
+	".RRRRWD",
+	"RRRRRRR",
+	"RRWWW..",
+	".RR....",
+}
+
+// sprCheepGray is the same fish in gray (cheepGrayColors supplies the
+// cooler body tone; the manual pins gray as the slower variant).
+var sprCheepGray = sprCheep
+
+var sprBloober = []string{ // 6×7: white squid, eyes and wavy tentacles
+	".WWWW.",
+	"WWWWWW",
+	"WDWWDW",
+	"WWWWWW",
+	".WWWW.",
+	".W.W.W",
+	"W.W.W.",
+}
+
+var sprHammerBro = []string{ // 7×13 frame A: hammer cocked overhead
+	"..GGG..",
+	".GGGGG.",
+	".GGGGGW",
+	".KKKDKW",
+	".KKKKWn",
+	"GgGGGKn",
+	"GgGGGK.",
+	"GgGGGK.",
+	"GgGGGK.",
+	".KKKK..",
+	".KK.KK.",
+	".KK.KK.",
+	"KK...KK",
+}
+
+var sprHammerBroWalk = []string{ // 7×13 frame B: stride, hammer forward
+	"..GGG..",
+	".GGGGG.",
+	".GGGGG.",
+	".KKKDK.",
+	".KKKKK.",
+	"GgGGGKn",
+	"GgGGKWW",
+	"GgGGGK.",
+	"GgGGGK.",
+	".KKKK..",
+	".KK.KK.",
+	"KK..KK.",
+	"KK...KK",
+}
+
+var sprHammer = []string{ // 5×5: spinning hammer; flip alternates on Rot
+	"WWW..",
+	"WWW..",
+	"..nn.",
+	"...nn",
+	"....n",
+}
+
+var sprBuzzy = []string{ // 6×8: indigo dome shell, black hide (B rune)
+	"..WDDD",
+	".DDDDD",
+	".BBBB.",
+	"BBBBBB",
+	"BBBBBB",
+	".DDDD.",
+	".DD.DD",
+	".DD.DD",
+}
+
+var sprBuzzyWalk = []string{ // 6×8: feet spread for the waddle
+	"..WDDD",
+	".DDDDD",
+	".BBBB.",
+	"BBBBBB",
+	"BBBBBB",
+	".DDDD.",
+	".DD.DD",
+	"DD..DD",
+}
+
+// Red koopa / paratroopa: the koopa art re-skinned through
+// koopaRedColors (shell G→red family). Frame pairs mirror the green
+// set so walk cycles keep their cadence.
+var (
+	sprKoopaRed     = sprKoopa
+	sprKoopaRedWalk = sprKoopaWalk
+	sprParaRed      = sprPara
+	sprParaRedWalk  = sprParaWalk
+)
+
+var sprToad = []string{ // 7×8: mushroom cap with spots, vest, dark shoes
+	".RRRRR.",
+	"RRWRWRR",
+	".SSSSS.",
+	".SDSDS.",
+	".SSSSS.",
+	".WWBWW.",
+	".WBBBW.",
+	".D...D.",
+}
+
+var sprPrincess = []string{ // 7×12: crown, hair, gown (R maps to pink)
+	"..Y.Y..",
+	"..YYY..",
+	".nnnnn.",
+	"nnSSSnn",
+	"nSDSDSn",
+	"nnSSSnn",
+	".nnnnn.",
+	".RRRRR.",
+	".RRRRR.",
+	"RRRRRRR",
+	"RRRRRRR",
+	"RRRRRRR",
+}
+
+var sprSpring = []string{ // 7×4: red top plate over an open coil
+	".RRRRR.",
+	".D.R.D.",
+	".D.R.D.",
+	".DDDDD.",
+}
+
+var sprSpringDown = []string{ // 7×4: compressed coil (Compress > 0)
+	".RRRRR.",
+	".DRDRD.",
+	".DRDRD.",
+	".DDDDD.",
+}
+
+// Lift platform art (S9): a fixed 4×2 mushroom-platform chunk, tiled
+// across the lift's width by drawLifts. The flimsy variant's pale plank
+// reads as the cheaper platform that falls out from under you.
+var sprLift = []string{ // 4×2
+	"LLLL",
+	"nnnn",
+}
+
+var sprLiftFlimsy = []string{ // 4×2
+	"WWWW",
+	"WDDW",
+}
+
+//
 // Tile pixel patterns. Each paints one tile (Pix×Pix) at pixel (x, y);
 // (tx, ty) are the tile's world coordinates, used for variation.
 //

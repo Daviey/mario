@@ -8,6 +8,10 @@ import "math"
 // Both beats are input-free animations (StatePipeIn / StatePipeOut), so
 // the game clock holds while they play — an animation the player cannot
 // abort must never be able to time him out.
+//
+// A warp with JumpTo > 0 (the warp zones, contract S11) skips the room
+// machinery entirely: the run jumps ahead to that level and the player
+// rises out of the ground at its player start.
 
 // Warp pacing: the sink and the rise each cover two tiles (a small player
 // plus the pipe lip; a super player exactly fits) at a fixed speed.
@@ -34,6 +38,17 @@ type worldState struct {
 	particles  []*Particle
 	bumps      map[int]int
 	checkpoint float64
+
+	// SMB1-fidelity sets (contract S4): the castle and water hazards and
+	// the rideable platforms swap worlds with everything else, so a room
+	// visit neither freezes nor resets the main level's podoboos.
+	lifts      []*Lift
+	springs    []*Spring
+	podoboos   []*Podoboo
+	cheeps     []*Cheep
+	bloopers   []*Bloober
+	hammerBros []*HammerBro
+	hammers    []*Hammer
 }
 
 // stashWorld captures the current live world.
@@ -52,6 +67,14 @@ func (g *Game) stashWorld() *worldState {
 		particles:  g.Particles,
 		bumps:      g.bumps,
 		checkpoint: g.checkpoint,
+
+		lifts:      g.Lifts,
+		springs:    g.Springs,
+		podoboos:   g.Podoboos,
+		cheeps:     g.Cheeps,
+		bloopers:   g.Bloopers,
+		hammerBros: g.HammerBros,
+		hammers:    g.Hammers,
 	}
 }
 
@@ -70,6 +93,14 @@ func (g *Game) applyWorld(w *worldState) {
 	g.Particles = w.particles
 	g.bumps = w.bumps
 	g.checkpoint = w.checkpoint
+
+	g.Lifts = w.lifts
+	g.Springs = w.springs
+	g.Podoboos = w.podoboos
+	g.Cheeps = w.cheeps
+	g.Bloopers = w.bloopers
+	g.HammerBros = w.hammerBros
+	g.Hammers = w.hammers
 }
 
 // warpUnder returns the warp whose pipe mouth the player stands on, if
@@ -118,7 +149,22 @@ func (g *Game) updatePipeIn() {
 // world; leaving it restores that stash and re-stashes the room so a
 // re-entry within the same level visit finds it exactly as it was left
 // (collected coins stay collected — the original behaves the same).
+//
+// A warp-zone warp (JumpTo > 0, contract S11) instead skips the run
+// ahead to that level index — the 1-2 warp room's World 2 / World 3
+// pipes — preserving the player's power, and rises him out of the ground
+// at the target level's player start.
 func (g *Game) performWarp(w *Warp) {
+	if w.JumpTo > 0 {
+		idx := w.JumpTo
+		if idx > len(g.Levels)-1 {
+			idx = len(g.Levels) - 1 // authoring guard: clamp, never panic
+		}
+		power := g.Player.Power
+		g.loadLevel(idx, power)
+		g.beginPipeOutAt(g.Level.PlayerStart)
+		return
+	}
 	if w.Dest == nil {
 		g.roomWorlds[g.roomTemplate] = g.stashWorld()
 		g.applyWorld(g.savedWorld)
@@ -147,19 +193,10 @@ func (g *Game) roomFor(t *Level) *worldState {
 	lvl := instantiate(t)
 	w := &worldState{
 		level:      lvl,
-		enemies:    nil,
 		bumps:      map[int]int{},
 		checkpoint: -1,
 	}
-	for _, s := range lvl.GoombaSpawns {
-		w.enemies = append(w.enemies, newGoomba(s))
-	}
-	for _, s := range lvl.KoopaSpawns {
-		w.enemies = append(w.enemies, newKoopa(s))
-	}
-	for _, s := range lvl.ParaSpawns {
-		w.enemies = append(w.enemies, newPara(s))
-	}
+	w.enemies = buildEnemies(lvl)
 	w.plants = nil
 	for _, s := range lvl.PlantSpawns {
 		w.plants = append(w.plants, newPlant(s))
@@ -168,11 +205,17 @@ func (g *Game) roomFor(t *Level) *worldState {
 	for _, s := range lvl.CoinSpawns {
 		w.coins = append(w.coins, &CoinItem{Pos: s})
 	}
-	w.bowsers = nil
-	for _, s := range lvl.BowserSpawns {
-		w.bowsers = append(w.bowsers, newBowser(s))
-	}
+	w.bowsers = buildBowsers(lvl)
 	w.bossFires = nil
+	// SMB1-fidelity sets, so a room fields the same menagerie the main
+	// level would (and the spawner-driven ones start empty).
+	w.podoboos = buildPodoboos(lvl)
+	w.bloopers = buildBloopers(lvl)
+	w.hammerBros = buildHammerBros(lvl)
+	w.cheeps = nil
+	w.hammers = nil
+	w.lifts = buildLifts(lvl)
+	w.springs = buildSprings(lvl)
 	if g.roomWorlds == nil {
 		g.roomWorlds = map[*Level]*worldState{}
 	}
@@ -191,6 +234,24 @@ func (g *Game) beginPipeOut(x, top int) {
 	g.State = StatePipeOut
 	g.stateTimer = PipeWarpTicks
 	g.pipeTop = top
+	g.emit("pipe")
+	g.updateCamera()
+}
+
+// beginPipeOutAt starts the rise to standing at an arbitrary spawn point
+// (the level-skip warp rises at the target level's player start): the
+// player begins two tiles under the surface — inside the ground, pipe
+// style — and climbs out to stand exactly where a fresh load would put
+// him, honouring his current size.
+func (g *Game) beginPipeOutAt(start Vec) {
+	p := g.Player
+	standY := start.Y - (p.H - SmallH) // newPlayer's size adjustment
+	p.Pos = Vec{start.X, standY + 2}
+	p.Vel = Vec{}
+	p.Grounded = false
+	g.State = StatePipeOut
+	g.stateTimer = PipeWarpTicks
+	g.pipeTop = int(math.Round(standY + p.H)) // the standing row for the snap
 	g.emit("pipe")
 	g.updateCamera()
 }

@@ -13,8 +13,9 @@ type Theme uint8
 const (
 	ThemeOverworld Theme = iota
 	ThemeUnderground
-	ThemeSky    // athletic: pale sky, sandstone terrain, clouds only
-	ThemeCastle // finale: black sky, grey stone, lava pools, fire bars
+	ThemeSky        // athletic: pale sky, sandstone terrain, clouds only
+	ThemeCastle     // finale: black sky, grey stone, lava pools, fire bars
+	ThemeUnderwater // 2-2: blue-teal swim world (the engine keys swim off Level.Underwater, not the theme)
 )
 
 // Tile is a single grid cell of a level.
@@ -73,16 +74,61 @@ type Level struct {
 	// Warps are this level's enterable pipes (see warp.go): press Down
 	// while standing on the mouth to travel. Nil on levels without one.
 	Warps []Warp
+
+	// SMB1-fidelity extension fields (contract S1): starting timer,
+	// world flavour flags, the new hazard spawners and the
+	// castle-cutscene retainer. All optional — zero values reproduce
+	// the classic behaviour, and the engine keys every rule off these
+	// flags (not the theme) so a custom level can opt in piecemeal.
+	Time         int  // starting timer units; 0 → StartTime. Ground/underground/underwater 400, athletic/castle 300
+	Night        bool // world-3 night palette (render-side only)
+	Underwater   bool // swim regime + cheep-swim spawner (theme-independent flag)
+	CheepLeaping bool // 2-3 bridge leap spawner active
+	CheepStopX   int  // leaping stops once the player X reaches this (the stone steps)
+
+	Currents       []CurrentZone // 2-2 downward drag zones
+	PodobooSpawns  []Vec         // lava pools: X = pool centre column, Y = lava surface row (raw; newPodoboo takes these)
+	BlooberSpawns  []Vec         // bloobers, feet-planted like a goomba (1.0 tall, so Y = marker row)
+	HammerSpawns   []Vec         // hammer bros, feet-planted (1.7 tall: Y = marker row - 0.7)
+	BuzzySpawns    []Vec         // buzzy beetles: koopa box, feet-planted like 'K'
+	KoopaRedSpawns []Vec         // red koopas (edge-turners), feet-planted like 'K'
+	ParaRedSpawns  []Vec         // red vertical paratroopas, feet-planted like 'W'
+
+	Retainer   int // 0 none, 1 toad, 2 princess: castle cutscene after the castle walk
+	RetainerAt Vec // the retainer's cell ('t'/'p' marker); the player walks to X-1.5
+
+	BowserDisguise EnemyKind // the castle boss's true identity: KindGoomba (none), KindKoopa, KindBuzzy (fakes, all of them)
+
+	LiftSpawns   []LiftSpawn // rideable platforms (Builder.Lift); Y is the platform's top surface
+	SpringSpawns []Vec       // springboards: X = left edge, Y = top surface (box 1 wide, 0.5 tall)
+}
+
+// CurrentZone is one of 2-2's downward currents: a column span that
+// drags a swimming player toward the waterbed (and the pit below it).
+type CurrentZone struct {
+	X0, X1 int     // inclusive tile-column span of the drag zone
+	Drag   float64 // extra downward velocity per tick inside the zone
+}
+
+// Current adds one of 2-2's downward currents: every tick a swimming
+// player whose centre sits inside the inclusive column span [x0, x1]
+// sinks CurrentDrag faster (see updatePlayer). The builder records it;
+// mustLevel (levels.go) carries it onto the parsed level.
+func (b *Builder) Current(x0, x1 int) {
+	b.currents = append(b.currents, CurrentZone{X0: x0, X1: x1, Drag: CurrentDrag})
 }
 
 // Warp is one enterable pipe. X/Top locate the pipe in the level that
 // owns the warp (left column of the two-wide pipe, mouth row); Dest is
 // the destination level — nil means the run's main level — whose pipe
-// at DestX/DestTop is the one the player rises back out of.
+// at DestX/DestTop is the one the player rises back out of. A warp with
+// JumpTo > 0 ignores Dest entirely: it is a warp-zone pipe that skips
+// the run ahead to that 0-based level index (see performWarp).
 type Warp struct {
 	X, Top         int
 	Dest           *Level
 	DestX, DestTop int
+	JumpTo         int // 0 = ordinary room travel; else 0-based target level index
 }
 
 // At returns the tile at a grid position. Out-of-level sides act as solid
@@ -153,10 +199,13 @@ var tileChars = map[byte]Tile{
 //	'H' hidden coin block     '1' hidden 1-UP block (bump from below only)
 //	'F' flag pole   'T' flag top   'b' bridge plank (solid, over lava)
 //	'G' goomba   'K' koopa   'W' flying koopa   'c' coin   'M' player start
+//	'z' buzzy beetle (koopa box; fire-immune, stomps to a shell)   'R' red koopa
+//	'r' red vertical paratroopa   'q' bloober   'm' hammer bro   'o' podoboo
 //	'V' piranha plant (on the pipe below its cell)
 //	'h' fire-bar hub (rotating hazard anchored at the cell centre)
 //	'Z' Bowser (feet planted on the row below the marker)
 //	'x' axe — the boss arena's goal (one per level; last one wins)
+//	't' toad retainer / 'p' princess: the castle cutscene after the walk
 //
 // Rows are padded with spaces to the width of the longest row. Entity
 // characters are removed from the tile grid and turned into spawn points.
@@ -201,6 +250,24 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 				l.KoopaSpawns = append(l.KoopaSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
 			case 'W':
 				l.ParaSpawns = append(l.ParaSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'z': // buzzy beetle: koopa box, feet planted like a koopa
+				l.BuzzySpawns = append(l.BuzzySpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'R': // red koopa: the edge-turner
+				l.KoopaRedSpawns = append(l.KoopaRedSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'r': // red paratroopa: the vertical flyer
+				l.ParaRedSpawns = append(l.ParaRedSpawns, Vec{float64(x), float64(y) + 1 - KoopaH})
+			case 'q': // bloober: 1.0 tall, so the planted spawn equals the marker row
+				l.BlooberSpawns = append(l.BlooberSpawns, Vec{float64(x), float64(y)})
+			case 'm': // hammer bro: 1.7 tall, feet planted on the row below the marker
+				l.HammerSpawns = append(l.HammerSpawns, Vec{float64(x), float64(y) - 0.7})
+			case 'o': // podoboo: X = lava-pool centre column, Y = lava surface row (raw)
+				l.PodobooSpawns = append(l.PodobooSpawns, Vec{float64(x), float64(y)})
+			case 't': // toad retainer: the castle cutscene waits at this cell
+				l.Retainer = 1
+				l.RetainerAt = Vec{float64(x), float64(y)}
+			case 'p': // princess retainer (the final castle's ending)
+				l.Retainer = 2
+				l.RetainerAt = Vec{float64(x), float64(y)}
 			case 'h': // fire-bar hub: rotates about the cell centre
 				l.BarSpawns = append(l.BarSpawns, NewFireBar(float64(x), float64(y)))
 			case 'c':
@@ -283,6 +350,38 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 	}
 	for _, s := range l.ParaSpawns {
 		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	// The SMB1-fidelity walkers ride the same rule as their green
+	// cousins: buzzy beetles and red koopas/paratroopas share the koopa
+	// box, and a hammer bro (0.9 wide, but two tiles of menace) gets the
+	// same berth on the ground it patrols.
+	for _, s := range l.BuzzySpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	for _, s := range l.KoopaRedSpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	for _, s := range l.ParaRedSpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	for _, s := range l.HammerSpawns {
+		if math.Abs(s.X-colX) < SmallW+KoopaW {
+			return true
+		}
+	}
+	// Bloobers drift through walls toward the player, so a spawn on the
+	// respawn column is a trap even underwater (plant-style centre test;
+	// a bloober is 0.9 wide).
+	for _, s := range l.BlooberSpawns {
+		if math.Abs(s.X+0.45-(colX+SmallW/2)) < (SmallW+0.9)/2+0.25 {
 			return true
 		}
 	}

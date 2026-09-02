@@ -93,9 +93,14 @@ func (g *Game) aliveFireballs() int {
 // throwFireball launches a fireball in the player's facing direction.
 func (g *Game) throwFireball() {
 	p := g.Player
+	// Fireballs work underwater, at reduced speed (contract S6).
+	speed := FireballSpeed
+	if g.Level.Underwater {
+		speed *= 0.6
+	}
 	g.Fireballs = append(g.Fireballs, &Fireball{
 		Pos:  Vec{p.Pos.X + p.W/2 + float64(p.Facing)*0.4, p.Pos.Y + p.H*0.3},
-		Vel:  Vec{float64(p.Facing) * FireballSpeed, -0.05},
+		Vel:  Vec{float64(p.Facing) * speed, -0.05},
 		Life: FireballLife,
 	})
 	g.emit("fire")

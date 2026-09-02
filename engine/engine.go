@@ -11,7 +11,7 @@ import "math"
 //
 // Down is a reserved replay bit: the recording wire format (replay.go
 // maskOf) freezes it as bit 3, so it must never be reclaimed or
-// renumbered — that would rewrite every existing recording. In play it
+// renumbered — that would rewrite every existing recordings. In play it
 // is the pipe-travel key: its rising edge while standing on an enterable
 // pipe mouth sinks the player in (warp.go). There is still no crouch.
 type Input struct {
@@ -23,11 +23,12 @@ type Input struct {
 type State int
 
 // The run lifecycle: Title → WorldCard → Playing, then on level clear
-// FlagSlide → WalkCastle → ScoreTick → the next level's WorldCard (or
-// Win after the last); the boss arena ends Playing through BridgeFall
-// (axe grab → bridge collapse → boss in the lava) into that same castle
-// walk; a death detours through Dying → WorldCard respawn, or GameOver
-// when the lives run out.
+// FlagSlide → WalkCastle → (a castle with a retainer: Retainer, the
+// toad/princess "thank you" beat) → ScoreTick → the next level's
+// WorldCard (or Win after the last); the boss arena ends Playing
+// through BridgeFall (axe grab → bridge collapse → boss in the lava)
+// into that same castle walk; a death detours through Dying → WorldCard
+// respawn, or GameOver when the lives run out.
 const (
 	StateTitle State = iota
 	StateWorldCard
@@ -41,6 +42,7 @@ const (
 	StateGameOver
 	StateWin
 	StateBridgeFall
+	StateRetainer
 )
 
 // String returns the state's kebab-case name, as used in logs and debug
@@ -71,6 +73,8 @@ func (s State) String() string {
 		return "win"
 	case StateBridgeFall:
 		return "bridge-fall"
+	case StateRetainer:
+		return "retainer"
 	}
 	return "unknown"
 }
@@ -86,10 +90,12 @@ const (
 	DeathFreezeTicks = 30  // held still before the arc (the classic beat)
 	WorldCardTicks   = 90  // "WORLD 1-2 x3" interstitial
 	CastleDwellTicks = 45  // door-entry pause before the score countdown
+	RetainerTicks    = 150 // toad/princess cutscene hold before the score countdown
 	HurryTime        = 100 // HUD turns red below this
 	HurryFlashTicks  = 120 // "HURRY!" flash duration once time crosses HurryTime
 	ExtraLifeCoins   = 100
-	ScoreTickPace    = 2 // time units cashed into score per countdown beat; also the tick-sound period
+	ScoreTickPace    = 2   // time units cashed into score per countdown beat; also the tick-sound period
+	FireworksScore   = 500 // per burst when the cleared timer's last digit is 1, 3 or 6
 )
 
 // Game is a complete playthrough: levels, lives, score and the live world
@@ -109,6 +115,17 @@ type Game struct {
 	Bowsers      []*Bowser
 	BossFires    []*BossFire
 	Particles    []*Particle
+
+	// SMB1-fidelity entity sets (contract S4): the castle and water
+	// hazards plus the rideable platforms. All are rebuilt by
+	// loadLevel/spawnEntities from the level's spawn lists.
+	Bloopers   []*Bloober
+	Cheeps     []*Cheep
+	Podoboos   []*Podoboo
+	HammerBros []*HammerBro
+	Hammers    []*Hammer
+	Lifts      []*Lift
+	Springs    []*Spring
 
 	Score     int
 	CoinCount int
@@ -130,17 +147,20 @@ type Game struct {
 	// leave the machine — the server's require_replay trigger would
 	// reject such a row anyway.
 	Cheats     bool
-	Hurry      bool     // time crossed HurryTime: HUD turns red
-	HurryT     int      // "HURRY!" flash countdown
-	FlagDrop   float64  // 0 pennant at the top of the pole, 1 at the base
-	CastleFlag float64  // 0..1 castle victory-flag rise after door entry
-	InCastle   bool     // the player has walked into the castle door
-	Events     []string // sound events emitted this tick, consumed by the host
+	Hurry      bool    // time crossed HurryTime: HUD turns red
+	HurryT     int     // "HURRY!" flash countdown
+	FlagDrop   float64 // 0 pennant at the top of the pole, 1 at the base
+	CastleFlag float64 // 0..1 castle victory-flag rise after door entry
+	InCastle   bool    // the player has walked into the castle door
+
+	RetainerShown bool     // this level's toad/princess cutscene has played
+	Events        []string // sound events emitted this tick, consumed by the host
 
 	levelIndex int
 	stateTimer int
 	checkpoint float64 // tile X of the mid-level respawn point; -1 unreached
 	flagTopY   float64 // pole-slide start height (drives FlagDrop)
+	fireworks  bool    // flag-slide fireworks already awarded this slide
 	bumps      map[int]int
 	bridgeCols []int // bridge columns left to sweep in StateBridgeFall
 	ceilBuf    []int // moveY rising-collision column scratch, reused per tick
@@ -297,6 +317,10 @@ func (g *Game) Update(in Input) {
 		g.updateBridgeFall()
 		g.updateParticles()
 		g.decayBumps()
+	case StateRetainer:
+		g.updateRetainer(in.AnyKey)
+		g.updateParticles()
+		g.decayBumps()
 	case StateDying:
 		g.stateTimer--
 		if g.stateTimer > DyingTicks-DeathFreezeTicks {
@@ -395,7 +419,8 @@ func (g *Game) clearSpawnThreats() {
 
 // updatePlaying runs one live-play tick. The ordering is load-bearing and
 // must not be reshuffled: clock → suicide → fireballs → player physics →
-// checkpoint → flag/axe grab → enemies/plants/bars/combats → bowsers →
+// checkpoint → flag/axe grab → enemies/plants/bars → bowsers/bossfires →
+// lifts/springs/podoboos/cheeps/bloopers/hammer bros/hammers → combats →
 // lava → pickups → particles → camera → pit → cleanup. The early returns
 // are not optional style — a kill (time-out, suicide, lava, fall-out) or
 // a goal grab (flag, axe) invalidates every later step, which would
@@ -472,6 +497,13 @@ func (g *Game) updatePlaying(in Input) {
 	g.updateFireBars()
 	g.updateBowsers()
 	g.updateBossFires()
+	g.updateLifts()
+	g.updateSprings()
+	g.updatePodoboos()
+	g.updateCheeps()
+	g.updateBloopers()
+	g.updateHammerBros()
+	g.updateHammers()
 	g.playerEnemyInteractions()
 	g.playerBowserInteractions()
 	if g.State != StatePlaying {
@@ -551,11 +583,40 @@ func (g *Game) updateFlagSlide() {
 		return
 	}
 	g.FlagDrop = 1
-	// Feet on the ground: hop off towards the castle.
+	// Feet on the ground: the classic timer-digit fireworks, then hop off
+	// towards the castle.
+	g.awardFireworks()
 	g.State = StateWalkCastle
 	p.Pos.X = float64(g.Level.FlagX) + 0.8
 	p.Vel = Vec{X: CastleWalkSpeed, Y: CastleHopVel}
 	p.Facing = 1
+}
+
+// awardFireworks pays the flagpole fireworks (contract S12): when the
+// cleared timer's last digit is 1, 3 or 6, three sparkle bursts go off
+// above the castle at FireworksScore each — once per slide, a pure
+// function of the timer state.
+func (g *Game) awardFireworks() {
+	if g.fireworks {
+		return
+	}
+	switch g.Time % 10 {
+	case 1, 3, 6:
+	default:
+		return
+	}
+	g.fireworks = true
+	// The bursts sit above the castle roof (the castle spans the goal's
+	// right-hand columns on rows 9..12 — render.castleRect).
+	base := float64(g.Level.GoalX())
+	for i, by := range [...]float64{6, 4.8, 6.3} {
+		bx := base + 3.5 + float64(i)*1.5
+		for _, o := range [...]Vec{{0, -0.3}, {0.3, 0}, {-0.3, 0}, {0.2, -0.18}, {-0.2, -0.18}, {0, 0.12}} {
+			g.spawnSparkle(bx+o.X, by+o.Y)
+		}
+		g.Score += FireworksScore
+		g.spawnScorePop(bx, by-0.6, FireworksScore, false)
+	}
 }
 
 // Castle-door geometry, in tile columns relative to the level's goal
@@ -579,8 +640,17 @@ func (g *Game) updateWalkCastle() {
 		}
 		g.stateTimer--
 		if g.stateTimer <= 0 {
-			g.State = StateScoreTick
-			g.emit("clear")
+			if g.Level.Retainer != 0 && !g.RetainerShown {
+				// The castle holds a retainer: the toad (or princess)
+				// "thank you" beat plays before the score countdown,
+				// once per visit of this level.
+				g.State = StateRetainer
+				g.stateTimer = RetainerTicks
+				g.RetainerShown = true
+			} else {
+				g.State = StateScoreTick
+				g.emit("clear")
+			}
 		}
 		return
 	}
@@ -597,6 +667,33 @@ func (g *Game) updateWalkCastle() {
 	if p.Pos.X+p.W/2 >= doorX || p.Pos.X > float64(g.Level.GoalX()+CastleDoorPastX) {
 		g.InCastle = true
 		g.stateTimer = CastleDwellTicks
+	}
+}
+
+// updateRetainer plays the castle cutscene (contract S5): the player
+// auto-walks to a halt beside the retainer (toad or princess, at
+// RetainerAt.X-1.5) and the beat holds until he arrives, the timer runs
+// out or any key is pressed — then the score countdown takes over, as
+// after any other castle. The world card the countdown leads to is
+// entered from StateScoreTick exactly as before, so run recording and
+// replay arming are untouched.
+func (g *Game) updateRetainer(anyKey bool) {
+	p := g.Player
+	stop := g.Level.RetainerAt.X - 1.5
+	if p.Pos.X < stop {
+		p.Vel.Y = applyGravity(p.Vel.Y, Gravity)
+		g.moveX(&p.Pos, p.W, p.H, CastleWalkSpeed)
+		landed, _, _ := g.moveY(&p.Pos, p.W, p.H, p.Vel.Y)
+		if landed {
+			p.Vel.Y = 0
+		}
+		p.WalkDist += CastleWalkSpeed
+		g.updateCamera()
+	}
+	g.stateTimer--
+	if p.Pos.X >= stop || g.stateTimer <= 0 || anyKey {
+		g.State = StateScoreTick
+		g.emit("clear")
 	}
 }
 
@@ -668,7 +765,13 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 
 	g.Level = lvl
 	g.levelIndex = i
-	g.Time = StartTime
+	// The timer comes from the level itself when it declares one (SMB1:
+	// 400 for ground/underground/underwater, 300 for athletic and
+	// castle); otherwise the classic default.
+	g.Time = lvl.Time
+	if g.Time <= 0 {
+		g.Time = StartTime
+	}
 	g.CameraX = 0
 	g.bumps = map[int]int{}
 	g.checkpoint = -1
@@ -677,6 +780,8 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	g.FlagDrop = 0
 	g.CastleFlag = 0
 	g.InCastle = false
+	g.RetainerShown = false
+	g.fireworks = false
 
 	// A level load starts the visit over: any warp room state from the
 	// previous visit goes with it.
@@ -718,21 +823,31 @@ func instantiate(src *Level) *Level {
 	lvl.BarSpawns = append([]FireBar(nil), src.BarSpawns...)
 	lvl.BowserSpawns = append([]Vec(nil), src.BowserSpawns...)
 	lvl.Warps = append([]Warp(nil), src.Warps...)
+	// SMB1-fidelity fields (contract S1): flags, hazard spawners, the
+	// retainer and the boss's disguise all travel with the copy.
+	lvl.Time = src.Time
+	lvl.Night = src.Night
+	lvl.Underwater = src.Underwater
+	lvl.CheepLeaping = src.CheepLeaping
+	lvl.CheepStopX = src.CheepStopX
+	lvl.Currents = append([]CurrentZone(nil), src.Currents...)
+	lvl.PodobooSpawns = append([]Vec(nil), src.PodobooSpawns...)
+	lvl.BlooberSpawns = append([]Vec(nil), src.BlooberSpawns...)
+	lvl.HammerSpawns = append([]Vec(nil), src.HammerSpawns...)
+	lvl.BuzzySpawns = append([]Vec(nil), src.BuzzySpawns...)
+	lvl.KoopaRedSpawns = append([]Vec(nil), src.KoopaRedSpawns...)
+	lvl.ParaRedSpawns = append([]Vec(nil), src.ParaRedSpawns...)
+	lvl.Retainer = src.Retainer
+	lvl.RetainerAt = src.RetainerAt
+	lvl.BowserDisguise = src.BowserDisguise
+	lvl.LiftSpawns = append([]LiftSpawn(nil), src.LiftSpawns...)
+	lvl.SpringSpawns = append([]Vec(nil), src.SpringSpawns...)
 	return lvl
 }
 
 // spawnEntities builds the live entity sets from a level's spawn lists.
 func (g *Game) spawnEntities(lvl *Level) {
-	g.Enemies = nil
-	for _, s := range lvl.GoombaSpawns {
-		g.Enemies = append(g.Enemies, newGoomba(s))
-	}
-	for _, s := range lvl.KoopaSpawns {
-		g.Enemies = append(g.Enemies, newKoopa(s))
-	}
-	for _, s := range lvl.ParaSpawns {
-		g.Enemies = append(g.Enemies, newPara(s))
-	}
+	g.Enemies = buildEnemies(lvl)
 	g.Plants = nil
 	for _, s := range lvl.PlantSpawns {
 		g.Plants = append(g.Plants, newPlant(s))
@@ -742,16 +857,100 @@ func (g *Game) spawnEntities(lvl *Level) {
 	for _, s := range lvl.CoinSpawns {
 		g.CoinItems = append(g.CoinItems, &CoinItem{Pos: s})
 	}
-	g.Bowsers = nil
-	for _, s := range lvl.BowserSpawns {
-		g.Bowsers = append(g.Bowsers, newBowser(s))
-	}
+	g.Bowsers = buildBowsers(lvl)
 	g.BossFires = nil
 	g.bridgeCols = nil
 	g.Mushrooms = nil
 	g.FireFlowers = nil
 	g.Fireballs = nil
 	g.Particles = nil
+
+	// SMB1-fidelity sets: the castle and water hazards, the
+	// spawner-driven cheeps (empty until their spawners fire) and the
+	// rideable platforms (lifts.go, spring.go).
+	g.Podoboos = buildPodoboos(lvl)
+	g.Bloopers = buildBloopers(lvl)
+	g.HammerBros = buildHammerBros(lvl)
+	g.Cheeps = nil
+	g.Hammers = nil
+	g.Lifts = buildLifts(lvl)
+	g.Springs = buildSprings(lvl)
+}
+
+// buildEnemies turns a level's enemy spawn lists into the live set, in
+// authoring order (goombas, koopas, paratroopas, then the SMB1-fidelity
+// walkers). spawnEntities and the warp-room builder share it so a room
+// fields exactly the same menagerie.
+func buildEnemies(lvl *Level) []*Enemy {
+	var es []*Enemy
+	for _, s := range lvl.GoombaSpawns {
+		es = append(es, newGoomba(s))
+	}
+	for _, s := range lvl.KoopaSpawns {
+		es = append(es, newKoopa(s))
+	}
+	for _, s := range lvl.ParaSpawns {
+		es = append(es, newPara(s))
+	}
+	for _, s := range lvl.BuzzySpawns {
+		es = append(es, newBuzzy(s))
+	}
+	for _, s := range lvl.KoopaRedSpawns {
+		es = append(es, newKoopaRed(s))
+	}
+	for _, s := range lvl.ParaRedSpawns {
+		es = append(es, newParaRed(s))
+	}
+	return es
+}
+
+// buildBowsers fields the boss spawns with the level's disguise wired in
+// (contract S7: every castle boss in worlds 1-3 is an impostor whose true
+// form Level.BowserDisguise names).
+func buildBowsers(lvl *Level) []*Bowser {
+	var bs []*Bowser
+	for _, s := range lvl.BowserSpawns {
+		b := newBowser(s)
+		b.Disguise = lvl.BowserDisguise
+		bs = append(bs, b)
+	}
+	return bs
+}
+
+// buildPodoboos, buildBloopers and buildHammerBros field the castle and
+// water hazards from a level's spawn lists; spawnEntities and the
+// warp-room builder share them.
+func buildPodoboos(lvl *Level) []*Podoboo {
+	var ps []*Podoboo
+	for _, s := range lvl.PodobooSpawns {
+		ps = append(ps, newPodoboo(s.X, int(s.Y)))
+	}
+	return ps
+}
+
+func buildBloopers(lvl *Level) []*Bloober {
+	var bs []*Bloober
+	for _, s := range lvl.BlooberSpawns {
+		bs = append(bs, newBloober(s))
+	}
+	return bs
+}
+
+func buildHammerBros(lvl *Level) []*HammerBro {
+	var hs []*HammerBro
+	for _, s := range lvl.HammerSpawns {
+		hs = append(hs, newHammerBro(s))
+	}
+	return hs
+}
+
+// buildSprings fields the springboards from a level's spawn list.
+func buildSprings(lvl *Level) []*Spring {
+	var ss []*Spring
+	for _, s := range lvl.SpringSpawns {
+		ss = append(ss, &Spring{X: s.X, Y: s.Y})
+	}
+	return ss
 }
 
 func (g *Game) cleanup() {
@@ -763,6 +962,12 @@ func (g *Game) cleanup() {
 	g.Plants = filter(g.Plants, func(p *Plant) bool { return !p.Gone })
 	g.Bowsers = filter(g.Bowsers, func(b *Bowser) bool { return !b.Gone })
 	g.BossFires = filter(g.BossFires, func(f *BossFire) bool { return !f.Gone })
+	g.Podoboos = filter(g.Podoboos, func(p *Podoboo) bool { return !p.Gone })
+	g.Cheeps = filter(g.Cheeps, func(c *Cheep) bool { return !c.Gone })
+	g.Bloopers = filter(g.Bloopers, func(b *Bloober) bool { return !b.Gone })
+	g.HammerBros = filter(g.HammerBros, func(h *HammerBro) bool { return !h.Gone })
+	g.Hammers = filter(g.Hammers, func(h *Hammer) bool { return !h.Gone })
+	g.Lifts = filter(g.Lifts, func(l *Lift) bool { return !l.Gone })
 }
 
 func (g *Game) decayBumps() {

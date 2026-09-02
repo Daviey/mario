@@ -432,6 +432,9 @@ func TestUndergroundThemeAndCeiling(t *testing.T) {
 		t.Fatal("1-2 is not the underground theme")
 	}
 	for x := range levels[1].Width {
+		if x >= 157 && x <= 174 {
+			continue // roof gap over the warp alcove (original 1-2)
+		}
 		if levels[1].At(x, 0) != Brick {
 			t.Fatalf("underground ceiling gap at x=%d", x)
 		}

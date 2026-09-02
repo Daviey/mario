@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.09.02a" // Bowser boss: 2-4 ends bridge/axe (no flagpole); pre-bump recordings diverge
+const EngineVersion = "2026.09.03" // SMB1 worlds 1-3: 12 levels, underwater 2-2, bridge 2-3, castles 1-4/3-4, new enemies; pre-bump recordings diverge
 
 // Client is a configured PostgREST endpoint.
 type Client struct {

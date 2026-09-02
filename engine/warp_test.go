@@ -261,3 +261,52 @@ func TestDownOffPipeDoesNothing(t *testing.T) {
 		t.Fatalf("Down on a warpless pipe warped: %s", g.State)
 	}
 }
+
+// TestWarpZoneJumpsToLevel: a warp with JumpTo > 0 skips the run ahead
+// to that level index (contract S11, the 1-2 warp zone), preserving the
+// player's power and rising him out of the ground at the target's
+// player start.
+func TestWarpZoneJumpsToLevel(t *testing.T) {
+	a := buildLevel(t, 60, func(b *Builder) { b.Pipe(10, 2); b.Flag(50) })
+	target := buildLevel(t, 60, func(b *Builder) { b.Pipe(20, 2); b.Flag(50) })
+	target.Time = 400
+	a.Warps = []Warp{{X: 10, Top: GroundTop - 2, JumpTo: 1}}
+	g := NewGame([]*Level{a, target}, 40, LevelHeight)
+	g.State = StatePlaying
+	g.Player.Power = PowerSuper
+	start := target.PlayerStart
+
+	takeWarp(t, g, 10, GroundTop-2)
+
+	if g.LevelIndex() != 1 {
+		t.Fatalf("level index = %d, want 1", g.LevelIndex())
+	}
+	if g.Level.At(20, GroundTop-2) != Pipe {
+		t.Fatal("live level is not the jump target (no pipe at its marker)")
+	}
+	if g.Player.Power != PowerSuper {
+		t.Errorf("power = %v, want preserved super", g.Player.Power)
+	}
+	if g.Time != 400 {
+		t.Errorf("time = %d, want the target level's declared 400", g.Time)
+	}
+	// Risen to stand exactly where a fresh load would put him.
+	if !approx(g.Player.Pos.X, start.X) {
+		t.Errorf("player x = %f, want %f (target player start)", g.Player.Pos.X, start.X)
+	}
+	standY := start.Y - (g.Player.H - SmallH)
+	if !approx(g.Player.Pos.Y, standY) {
+		t.Errorf("player y = %f, want %f (standing at the start)", g.Player.Pos.Y, standY)
+	}
+	if !g.Player.Grounded || g.State != StatePlaying {
+		t.Errorf("state=%v grounded=%v, want playing and grounded", g.State, g.Player.Grounded)
+	}
+	// The skipped-to level plays on: the run continues from there.
+	g.Player.Pos.X = 46
+	g.Player.Vel.X = MaxRun
+	run(g, 24, Input{Right: true, Run: true})
+	runClear(g)
+	if g.State != StateWin {
+		t.Errorf("state = %v after clearing the target, want win", g.State)
+	}
+}

@@ -204,7 +204,17 @@ func script(g *Game, s stand, dir int, run bool, jumpAt, cutAt int, onTick func(
 			in.Right = true
 		}
 		if t >= jumpAt && (cutAt < 0 || t < cutAt) {
-			in.Up = true
+			if g.Level.Underwater {
+				// Swim scripts stroke in bounded flapping bursts —
+				// two strokes climb ~6 tiles — then release and sink,
+				// so the run lands like its land counterpart instead
+				// of pinning against the ceiling forever.
+				if t < jumpAt+40 && (t-jumpAt)/10%2 == 0 {
+					in.Up = true
+				}
+			} else {
+				in.Up = true
+			}
 		}
 		g.updatePlayer(in)
 		g.prevIn = in

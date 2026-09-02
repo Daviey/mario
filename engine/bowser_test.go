@@ -434,3 +434,42 @@ func TestRespawnRestoresBridgeAndBoss(t *testing.T) {
 		t.Errorf("respawn: %d boss fires survived, want 0", len(g.BossFires))
 	}
 }
+
+// The impostor reveal: a combat-killed fake bowser is replaced by the
+// flipped corpse of his true form, still worth the flat 5000; the axe
+// path sinks him as a bowser, no corpse.
+func TestFakeBowserRevealsCorpse(t *testing.T) {
+	g := newGame(t, mustBossLevel(t))
+	b := g.Bowsers[0]
+	b.Disguise = KindKoopa
+	pos := b.Pos
+	g.killBowser(b)
+	if g.Score != BowserScore {
+		t.Errorf("score = %d, want %d", g.Score, BowserScore)
+	}
+	if !b.Gone {
+		t.Error("impostor body did not leave with the reveal")
+	}
+	corpse := -1
+	for i, e := range g.Enemies {
+		if e.Kind == KindKoopa && e.State == EnemyFlipped && e.Pos.X >= pos.X && e.Pos.X <= pos.X+b.W {
+			corpse = i
+		}
+	}
+	if corpse < 0 {
+		t.Fatal("no flipped koopa corpse revealed at the bowser position")
+	}
+
+	// Axe path: the sink owns the body; no reveal.
+	g = newGame(t, mustBossLevel(t))
+	b = g.Bowsers[0]
+	b.Disguise = KindBuzzy
+	before := len(g.Enemies)
+	g.bowserSinks(b)
+	if b.State != BowserSinking || b.Gone {
+		t.Errorf("axe-path impostor state = %v gone=%v, want sinking", b.State, b.Gone)
+	}
+	if len(g.Enemies) != before {
+		t.Error("axe path revealed a corpse")
+	}
+}

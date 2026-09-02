@@ -20,6 +20,24 @@ func (g *Game) updateFireBars() {
 	}
 }
 
+// fireballHit reports the first live player fireball overlapping a
+// body's box, if any — the shared contact probe for the dedicated
+// entity updates (cheep, bloober, hammer bro), which resolve their own
+// fireball kills the same way updateFireBars resolves its own player
+// contact. The caller owns the kill: score, pop and the fireball's
+// Gone all belong to the species' law.
+func (g *Game) fireballHit(x, y, w, h float64) *Fireball {
+	for _, fb := range g.Fireballs {
+		if fb.Gone {
+			continue
+		}
+		if overlap(fb.Pos.X, fb.Pos.Y, FireballW, FireballH, x, y, w, h) {
+			return fb
+		}
+	}
+	return nil
+}
+
 // touchingLava reports whether the player's body overlaps any lava tile.
 func (g *Game) touchingLava() bool {
 	p := g.Player

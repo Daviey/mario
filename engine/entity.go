@@ -65,6 +65,8 @@ const (
 	EnemyFrameLen       = 0.16  // tiles travelled per enemy walk-cycle frame
 	ParaHopVel          = -0.34 // flying-koopa hop impulse (~2.7-tile apex)
 	ParaHopEvery        = 48    // grounded ticks between flying-koopa hops
+	ParaRedFlyVel       = 0.03  // red paratroopa vertical flight pace
+	ParaRedRange        = 3.0   // red paratroopa bob extremes around BaseY
 
 	// Interaction feel: the contact tolerances that decide stomp vs.
 	// hurt, kick direction and landing feedback.
@@ -109,6 +111,8 @@ const (
 	MushroomScore    = 1000
 	FlowerScore      = 1000
 	TimeBonusPerUnit = 10
+	CheepScore       = 200 // cheep cheep: stomp (leaping) or fireball
+	BlooberScore     = 200 // bloober: fireball or star only
 )
 
 // stompLadder is the consecutive-airborne-stomp score ladder; once past
@@ -185,11 +189,13 @@ func (p *Player) shrink() {
 type EnemyKind uint8
 
 // Enemy species. KindPara hops as it walks and demotes to KindKoopa when
-// stomped.
+// stomped. KindBuzzy (the beetle) wears a fireproof shell: fireballs die
+// on it with no effect, a stomp makes the shell like a koopa's.
 const (
 	KindGoomba EnemyKind = iota
 	KindKoopa
-	KindPara // flying koopa: hops while walking; a stomp demotes it to koopa
+	KindPara  // flying koopa: hops while walking; a stomp demotes it to koopa
+	KindBuzzy // buzzy beetle: fire-immune; a stomp makes the shell
 )
 
 // EnemyState is the lifecycle state of an enemy.
@@ -208,13 +214,19 @@ const (
 
 // Enemy is a goomba or koopa (koopas become shells when stomped).
 type Enemy struct {
-	Pos      Vec
-	Vel      Vec
-	W, H     float64
-	Kind     EnemyKind
-	State    EnemyState
-	Dir      int
-	Timer    int     // squashed-pose countdown; grounded paratroopas reuse it as hop charge
+	Pos   Vec
+	Vel   Vec
+	W, H  float64
+	Kind  EnemyKind
+	State EnemyState
+	Dir   int
+	// Red marks the red variants: a red koopa probes ahead and turns
+	// at ledges instead of walking off; a red paratroopa flies in
+	// place, bobbing vertically around BaseY.
+	Red   bool
+	BaseY float64 // red paratroopa flight centre (the spawn Y)
+	Timer int     // squashed-pose countdown; grounded paratroopas reuse it as hop charge
+	// (a red paratroopa reuses it as the flight direction sign)
 	WalkDist float64 // drives the walk cycle
 	Chain    int     // consecutive kills by this sliding shell (combo ladder)
 	Gone     bool
@@ -230,6 +242,21 @@ func newKoopa(p Vec) *Enemy {
 
 func newPara(p Vec) *Enemy {
 	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindPara, State: EnemyWalking, Dir: -1}
+}
+
+func newBuzzy(p Vec) *Enemy {
+	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindBuzzy, State: EnemyWalking, Dir: -1}
+}
+
+func newKoopaRed(p Vec) *Enemy {
+	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindKoopa, State: EnemyWalking, Dir: -1, Red: true}
+}
+
+// newParaRed is the vertical flier of the athletic levels: no gravity,
+// no walking — it bobs around BaseY (Timer carries the flight sign,
+// starting rising). A stomp demotes it to a red koopa (edge-turner).
+func newParaRed(p Vec) *Enemy {
+	return &Enemy{Pos: p, W: KoopaW, H: KoopaH, Kind: KindPara, State: EnemyWalking, Dir: -1, Red: true, BaseY: p.Y, Timer: -1}
 }
 
 // CoinItem is a collectible coin floating in the world.
@@ -366,6 +393,12 @@ type Bowser struct {
 	Flash    int  // hit-flash countdown (render brightens)
 	Flipped  bool // killed by fireballs/star: render upside down
 	Gone     bool
+
+	// Disguise is the impostor's true form (worlds 1-4/2-4/3-4 field a
+	// goomba, koopa or buzzy in a Bowser suit). KindGoomba (0) means a
+	// real boss; anything else reveals a flipped corpse of that species
+	// when a combat kill lands (killBowser).
+	Disguise EnemyKind
 }
 
 func newBowser(spawn Vec) *Bowser {

@@ -187,14 +187,22 @@ func (g *Game) updateBossFires() {
 }
 
 // killBowser pays a combat kill (five fireballs, or star contact): the
-// corpse flips upside down and drops out of the world.
+// corpse flips upside down and drops out of the world. An impostor
+// (Disguise != KindGoomba — the worlds 1-4/2-4/3-4 bosses) is replaced
+// outright by the flipped corpse of his true form, SMB1's reveal; the
+// score is the same BowserScore either way.
 func (g *Game) killBowser(b *Bowser) {
-	b.Flipped = true
-	b.State = BowserFalling
-	b.Vel = Vec{0, FlipVel}
 	g.Score += BowserScore
 	g.spawnScorePop(b.Pos.X, b.Pos.Y, BowserScore, false)
 	g.emit("bowserdie")
+	if b.Disguise != KindGoomba {
+		g.spawnRevealCorpse(b)
+		b.Gone = true
+		return
+	}
+	b.Flipped = true
+	b.State = BowserFalling
+	b.Vel = Vec{0, FlipVel}
 }
 
 // bowserSinks pays the lava kill (once — a combat kill already paid at
