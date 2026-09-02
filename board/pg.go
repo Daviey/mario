@@ -205,6 +205,26 @@ func (c *DBClient) SetVerified(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetScore mirrors Client.SetScore over SQL.
+func (c *DBClient) SetScore(ctx context.Context, id string, score int) error {
+	_, _, err := c.conn.Exec(ctx,
+		`UPDATE scores SET score = `+strconv.Itoa(score)+` WHERE id = '`+sqlString(id)+`'`)
+	if err != nil {
+		return fmt.Errorf("db correct score: %w", err)
+	}
+	return nil
+}
+
+// SetHidden mirrors Client.SetHidden over SQL.
+func (c *DBClient) SetHidden(ctx context.Context, id string) error {
+	_, _, err := c.conn.Exec(ctx,
+		`UPDATE scores SET hidden = true WHERE id = '`+sqlString(id)+`'`)
+	if err != nil {
+		return fmt.Errorf("db hide: %w", err)
+	}
+	return nil
+}
+
 // DeleteRow mirrors Client.DeleteRow over SQL.
 func (c *DBClient) DeleteRow(ctx context.Context, id string) error {
 	_, _, err := c.conn.Exec(ctx,

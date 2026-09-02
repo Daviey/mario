@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,11 +14,13 @@ import (
 	"github.com/Daviey/mario/replay"
 )
 
-// TestVerifyPendingKeepAndDrop runs the real verifier loop against a fake
-// PostgREST serving two pending rows: one backed by a genuine replay of a
-// scripted run (must be kept and marked verified), one lying about its
-// score (must be dropped).
-func TestVerifyPendingKeepAndDrop(t *testing.T) {
+// TestVerifyPendingKeepFixAndHide runs the real verifier loop against a
+// fake PostgREST serving three pending rows backed by the same genuine
+// replay of a scripted run: an honest row (kept + verified), a row
+// overstating its score (corrected to the replayed score — the replay is
+// authoritative, never delete), and a cross-version row (hidden, never
+// deleted — the row and its recording stay for forensics).
+func TestVerifyPendingKeepFixAndHide(t *testing.T) {
 	// Record a genuine run.
 	levels := engine.DefaultLevels()
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
@@ -39,20 +42,34 @@ func TestVerifyPendingKeepAndDrop(t *testing.T) {
 
 	honest := `{"id":"keep-1","name":"HONEST","score":` + itoa(g.Score) + `,"level":` + itoa(g.LevelIndex()+1) +
 		`,"mode":"classic","engine_version":"` + board.EngineVersion + `","replay":` + jq(rec.JSON()) + `}`
-	liar := `{"id":"drop-1","name":"LIAR","score":999999,"level":9,` +
+	liar := `{"id":"fix-1","name":"LIAR","score":999999,"level":` + itoa(g.LevelIndex()+1) + `,` +
 		`"mode":"classic","engine_version":"` + board.EngineVersion + `","replay":` + jq(rec.JSON()) + `}`
+	stale := `{"id":"hide-1","name":"STALE","score":` + itoa(g.Score) + `,"level":` + itoa(g.LevelIndex()+1) +
+		`,"mode":"classic","engine_version":"0.0.0-old","replay":` + jq(rec.JSON()) + `}`
 
-	var patched, deleted, fetched atomic.Int32
+	var fetched atomic.Int32
+	var patched, deleted atomic.Int32
+	var fixedScore atomic.Int32
+	var fixedBody atomic.Bool
+	var hidBody atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			if fetched.Add(1) == 1 {
-				w.Write([]byte("[" + honest + "," + liar + "]"))
+				w.Write([]byte("[" + honest + "," + liar + "," + stale + "]"))
 			} else {
 				w.Write([]byte("[]"))
 			}
 		case http.MethodPatch:
 			patched.Add(1)
+			body, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(body), `"score":`) {
+				fixedScore.Add(1)
+				fixedBody.Store(strings.Contains(string(body), `"score":`+itoa(g.Score)))
+			}
+			if strings.Contains(string(body), `"hidden":true`) {
+				hidBody.Store(true)
+			}
 			w.WriteHeader(204)
 		case http.MethodDelete:
 			deleted.Add(1)
@@ -66,11 +83,20 @@ func TestVerifyPendingKeepAndDrop(t *testing.T) {
 	if err := runVerifyPending(); err != nil {
 		t.Fatal(err)
 	}
-	if got := patched.Load(); got != 1 {
-		t.Errorf("kept rows = %d, want 1", got)
+	if got := deleted.Load(); got != 0 {
+		t.Errorf("deleted rows = %d, want 0 (mismatched rows are corrected or hidden, never deleted)", got)
 	}
-	if got := deleted.Load(); got != 1 {
-		t.Errorf("dropped rows = %d, want 1", got)
+	if got := fixedScore.Load(); got != 1 {
+		t.Errorf("corrected rows = %d, want 1", got)
+	}
+	if !fixedBody.Load() {
+		t.Error("score correction PATCH did not carry the replayed score")
+	}
+	if !hidBody.Load() {
+		t.Error("stale row was not hidden")
+	}
+	if got := patched.Load(); got != 4 {
+		t.Errorf("total PATCHes = %d, want 4 (verify, score-fix, verify, hide)", got)
 	}
 }
 
@@ -107,6 +133,13 @@ func TestVerifyPendingFallsBackToDirectDB(t *testing.T) {
 	}
 }
 
+// jq embeds the replay string as a JSON string (PostgREST serves the text
+// column quoted, exactly like this).
+func jq(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -119,21 +152,15 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// jq embeds the replay string as a JSON string (PostgREST serves the text
-// column quoted, exactly like this).
-func jq(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
-// TestVerifyPendingSystematicDropFails verifies the alerting contract:
-// ONE row whose replay disagrees with its claim can be a corrupted
-// submission, but TWO is a systematic determinism or recording bug
-// deleting real scores (the 2026-08-30 recorder-wipe bug dropped every
-// death-containing run silently, for weeks) — the run must fail red.
-// Version-stale rows (pending recordings from before an EngineVersion
-// bump) are expected and must never trigger the failure.
-func TestVerifyPendingSystematicDropFails(t *testing.T) {
+// A plain score disagreement is NOT a failure any more — the replay is
+// authoritative, so those rows are corrected in place. What stays an
+// alert is Hiding: ONE row whose replay cannot settle it can be a
+// corrupted submission, but TWO unreplayable rows is a systematic
+// recording bug hiding real scores (the 2026-08-30 recorder-wipe bug
+// destroyed every death-containing run silently, for weeks) — the run
+// must fail red. Version-stale rows (pending recordings from before an
+// EngineVersion bump) are expected and must never trigger the failure.
+func TestVerifyPendingSystematicHideFails(t *testing.T) {
 	levels := engine.DefaultLevels()
 	g := engine.NewGame(levels, 20, engine.LevelHeight)
 	var rec replay.Recorder
@@ -155,9 +182,11 @@ func TestVerifyPendingSystematicDropFails(t *testing.T) {
 			`","replay":` + jq(rec.JSON()) + `}`
 	}
 	honest := row("keep-1", "HONEST", itoa(g.Score), itoa(g.LevelIndex()+1), board.EngineVersion)
-	liar1 := row("drop-1", "LIAR1", "999999", "9", board.EngineVersion)
-	liar2 := row("drop-2", "LIAR2", "888888", "8", board.EngineVersion)
-	stale := row("drop-3", "STALE", itoa(g.Score), itoa(g.LevelIndex()+1), "0.0.0-old")
+	// Level lies cannot be corrected (level feeds the L<n> column), so
+	// they hide — and two of them mean a systematic bug.
+	liar1 := row("hide-1", "LIAR1", itoa(g.Score), "9", board.EngineVersion)
+	liar2 := row("hide-2", "LIAR2", itoa(g.Score), "8", board.EngineVersion)
+	stale := row("hide-3", "STALE", itoa(g.Score), itoa(g.LevelIndex()+1), "0.0.0-old")
 
 	run := func(first string) error {
 		var fetched atomic.Int32
@@ -179,13 +208,19 @@ func TestVerifyPendingSystematicDropFails(t *testing.T) {
 		return runVerifyPending()
 	}
 
-	// Two determinism failures: the run must fail.
+	// Two unreplayable hides: the run must fail.
 	if err := run("[" + honest + "," + liar1 + "," + liar2 + "]"); err == nil {
-		t.Error("two replay-mismatch drops must fail the verification run")
+		t.Error("two hide-class failures must fail the verification run")
 	}
-	// One determinism failure plus a version-stale row: expected noise,
-	// the run stays green.
+	// One hide plus a version-stale row: expected noise, green run.
 	if err := run("[" + honest + "," + liar1 + "," + stale + "]"); err != nil {
-		t.Errorf("one determinism drop + one version drop must not fail: %v", err)
+		t.Errorf("one determinism hide + one version hide must not fail: %v", err)
+	}
+	// Plain score disagreements are corrections, never failures — even
+	// in bulk (this was the DROP-class red run before the policy change).
+	liar3 := row("fix-1", "LIAR3", "999999", itoa(g.LevelIndex()+1), board.EngineVersion)
+	liar4 := row("fix-2", "LIAR4", "999998", itoa(g.LevelIndex()+1), board.EngineVersion)
+	if err := run("[" + honest + "," + liar3 + "," + liar4 + "]"); err != nil {
+		t.Errorf("score corrections must stay green: %v", err)
 	}
 }

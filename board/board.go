@@ -293,6 +293,28 @@ func (c *Client) SetVerified(ctx context.Context, id string) error {
 	return err
 }
 
+// SetScore rewrites a row's score to the replayed value (the replay is
+// authoritative — the claim came from the same machine that recorded the
+// inputs, so an input-delivery loss must correct the row, not delete it).
+// Service-role only.
+func (c *Client) SetScore(ctx context.Context, id string, score int) error {
+	body, err := json.Marshal(map[string]int{"score": score})
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, http.MethodPatch, "/rest/v1/scores",
+		url.Values{"id": {"eq." + id}}, body)
+	return err
+}
+
+// SetHidden marks a row invisible to board surfaces while keeping the
+// row and its recording in the database for forensics. Service-role only.
+func (c *Client) SetHidden(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodPatch, "/rest/v1/scores",
+		url.Values{"id": {"eq." + id}}, []byte(`{"hidden":true}`))
+	return err
+}
+
 // DeleteRow removes a row (failed verification). Service-role only.
 func (c *Client) DeleteRow(ctx context.Context, id string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/rest/v1/scores",
