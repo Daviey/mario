@@ -77,7 +77,7 @@ func TestShellSmashesMultiCoinBrick(t *testing.T) {
 // a multi-coin brick whose timer was armed by a bump, then smashed by
 // a shell, must vanish for good — its map entry dies with the tile, or
 // the decay loop would later spend a solid Used block into mid-air
-// where the brick stood (live bug on 74d4078, reachable on 3-1).
+// where the brick stood (latent on 74d4078: both shipped C bricks sit at row 9, above the shell's smash band — the mechanism only fires in custom levels or future placements.)
 func TestShellSmashDropsArmedCoinBrick(t *testing.T) {
 	l := buildLevel(t, 60, func(b *Builder) { b.Set(20, 12, 'C') })
 	g := newGame(t, l)
