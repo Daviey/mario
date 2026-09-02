@@ -46,7 +46,8 @@ func (g *Game) updateCheeps() {
 	if g.Level.Underwater && !g.Level.CheepLeaping {
 		g.spawnSwimCheep()
 	}
-	if g.Level.CheepLeaping && g.Player.Pos.X < float64(g.Level.CheepStopX) {
+	if g.Level.CheepLeaping && g.Player.Pos.X < float64(g.Level.CheepStopX) &&
+		g.respawnGrace == 0 && g.overLeapWater() {
 		g.spawnLeapingCheep()
 	}
 	p := g.Player
@@ -103,6 +104,16 @@ func (g *Game) updateCheeps() {
 		}
 		g.hurtPlayer()
 	}
+}
+
+// overLeapWater reports whether the player stands over the open fall
+// the leapers rise through: the bottom row empty at the player's column
+// (2-3's planks and islands; the two-row approach ground and the stone
+// steps block the shoal — in the original the fish never leap through
+// solid approach ground).
+func (g *Game) overLeapWater() bool {
+	col := int(g.Player.Pos.X + g.Player.W/2)
+	return !g.Level.At(col, g.Level.Height-1).Solid()
 }
 
 // spawnSwimCheep launches one swimmer off the right edge when the

@@ -82,20 +82,21 @@ func (s State) String() string {
 // Run pacing: tick rate, clock and lives, plus the fixed beat lengths of
 // the non-playing interstitials.
 const (
-	TicksPerSecond   = 60
-	TicksPerTimeUnit = 24 // one game-time unit ticks down every 24 frames
-	StartTime        = 300
-	StartLives       = 3
-	DyingTicks       = 180 // death freeze-frame + arc + beat
-	DeathFreezeTicks = 30  // held still before the arc (the classic beat)
-	WorldCardTicks   = 90  // "WORLD 1-2 x3" interstitial
-	CastleDwellTicks = 45  // door-entry pause before the score countdown
-	RetainerTicks    = 150 // toad/princess cutscene hold before the score countdown
-	HurryTime        = 100 // HUD turns red below this
-	HurryFlashTicks  = 120 // "HURRY!" flash duration once time crosses HurryTime
-	ExtraLifeCoins   = 100
-	ScoreTickPace    = 2   // time units cashed into score per countdown beat; also the tick-sound period
-	FireworksScore   = 500 // per burst when the cleared timer's last digit is 1, 3 or 6
+	TicksPerSecond    = 60
+	TicksPerTimeUnit  = 24 // one game-time unit ticks down every 24 frames
+	StartTime         = 300
+	StartLives        = 3
+	DyingTicks        = 180 // death freeze-frame + arc + beat
+	DeathFreezeTicks  = 30  // held still before the arc (the classic beat)
+	WorldCardTicks    = 90  // "WORLD 1-2 x3" interstitial
+	CastleDwellTicks  = 45  // door-entry pause before the score countdown
+	RetainerTicks     = 150 // toad/princess cutscene hold before the score countdown
+	HurryTime         = 100 // HUD turns red below this
+	HurryFlashTicks   = 120 // "HURRY!" flash duration once time crosses HurryTime
+	ExtraLifeCoins    = 100
+	ScoreTickPace     = 2   // time units cashed into score per countdown beat; also the tick-sound period
+	FireworksScore    = 500 // per burst when the cleared timer's last digit is 1, 3 or 6
+	RespawnGraceTicks = 90  // no leaping-cheep spawns right after a respawn (one card's worth)
 )
 
 // Game is a complete playthrough: levels, lives, score and the live world
@@ -154,6 +155,7 @@ type Game struct {
 	InCastle   bool    // the player has walked into the castle door
 
 	RetainerShown bool     // this level's toad/princess cutscene has played
+	respawnGrace  int      // ticks of leaper-spawn silence after a respawn
 	Events        []string // sound events emitted this tick, consumed by the host
 
 	levelIndex int
@@ -392,6 +394,7 @@ func (g *Game) respawn() {
 		g.Player.Pos.X = cp
 	}
 	g.clearSpawnThreats()
+	g.respawnGrace = RespawnGraceTicks
 	g.State = StateWorldCard
 	g.stateTimer = WorldCardTicks
 }
@@ -415,6 +418,27 @@ func (g *Game) clearSpawnThreats() {
 	g.Bowsers = filter(g.Bowsers, func(b *Bowser) bool {
 		return !overlap(b.Pos.X, b.Pos.Y, b.W, b.H, p.Pos.X, p.Pos.Y, p.W, p.H)
 	})
+	// The SMB1-fidelity hazards: discrete entities (bloobers, hammer
+	// bros, live hammers, stray cheeps) get the goomba treatment. A
+	// podoboo is periodic, not discrete — removing it would silently
+	// edit the level — but the picker's arc-band guard keeps checkpoint
+	// columns out of its lane, so overlap here means a hand-authored
+	// start marker inside a pool: drop it rather than loop the player.
+	g.Bloopers = filter(g.Bloopers, func(b *Bloober) bool {
+		return !overlap(b.Pos.X, b.Pos.Y, b.W, b.H, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
+	g.HammerBros = filter(g.HammerBros, func(b *HammerBro) bool {
+		return !overlap(b.Pos.X, b.Pos.Y, b.W, b.H, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
+	g.Hammers = filter(g.Hammers, func(h *Hammer) bool {
+		return !overlap(h.Pos.X, h.Pos.Y, HammerW, HammerH, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
+	g.Cheeps = filter(g.Cheeps, func(c *Cheep) bool {
+		return !overlap(c.Pos.X, c.Pos.Y, c.W, c.H, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
+	g.Podoboos = filter(g.Podoboos, func(o *Podoboo) bool {
+		return !overlap(o.Pos.X, o.Pos.Y, o.W, o.H, p.Pos.X, p.Pos.Y, p.W, p.H)
+	})
 }
 
 // updatePlaying runs one live-play tick. The ordering is load-bearing and
@@ -430,6 +454,9 @@ func (g *Game) clearSpawnThreats() {
 // re-check before the world moves.
 func (g *Game) updatePlaying(in Input) {
 	g.curIn = in
+	if g.respawnGrace > 0 {
+		g.respawnGrace--
+	}
 
 	if g.Tick%TicksPerTimeUnit == 0 {
 		g.Time--

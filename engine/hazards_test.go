@@ -190,7 +190,8 @@ func TestLeapingCheepSpawnerAndStomp(t *testing.T) {
 	g.Level.CheepLeaping = true
 	g.Level.CheepStopX = 40
 	g.Player.Pos.X = 30
-	g.Player.Invincible = 1 << 30 // spawner smoke: ignore contact
+	g.Level.Set(30, g.Level.Height-1, Empty) // leapers only rise through open fall
+	g.Player.Invincible = 1 << 30            // spawner smoke: ignore contact
 	spawned := 0
 	for range 300 {
 		g.Tick++

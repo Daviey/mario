@@ -337,43 +337,51 @@ func (l *Level) computeCheckpoint() {
 // is exactly the world a respawning player walks into. Plants count too:
 // their rise mercy keeps a hidden plant down, but a pipe mouth under the
 // respawn column is still a trap the moment the player steps off it.
+// walkInBerth widens a walker's respawn berth past its spawn box:
+// enemies patrol the moment the world card hands control back, and a
+// walker parked just outside the static berth reaches the column in
+// under a second (live 2026-09-02: a goomba 1.8 tiles from 2-4's
+// checkpoint closed the gap in 39 ticks and looped every remaining
+// life; 3-1's koopa did the same from 0.8 tiles past the column).
+const walkInBerth = WorldCardTicks * EnemyWalk
+
 func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 	for _, s := range l.GoombaSpawns {
-		if math.Abs(s.X-colX) < SmallW+GoombaW {
+		if math.Abs(s.X-colX) < SmallW+GoombaW+walkInBerth {
 			return true
 		}
 	}
 	for _, s := range l.KoopaSpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
 	for _, s := range l.ParaSpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
 	// The SMB1-fidelity walkers ride the same rule as their green
-	// cousins: buzzy beetles and red koopas/paratroopas share the koopa
-	// box, and a hammer bro (0.9 wide, but two tiles of menace) gets the
-	// same berth on the ground it patrols.
+	// cousins — buzzy beetles and red koopas/paratroopas share the
+	// koopa box, a hammer bro gets its patrol berth — widened by the
+	// same walk-in margin.
 	for _, s := range l.BuzzySpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
 	for _, s := range l.KoopaRedSpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
 	for _, s := range l.ParaRedSpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
 	for _, s := range l.HammerSpawns {
-		if math.Abs(s.X-colX) < SmallW+KoopaW {
+		if math.Abs(s.X-colX) < SmallW+KoopaW+walkInBerth {
 			return true
 		}
 	}
@@ -397,6 +405,19 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 		if math.Abs(s.X+BowserW/2-(colX+SmallW/2)) < (SmallW+BowserW)/2 &&
 			math.Abs(s.Y+BowserH/2-(float64(ground)-SmallH/2)) < (SmallH+BowserH)/2 {
 			return true
+		}
+	}
+	// A podoboo arcs PodobooJumpVel's worth of height above its lava
+	// surface on its own column: a respawn column inside the leap lane
+	// at a height the arc sweeps through is a trap whenever the phase
+	// window lands (the guard treats the whole arc band as threatened —
+	// phases are pure functions of the tick, so any offset is possible).
+	for _, s := range l.PodobooSpawns {
+		if math.Abs(s.X+PodobooW/2-(colX+SmallW/2)) < (SmallW+PodobooW)/2 {
+			top := s.Y - (PodobooJumpVel*PodobooJumpVel)/(2*Gravity) - PodobooH
+			if float64(ground) > top && float64(ground)-SmallH < s.Y {
+				return true
+			}
 		}
 	}
 	// A fire bar sweeps a full disc around its hub: MaxReach (entity.go)
