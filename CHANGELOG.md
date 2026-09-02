@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.10.0 — 2026-09-02
+
+This release adds the Bowser boss fight at the end of world 2-4 and overhauls leaderboard verification to correct mismatched scores and hide invalid rows instead of deleting them.
+
+## Highlights
+- World 2-4 now ends with a Bowser boss fight on a bridge over lava, with the axe as the castle-level goal replacing the flagpole.
+
+## Added
+- Bowser boss for castle level 2-4: bridge/axe fight, new sprites, engine logic, and tests (`engine/bowser.go`, `render/sprites.go`).
+
+## Changed
+- Score verifier now corrects rows whose replay scores differ from the claim and hides unverifiable rows instead of deleting them; new `hidden` column (`supabase/migrations/20260902000000_hidden_scores.sql`).
+
+## Packaging
+- No packaging changes in this release.
+
+
 ## v0.8.0 — 2026-08-31
 
 A hardening and code-health release: engine levels now enforce coin reachability everywhere, the SSH server gained a control lane and hard caps, and the giant render/server files were split into maintainable seams — plus a SECURITY.md shipped on the web build.
