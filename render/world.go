@@ -64,6 +64,7 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawTilesPx(f, g, p, camX, camY, ox, oy)
 	drawLifts(f, g, p, rc, camX, camY) // platforms under the actors
 	drawSprings(f, g, p, rc, camX, camY)
+	drawVine(f, g, p, rc, camX, camY)
 	drawAxe(f, g, p, rc, ox, oy)
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
@@ -215,7 +216,7 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 			switch t {
 			case engine.Ground:
 				drawGround(f, p, x, y, tx, ty, g.Level.At(tx, ty-1) != engine.Ground)
-			case engine.Brick, engine.BrickCoin: // the ten-coin brick is disguised as a plain brick
+			case engine.Brick, engine.BrickCoin, engine.BrickVine: // coin and vine bricks are disguised as plain bricks
 				drawBrick(f, p, x, y, tx)
 			case engine.Question, engine.QuestionMush, engine.QuestionStar:
 				drawQuestion(f, p, x, y, g.Tick%48 < 24)
@@ -558,6 +559,22 @@ func drawHammers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, 
 		cx := int(math.Round((hm.Pos.X + 0.25 - camX) * Pix)) // 0.25 = W/2 of the 0.5 box
 		cy := int(math.Round((hm.Pos.Y + 0.25 - camY) * Pix))
 		f.DrawSprite(sprHammer, rc, cx-sprW(sprHammer)/2, cy-sprH(sprHammer)/2, (hm.Rot/4)%2 == 1, 1)
+	}
+}
+
+// drawVine paints the beanstalk: one stalk tile per row from the spent
+// brick's crown up to the grown top, leaf side alternating via the
+// draw mirror. The brick itself renders as a plain brick until spent
+// (the tile switch) and as Used after — the stalk is the only tell.
+func drawVine(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	v := g.Vine()
+	if v == nil {
+		return
+	}
+	x := int(math.Round((float64(v.X)+0.5-camX)*Pix)) - sprW(sprVine)/2
+	for ty := v.GrowTop; ty < v.BaseY; ty++ {
+		y := int(math.Round((float64(ty) - camY) * Pix))
+		f.DrawSprite(sprVine, rc, x, y, (v.BaseY-ty)%2 == 1, 1)
 	}
 }
 

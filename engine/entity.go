@@ -97,6 +97,10 @@ const (
 	StarWalk   = 0.055
 	StarBounce = -0.22
 
+	VineClimbSpeed = 1.0 / 32 // beanstalk climb, tiles per tick (SMB's measured stalk speed)
+	VineGrowEvery  = 3        // ticks per tile of stalk growth
+	VineTopRow     = 1        // the stalk's crown row, just under the sky edge
+
 	FlagSlideSpeed  = 0.05     // tiles per tick down the pole
 	CastleWalkSpeed = 0.07     // auto-walk to the castle door
 	CastleHopVel    = -0.22    // hop off the pole base towards the castle door
@@ -144,6 +148,7 @@ type Player struct {
 	W, H       float64
 	Facing     int // 1 right, -1 left
 	Grounded   bool
+	Climbing   bool // on the beanstalk: physics is off, Up/Down ride the stalk
 	Power      PowerLevel
 	Invincible int     // post-hit invincibility ticks
 	Star       int     // star-power ticks: invincible, kills on touch
@@ -282,6 +287,16 @@ const (
 	MushLife                      // 1-UP
 	MushStar                      // star power
 )
+
+// Vine is a grown beanstalk: sprouted by bumping a BrickVine ('J'), it
+// climbs the sky column above the spent brick and carries the player to
+// the level's vine room (1-1's Coin Heaven). Scenery otherwise: not
+// solid, no collision — only the player's Up press interacts with it.
+type Vine struct {
+	X, BaseY int    // the sprout column and the spent brick's row
+	GrowTop  int    // the stalk's current crown row, growing toward VineTopRow
+	Dest     *Level // the room the crown leads to; nil = bare stalk
+}
 
 // Mushroom is a power-up that emerges from a block and then walks: the
 // super mushroom, the 1-UP mushroom and the bouncing star.

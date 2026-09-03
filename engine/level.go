@@ -40,12 +40,13 @@ const (
 	FlagTop
 	TileBridge // castle boss bridge: solid plank over the lava pool
 	BrickCoin  // multi-coin brick: pays per bump until count or clock runs out
+	BrickVine  // vine brick: bump spends it and sprouts the beanstalk ('J')
 )
 
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, BrickCoin, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
+	case Ground, Brick, BrickCoin, BrickVine, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
 		return true
 	}
 	return false
@@ -102,6 +103,11 @@ type Level struct {
 
 	LiftSpawns   []LiftSpawn // rideable platforms (Builder.Lift); Y is the platform's top surface
 	SpringSpawns []Vec       // springboards: X = left edge, Y = top surface (box 1 wide, 0.5 tall)
+
+	// The beanstalk (vine.go): the vine brick's bump destination, and —
+	// on room levels — the fall-out exit column. Both optional.
+	VineRoom  *Level // 1-1's Coin Heaven; nil = the stalk tops out bare
+	DropExitX int    // room-only: falling out below the room returns to the main level at this X
 }
 
 // CurrentZone is one of 2-2's downward currents: a column span that
@@ -180,6 +186,7 @@ var tileChars = map[byte]Tile{
 	'#': Ground,
 	'B': Brick,
 	'C': BrickCoin,
+	'J': BrickVine,
 	'?': Question,
 	'U': QuestionMush,
 	'f': QuestionFire,

@@ -222,7 +222,9 @@ func (g *Game) shellSmashBricks(e *Enemy, vx float64) bool {
 	broke := false
 	for ty := y0; ty <= y1; ty++ {
 		t := g.Level.At(col, ty)
-		if t != Brick && t != BrickCoin {
+		// BrickVine included: a smashed vine brick breaks like any
+		// other and never sprouts — spawning lives in hitBlock alone.
+		if t != Brick && t != BrickCoin && t != BrickVine {
 			continue
 		}
 		g.Level.Set(col, ty, Empty)

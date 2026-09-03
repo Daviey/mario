@@ -728,6 +728,18 @@ var sprSpringArmed = []string{ // 7×3: full compression — gold plate, jump no
 	sprSpringDown[3],
 }
 
+// Beanstalk stalk tile: drawn per row from the spent brick's crown up
+// to the grown top (drawVine), with the leaf side mirrored every other
+// row so the column reads as one climbing vine.
+var sprVine = []string{ // 4×6
+	".g..",
+	".gG.",
+	".g..",
+	".gG.",
+	".g..",
+	".gGE",
+}
+
 // Lift platform art (S9): a fixed 4×2 mushroom-platform chunk, tiled
 // across the lift's width by drawLifts. The flimsy variant's pale plank
 // reads as the cheaper platform that falls out from under you.

@@ -6,6 +6,12 @@ import "math"
 func (g *Game) updatePlayer(in Input) {
 	p := g.Player
 
+	// On the beanstalk the ordinary physics is off entirely (vine.go).
+	if p.Climbing {
+		g.updateClimb(in)
+		return
+	}
+
 	// Horizontal control.
 	accel, maxV := WalkAccel, MaxWalk
 	if in.Run {
@@ -247,6 +253,13 @@ func (g *Game) hitBlock(tx, ty int, p *Player) {
 				delete(g.coinBricks, idx)
 			}
 		}
+	case BrickVine:
+		// The beanstalk brick spends itself and sprouts the vine — it
+		// never breaks, small or super: the stalk is the prize.
+		g.Level.Set(tx, ty, Used)
+		g.bumps[idx] = BumpAnimTicks
+		g.vine = newVine(tx, ty, g.Level.VineRoom)
+		g.emit("bump")
 	case Brick:
 		if p.Power >= PowerSuper {
 			g.Level.Set(tx, ty, Empty)

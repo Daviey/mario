@@ -209,6 +209,7 @@ func level1() *Level {
 
 	b.Fill(72, 10, 75, 10, 'B')
 	b.Coins(8, 72, 73, 74, 75)
+	b.Set(77, 9, 'J') // the beanstalk brick (SMB's vine block): bump, climb, Coin Heaven
 	b.Set(80, 12, 'K')
 
 	b.Fill(84, 9, 87, 9, 'B')
@@ -236,6 +237,26 @@ func level1() *Level {
 	room := level1Room()
 	l.Warps = []Warp{{X: 28, Top: GroundTop - 2, Dest: room, DestX: 2, DestTop: GroundTop - 2}}
 	room.Warps = []Warp{{X: 30, Top: GroundTop - 2, Dest: nil, DestX: 41, DestTop: GroundTop - 3}}
+	l.VineRoom = level1CoinHeaven()
+	return l
+}
+
+// level1CoinHeaven is 1-1's beanstalk bonus room: a sky ledge with a
+// coin harvest and an open right edge — running off the floor drops the
+// player back into 1-1 at the final staircase, falling from above the
+// sky (the original's skip-ahead exit). Rooms are not part of
+// DefaultLevels; the vine brick's stalk crown leads here (level1).
+func level1CoinHeaven() *Level {
+	b := NewBuilder(26, LevelHeight)
+	b.Theme(ThemeSky)
+	b.Ground(0, 17) // the ledge: open sky from column 18 rightward
+	for y := 1; y < GroundTop; y++ {
+		b.Set(0, y, 'B') // brick wall closes the left edge
+	}
+	b.Coins(10, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13) // the long harvest row
+	b.Coins(7, 10, 11, 12, 13)                          // ...and its high finish
+	l := mustLevel("1-1 heaven", b)
+	l.DropExitX = 124 // the final staircase's base, back in 1-1
 	return l
 }
 

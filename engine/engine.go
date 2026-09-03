@@ -165,6 +165,7 @@ type Game struct {
 	fireworks  bool    // flag-slide fireworks already awarded this slide
 	bumps      map[int]int
 	coinBricks map[int]*coinBrick // live multi-coin bricks, keyed by tile index
+	vine       *Vine              // the live beanstalk (nil until one sprouts)
 	bridgeCols []int              // bridge columns left to sweep in StateBridgeFall
 	ceilBuf    []int              // moveY rising-collision column scratch, reused per tick
 	prevIn     Input              // previous tick's input, for rising/falling edges
@@ -497,8 +498,23 @@ func (g *Game) updatePlaying(in Input) {
 		}
 	}
 
+	// The beanstalk: a rising Up press grabs a live stalk, SMB
+	// ladder-style, and consumes the tick — the press must not also
+	// jump the player.
+	if g.tryGrabVine(in) {
+		return
+	}
+
 	g.updatePlayer(in)
 	if g.State != StatePlaying {
+		return
+	}
+
+	// The stalk grows with the world; a fall out of a drop-exit room
+	// (the Coin Heaven's open right edge) returns to the main level.
+	g.updateVine()
+	if g.inRoom && g.Level.DropExitX > 0 && g.Player.Pos.Y > float64(g.Level.Height) {
+		g.exitRoomFall()
 		return
 	}
 
@@ -761,6 +777,7 @@ func (g *Game) kill() {
 	g.Lives--
 	g.State = StateDying
 	g.stateTimer = DyingTicks
+	g.Player.Climbing = false
 	g.Player.Vel.X = 0
 	g.Player.Vel.Y = DeathBounceVel
 	g.emit("die")
@@ -803,6 +820,7 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	g.CameraX = 0
 	g.bumps = map[int]int{}
 	g.coinBricks = seedCoinBricks(lvl)
+	g.vine = nil
 	g.checkpoint = -1
 	g.Hurry = false
 	g.HurryT = 0
@@ -871,6 +889,11 @@ func instantiate(src *Level) *Level {
 	lvl.BowserDisguise = src.BowserDisguise
 	lvl.LiftSpawns = append([]LiftSpawn(nil), src.LiftSpawns...)
 	lvl.SpringSpawns = append([]Vec(nil), src.SpringSpawns...)
+	// The beanstalk's room pointer and the room's drop-exit column are
+	// template wiring, not tile data — they must travel with the copy
+	// or the live level sprouts a bare stalk (VineRoom nil).
+	lvl.VineRoom = src.VineRoom
+	lvl.DropExitX = src.DropExitX
 	return lvl
 }
 

@@ -26,7 +26,7 @@ import (
 
 // EngineVersion marks the gameplay build a replay was recorded on. Bump it
 // on ANY engine/level change — the verifier rejects rows it cannot trust.
-const EngineVersion = "2026.09.03c" // multi-coin bricks: ten coins or a ~4s window per brick; pre-bump recordings diverge
+const EngineVersion = "2026.09.03d" // multi-coin bricks: ten coins or a ~4s window per brick; pre-bump recordings diverge
 
 // Client is a configured PostgREST endpoint.
 type Client struct {

@@ -54,8 +54,9 @@ func TestLevelBytesPinnedToEngineVersion(t *testing.T) {
 		level *Level
 		want  uint64
 	}{
-		{"1-1", level1(), 0x7ae96555a5fb2dd8},
+		{"1-1", level1(), 0x125767e17bbb2de8},
 		{"1-1 cellar", level1Room(), 0x7771631684718c21},
+		{"1-1 heaven", level1CoinHeaven(), 0x3f85ef959448f6f7},
 		{"daily 2026-02-03", DailyLevelFor(2026, 2, 3), 0x1a8e7be7c146cfee},
 	} {
 		got := levelDigest(tc.level)
