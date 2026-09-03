@@ -163,12 +163,15 @@ func mustLevel(name string, b *Builder) *Level {
 	return l
 }
 
-// DefaultLevels returns the twelve built-in levels (worlds 1-3): 1-1,
+// DefaultLevels returns the sixteen built-in levels (worlds 1-4): 1-1,
 // 1-2, 1-3, 1-4 (castle), 2-1, 2-2 (underwater), 2-3 (bridge), 2-4
-// (castle), 3-1, 3-2, 3-3 (world-3 night) and 3-4 (final castle).
+// (castle), 3-1, 3-2, 3-3 (world-3 night), 3-4 (castle, toad), 4-1,
+// 4-2 (underground vine cellar), 4-3 (athletic) and 4-4 (final castle,
+// the princess ends the quest).
 func DefaultLevels() []*Level {
 	return []*Level{level1(), level2(), level3(), level4(), level5(), level6(),
-		level7(), level8(), level9(), level10(), level11(), level12()}
+		level7(), level8(), level9(), level10(), level11(), level12(),
+		level13(), level14(), level15(), level16()}
 }
 
 func level1() *Level {
@@ -391,13 +394,15 @@ func level2WarpRoom() *Level {
 		b.Set(25, y, 'B')
 	}
 	b.Pipe(2, 2)  // arrival: the player rises out of this mouth
-	b.Pipe(8, 2)  // world 3
-	b.Pipe(14, 2) // world 2
+	b.Pipe(8, 2)  // world 4
+	b.Pipe(14, 2) // world 3
+	b.Pipe(20, 2) // world 2
 	b.Set(6, 12, 'M')
 	l := mustLevel("1-2", b)
 	l.Warps = []Warp{
-		{X: 8, Top: GroundTop - 2, JumpTo: 8, DestX: 2, DestTop: GroundTop - 2},
-		{X: 14, Top: GroundTop - 2, JumpTo: 4, DestX: 2, DestTop: GroundTop - 2},
+		{X: 8, Top: GroundTop - 2, JumpTo: 12, DestX: 2, DestTop: GroundTop - 2},
+		{X: 14, Top: GroundTop - 2, JumpTo: 8, DestX: 2, DestTop: GroundTop - 2},
+		{X: 20, Top: GroundTop - 2, JumpTo: 4, DestX: 2, DestTop: GroundTop - 2},
 	}
 	return l
 }
@@ -1022,10 +1027,11 @@ func level11() *Level {
 	return l
 }
 
-// level12 is the final castle: a hall of fire-bar pillars over boiling
+// level12 is world 3's castle: a hall of fire-bar pillars over boiling
 // lava — six pools, six lava bubbles — the three question blocks, and
-// the last fake Bowser (a buzzy beetle in disguise) behind his brick
-// barrier with a horizontal lift above. The princess ends the quest.
+// the fake Bowser (a buzzy beetle in disguise) behind his brick
+// barrier with a horizontal lift above. Toad waits behind the arena:
+// the princess is in another castle (4-4, since world 4 exists).
 func level12() *Level {
 	b := NewBuilder(200, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -1092,7 +1098,7 @@ func level12() *Level {
 	b.Lift(160, 7, 3, LiftHoriz, 4)
 	b.Set(162, 12, 'Z') // fake Bowser (buzzy beetle), on the bridge
 	b.Set(169, 12, 'x') // the axe
-	b.Set(178, 12, 'p') // the princess
+	b.Set(178, 12, 't') // the toad — the princess is in another castle (4-4)
 	l := mustLevel("3-4", b)
 	l.Time = 300
 	l.BowserDisguise = KindBuzzy
