@@ -214,10 +214,11 @@ func level27() *Level {
 	return l
 }
 
-// level28 is THE maze castle: three looping corridors between the fire
-// bars — low way, high way, low way again (SMB 7-4's ladder of
-// repeats, condensed to three) — before the fake Bowser (a goomba in
-// the suit) on his bridge, the axe, and the princess.
+// level28 is world 7's maze castle: three looping corridors between
+// the fire bars — low way, high way, low way again (SMB 7-4's ladder
+// of repeats, condensed to three) — before the fake Bowser (a goomba
+// in the suit) on his bridge and the axe. Toad waits behind the arena:
+// the princess is in another castle (8-4, since world 8 exists).
 func level28() *Level {
 	b := NewBuilder(210, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -280,7 +281,7 @@ func level28() *Level {
 	}
 	b.Set(192, 12, 'Z') // fake Bowser (goomba), on the bridge
 	b.Set(199, 12, 'x') // the axe
-	b.Set(205, 12, 'p') // the princess: the quest's end (while 7 is last)
+	b.Set(205, 12, 't') // the toad — the princess is in another castle (8-4)
 	l := mustLevel("7-4", b)
 	l.Time = 300
 	l.BowserDisguise = KindGoomba

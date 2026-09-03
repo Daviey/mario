@@ -148,8 +148,8 @@ func TestLoadLevelsDefault(t *testing.T) {
 	if !a.levelsTrust {
 		t.Fatal("default (nil) levels must keep runs replay-trusted")
 	}
-	if len(a.Game.Levels) != 28 {
-		t.Errorf("New defaulted to %d levels, want 28", len(a.Game.Levels))
+	if len(a.Game.Levels) != 32 {
+		t.Errorf("New defaulted to %d levels, want 32", len(a.Game.Levels))
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.txt")

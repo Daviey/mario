@@ -147,11 +147,44 @@ func level14() *Level {
 
 	// The exit pipe: 2-2's shape — warp to the overworld flag room.
 	b.Pipe(176, 3)
+	// The late warp zone (the original hides it behind the second
+	// beanstalk; ours is a plant pipe before the exit — worlds 6, 7
+	// and 8, the roof-pocket pattern).
+	b.Pipe(162, 2)
+	b.Plant(162, 2)
 	l := mustLevel("4-2", b)
 	l.Time = 400
 	room := level14FlagRoom()
-	l.Warps = []Warp{{X: 176, Top: GroundTop - 3, Dest: room, DestX: 2, DestTop: GroundTop - 2}}
+	l.Warps = []Warp{
+		{X: 162, Top: GroundTop - 2, Dest: level14WarpRoom(), DestX: 2, DestTop: GroundTop - 2},
+		{X: 176, Top: GroundTop - 3, Dest: room, DestX: 2, DestTop: GroundTop - 2},
+	}
 	l.VineRoom = level14CoinHeaven()
+	return l
+}
+
+// level14WarpRoom is 4-2's warp zone: worlds 6, 7 and 8 left to right
+// (the original's second warp zone, unlocked by worlds 6-8 existing).
+func level14WarpRoom() *Level {
+	b := NewBuilder(26, LevelHeight)
+	b.Theme(ThemeUnderground)
+	b.Ground(0, 25)
+	b.Ceiling()
+	for y := 1; y < GroundTop; y++ { // brick walls close the pocket
+		b.Set(0, y, 'B')
+		b.Set(25, y, 'B')
+	}
+	b.Pipe(2, 2)  // arrival
+	b.Pipe(8, 2)  // world 6
+	b.Pipe(14, 2) // world 7
+	b.Pipe(20, 2) // world 8
+	b.Set(6, 12, 'M')
+	l := mustLevel("4-2 warp", b)
+	l.Warps = []Warp{
+		{X: 8, Top: GroundTop - 2, JumpTo: 20, DestX: 2, DestTop: GroundTop - 2},
+		{X: 14, Top: GroundTop - 2, JumpTo: 24, DestX: 2, DestTop: GroundTop - 2},
+		{X: 20, Top: GroundTop - 2, JumpTo: 28, DestX: 2, DestTop: GroundTop - 2},
+	}
 	return l
 }
 

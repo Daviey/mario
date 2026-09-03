@@ -176,23 +176,27 @@ func mustLevel(name string, b *Builder) *Level {
 	return l
 }
 
-// DefaultLevels returns the twenty-eight built-in levels (worlds 1-7):
+// DefaultLevels returns the thirty-two built-in levels (worlds 1-8):
 // 1-1, 1-2, 1-3, 1-4 (castle), 2-1, 2-2 (underwater), 2-3 (bridge),
 // 2-4 (castle), 3-1, 3-2, 3-3 (world-3 night), 3-4 (castle, toad),
-// 4-1, 4-2 (underground vine cellar), 4-3 (athletic), 4-4 (castle,
-// toad, maze), 5-1 (bullet-bill blasters), 5-2 (underground, flooded
-// middle), 5-3 (elevator flight), 5-4 (castle, toad), 6-1 (plant
-// gauntlet), 6-2 (lift cave), 6-3 (short hop chain), 6-4 (castle,
-// toad), 7-1 (springboard shelf), 7-2 (underground, second flooded
-// middle), 7-3 (lift chain) and 7-4 (the maze castle, the princess
-// ends the quest).
+// 4-1, 4-2 (underground vine cellar + warp zone), 4-3 (athletic),
+// 4-4 (castle, toad, maze), 5-1 (bullet-bill blasters), 5-2
+// (underground, flooded middle), 5-3 (elevator flight), 5-4 (castle,
+// toad), 6-1 (plant gauntlet), 6-2 (lift cave), 6-3 (short hop
+// chain), 6-4 (castle, toad), 7-1 (springboard shelf), 7-2
+// (underground, second flooded middle), 7-3 (lift chain), 7-4 (the
+// maze castle, toad), 8-1 (the long road: blasters + hammer bros),
+// 8-2 (the buzzy cave, springboard shelf), 8-3 (the hammer gauntlet)
+// and 8-4 (THE final castle: four mazes, the flooded detour, the real
+// Bowser, the princess — the quest's true end).
 func DefaultLevels() []*Level {
 	return []*Level{level1(), level2(), level3(), level4(), level5(), level6(),
 		level7(), level8(), level9(), level10(), level11(), level12(),
 		level13(), level14(), level15(), level16(),
 		level17(), level18(), level19(), level20(),
 		level21(), level22(), level23(), level24(),
-		level25(), level26(), level27(), level28()}
+		level25(), level26(), level27(), level28(),
+		level29(), level30(), level31(), level32()}
 }
 
 func level1() *Level {
