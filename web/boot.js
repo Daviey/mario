@@ -318,6 +318,10 @@
   let ac = null, master = null, noiseBuf = null;
   let muted = false;
   try { muted = localStorage.getItem('mario-muted') === '1'; } catch {}
+  // Music mute is independent of the master mute: the top-bar 🎵 button
+  // silences the BGM alone — gameplay SFX keep playing. Default ON.
+  let musicMuted = false;
+  try { musicMuted = localStorage.getItem('mario-music') === '0'; } catch {}
   const ensureAudio = () => {
     if (ac) { if (ac.state === 'suspended') ac.resume().catch(() => {}); return; }
     const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -434,10 +438,11 @@
       bass: [48,52, 50,53, 52,55, 53,57] },
   };
   const bgm = { key: null, theme: null, hurry: false, star: false,
-                 playing: false, timer: null, nextT: 0, step: 0 };
+                 playing: false, timer: null, nextT: 0, step: 0,
+                 musicMuted: musicMuted };
   window.marioBgm = bgm; // introspection: tests and curious players
   const bgmTick = () => {
-    if (!ac || !bgm.playing || muted) return;
+    if (!ac || !bgm.playing || muted || musicMuted) return;
     const th = THEMES[bgm.star ? 'star' : (THEMES[bgm.theme] ? bgm.theme : 'overworld')];
     const eighth = 60 / (th.bpm * (bgm.hurry ? 1.25 : 1)) / 2;
     while (bgm.nextT < ac.currentTime + 0.25) {
@@ -466,8 +471,25 @@
     if (bgm.playing && !bgm.timer) bgm.timer = setInterval(bgmTick, 80);
   };
 
-  // Top-bar controls: mute (persisted) and fullscreen + landscape lock.
-  // tabindex=-1 + blur() keeps game keys off the buttons.
+  // Top-bar controls: music mute, master mute (both persisted) and
+  // fullscreen + landscape lock. tabindex=-1 + blur() keeps game keys
+  // off the buttons.
+  const musicBtn = document.getElementById('music-btn');
+  const musicBtnSync = () => {
+    musicBtn.textContent = '🎵';
+    musicBtn.classList.toggle('off', musicMuted);
+    musicBtn.setAttribute('aria-label', musicMuted ? 'music off' : 'music on');
+  };
+  musicBtnSync();
+  musicBtn.addEventListener('click', () => {
+    musicMuted = !musicMuted;
+    bgm.musicMuted = musicMuted;
+    try { localStorage.setItem('mario-music', musicMuted ? '0' : '1'); } catch {}
+    if (!musicMuted && ac && bgm.nextT < ac.currentTime + 0.02)
+      bgm.nextT = ac.currentTime + 0.05; // unmute: no burst of catch-up notes
+    musicBtnSync();
+    musicBtn.blur();
+  });
   const muteBtn = document.getElementById('mute-btn');
   muteBtn.textContent = muted ? '🔇' : '🔊';
   muteBtn.addEventListener('click', () => {

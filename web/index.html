@@ -289,6 +289,7 @@
   }
   @media (orientation: portrait) { body.touch #rotate:not(.off) { display: flex; } }
   @media (prefers-reduced-motion: reduce) { .pbtn { transition: none; } }
+.cbtn.off { text-decoration: line-through; opacity: .55; }
 </style>
 </head>
 <body>
@@ -298,6 +299,7 @@
     <span class="dim">a/d move · w jump · s duck · x run/fire · p pause · k die · r restart</span>
     <button id="pad-btn" class="cbtn" tabindex="-1" aria-label="toggle on-screen pad">🎮</button>
     <button id="fs-btn" class="cbtn" tabindex="-1" aria-label="fullscreen">⛶</button>
+    <button id="music-btn" class="cbtn" tabindex="-1" aria-label="toggle music">🎵</button>
     <button id="mute-btn" class="cbtn" tabindex="-1" aria-label="toggle sound">🔊</button>
   </span>
 </div>
