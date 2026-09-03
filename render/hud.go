@@ -124,7 +124,8 @@ var (
 )
 
 // hudSegs builds one HUD content variant: 0 richest (SCORE, COINS,
-// WORLD, TIME, LIVES, CHEATS), 1 drops WORLD, 2 drops the labels, 3 is
+// WORLD, TIME, LIVES, CHEATS), 1 drops the labels but keeps a compact
+// level, 2 keeps bare numbers plus the level, 3 is
 // the bare score (always drawn). The terminal HUD (drawHUD, widths in
 // columns) and the canvas HUD band (drawHudPx, widths in pixels) render
 // the same variants, so the two surfaces cannot drift apart.
@@ -150,6 +151,7 @@ func formatHudSegs(g *engine.Game, variant int) []hudSeg {
 		segs := []hudSeg{
 			seg(fmt.Sprintf("SCORE %06d", g.Score), hudPlain),
 			seg(fmt.Sprintf("COINS x%02d", g.CoinCount), hudPlain),
+			seg(g.LevelName(), hudPlain), // compact: the level never drops out
 			seg(fmt.Sprintf("TIME %03d", g.Time), hudFlash),
 			seg(fmt.Sprintf("LIVES x%d", g.Lives), hudPlain),
 		}
@@ -161,6 +163,7 @@ func formatHudSegs(g *engine.Game, variant int) []hudSeg {
 		return []hudSeg{
 			seg(fmt.Sprintf("%06d", g.Score), hudPlain),
 			seg(fmt.Sprintf("x%02d", g.CoinCount), hudPlain),
+			seg(g.LevelName(), hudPlain),
 			seg(fmt.Sprintf("%03d", g.Time), hudFlash),
 			seg(fmt.Sprintf("x%d", g.Lives), hudPlain),
 		}

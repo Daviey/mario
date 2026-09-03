@@ -732,6 +732,13 @@ func TestHudStatusContentParity(t *testing.T) {
 					t.Errorf("rich HUD %q missing %q", joined(ladder[0]), want)
 				}
 			}
+			// The level never drops out: the compact variants carry it
+			// bare (2026-09-03 — the ladder used to shed WORLD first).
+			for _, v := range ladder[1:3] {
+				if !strings.Contains(joined(v), g.LevelName()) {
+					t.Errorf("HUD variant %q missing the level %q", joined(v), g.LevelName())
+				}
+			}
 			var flashSegs, redSegs int
 			for _, seg := range ladder[0] {
 				switch seg.ink {
