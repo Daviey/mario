@@ -163,15 +163,17 @@ func mustLevel(name string, b *Builder) *Level {
 	return l
 }
 
-// DefaultLevels returns the sixteen built-in levels (worlds 1-4): 1-1,
+// DefaultLevels returns the twenty built-in levels (worlds 1-5): 1-1,
 // 1-2, 1-3, 1-4 (castle), 2-1, 2-2 (underwater), 2-3 (bridge), 2-4
 // (castle), 3-1, 3-2, 3-3 (world-3 night), 3-4 (castle, toad), 4-1,
-// 4-2 (underground vine cellar), 4-3 (athletic) and 4-4 (final castle,
-// the princess ends the quest).
+// 4-2 (underground vine cellar), 4-3 (athletic), 4-4 (castle, toad),
+// 5-1 (bullet-bill blasters), 5-2 (underground, flooded middle), 5-3
+// (elevator flight) and 5-4 (final castle, the princess ends the quest).
 func DefaultLevels() []*Level {
 	return []*Level{level1(), level2(), level3(), level4(), level5(), level6(),
 		level7(), level8(), level9(), level10(), level11(), level12(),
-		level13(), level14(), level15(), level16()}
+		level13(), level14(), level15(), level16(),
+		level17(), level18(), level19(), level20()}
 }
 
 func level1() *Level {

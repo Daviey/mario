@@ -46,6 +46,7 @@ type worldState struct {
 	// visit neither freezes nor resets the main level's podoboos.
 	lifts      []*Lift
 	springs    []*Spring
+	bullets    []*Bullet
 	podoboos   []*Podoboo
 	cheeps     []*Cheep
 	bloopers   []*Bloober
@@ -70,6 +71,7 @@ func (g *Game) stashWorld() *worldState {
 		bumps:      g.bumps,
 		coinBricks: g.coinBricks,
 		vine:       g.vine,
+		bullets:    g.Bullets,
 		checkpoint: g.checkpoint,
 
 		lifts:      g.Lifts,
@@ -98,6 +100,7 @@ func (g *Game) applyWorld(w *worldState) {
 	g.bumps = w.bumps
 	g.coinBricks = w.coinBricks
 	g.vine = w.vine
+	g.Bullets = w.bullets
 	g.checkpoint = w.checkpoint
 
 	g.Lifts = w.lifts
@@ -202,6 +205,7 @@ func (g *Game) roomFor(t *Level) *worldState {
 		bumps:      map[int]int{},
 		coinBricks: seedCoinBricks(lvl),
 		vine:       nil,
+		bullets:    nil,
 		checkpoint: -1,
 	}
 	w.enemies = buildEnemies(lvl)

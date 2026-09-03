@@ -256,10 +256,10 @@ func level15() *Level {
 	return l
 }
 
-// level16 is the quest's last castle: the fire-bar gauntlet tightens —
-// pillar pairs between every pool — before the fake Bowser (a goomba,
-// as at the quest's start) on his bridge, the axe, and the princess
-// who ends the run (StateWin fires here: 4-4 is the last level).
+// level16 is world 4's castle: the fire-bar gauntlet tightens — pillar
+// pairs between every pool — before the fake Bowser (a goomba, as at
+// the quest's start) on his bridge and the axe. Toad waits behind the
+// arena: the princess is in another castle (5-4, since world 5 exists).
 func level16() *Level {
 	b := NewBuilder(180, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -333,7 +333,7 @@ func level16() *Level {
 	}
 	b.Set(158, 12, 'Z') // fake Bowser (goomba, as at the quest's start)
 	b.Set(165, 12, 'x') // the axe
-	b.Set(174, 12, 'p') // the princess: the quest's true end
+	b.Set(174, 12, 't') // the toad — the princess is in another castle (5-4)
 	l := mustLevel("4-4", b)
 	l.Time = 300
 	l.BowserDisguise = KindGoomba

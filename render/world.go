@@ -65,6 +65,7 @@ func worldFrame(dst *Frame, g *engine.Game, p *Palette) *Frame {
 	drawLifts(f, g, p, rc, camX, camY) // platforms under the actors
 	drawSprings(f, g, p, rc, camX, camY)
 	drawVine(f, g, p, rc, camX, camY)
+	drawBullets(f, g, p, rc, camX, camY)
 	drawAxe(f, g, p, rc, ox, oy)
 	drawCoinItems(f, g, p, rc, camX, camY, ox, oy)
 	drawParticlesPx(f, g, p, rc, ox, oy)
@@ -218,6 +219,8 @@ func drawTilesPx(f *Frame, g *engine.Game, p *Palette, camX, camY float64, ox, o
 				drawGround(f, p, x, y, tx, ty, g.Level.At(tx, ty-1) != engine.Ground)
 			case engine.Brick, engine.BrickCoin, engine.BrickVine: // coin and vine bricks are disguised as plain bricks
 				drawBrick(f, p, x, y, tx)
+			case engine.BlasterTile: // bullet-bill cannon: dark iron, muzzle rim on the run's outer ends
+				drawBlaster(f, p, x, y, g.Level.At(tx-1, ty) != engine.BlasterTile)
 			case engine.Question, engine.QuestionMush, engine.QuestionStar:
 				drawQuestion(f, p, x, y, g.Tick%48 < 24)
 			case engine.Used:
@@ -559,6 +562,16 @@ func drawHammers(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, 
 		cx := int(math.Round((hm.Pos.X + 0.25 - camX) * Pix)) // 0.25 = W/2 of the 0.5 box
 		cy := int(math.Round((hm.Pos.Y + 0.25 - camY) * Pix))
 		f.DrawSprite(sprHammer, rc, cx-sprW(sprHammer)/2, cy-sprH(sprHammer)/2, (hm.Rot/4)%2 == 1, 1)
+	}
+}
+
+// drawBullets paints the flying bills (bullet.go): level flight, no
+// terrain interaction, flipped when bound left.
+func drawBullets(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, camY float64) {
+	for _, b := range g.Bullets {
+		cx := int(math.Round((b.Pos.X + engine.BulletW/2 - camX) * Pix))
+		cy := int(math.Round((b.Pos.Y + engine.BulletH/2 - camY) * Pix))
+		f.DrawSprite(sprBullet, rc, cx-sprW(sprBullet)/2, cy-sprH(sprBullet)/2, b.Vel.X < 0, 1)
 	}
 }
 

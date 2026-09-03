@@ -166,6 +166,7 @@ type Game struct {
 	bumps      map[int]int
 	coinBricks map[int]*coinBrick // live multi-coin bricks, keyed by tile index
 	vine       *Vine              // the live beanstalk (nil until one sprouts)
+	Bullets    []*Bullet          // live bullet-bill shells (bullet.go)
 	bridgeCols []int              // bridge columns left to sweep in StateBridgeFall
 	ceilBuf    []int              // moveY rising-collision column scratch, reused per tick
 	prevIn     Input              // previous tick's input, for rising/falling edges
@@ -546,6 +547,8 @@ func (g *Game) updatePlaying(in Input) {
 	g.updatePodoboos()
 	g.updateCheeps()
 	g.updateBloopers()
+	g.updateBlasters()
+	g.updateBullets()
 	g.updateHammerBros()
 	g.updateHammers()
 	g.playerEnemyInteractions()
@@ -821,6 +824,7 @@ func (g *Game) loadLevel(i int, power PowerLevel) {
 	g.bumps = map[int]int{}
 	g.coinBricks = seedCoinBricks(lvl)
 	g.vine = nil
+	g.Bullets = nil
 	g.checkpoint = -1
 	g.Hurry = false
 	g.HurryT = 0
@@ -894,6 +898,7 @@ func instantiate(src *Level) *Level {
 	// or the live level sprouts a bare stalk (VineRoom nil).
 	lvl.VineRoom = src.VineRoom
 	lvl.DropExitX = src.DropExitX
+	lvl.BlasterSpawns = append([]Vec(nil), src.BlasterSpawns...)
 	return lvl
 }
 
@@ -1011,6 +1016,7 @@ func (g *Game) cleanup() {
 	g.Mushrooms = filter(g.Mushrooms, func(m *Mushroom) bool { return !m.Gone })
 	g.FireFlowers = filter(g.FireFlowers, func(f *FireFlower) bool { return !f.Gone })
 	g.Fireballs = filter(g.Fireballs, func(f *Fireball) bool { return !f.Gone })
+	g.Bullets = filter(g.Bullets, func(b *Bullet) bool { return !b.Gone })
 	g.Plants = filter(g.Plants, func(p *Plant) bool { return !p.Gone })
 	g.Bowsers = filter(g.Bowsers, func(b *Bowser) bool { return !b.Gone })
 	g.BossFires = filter(g.BossFires, func(f *BossFire) bool { return !f.Gone })

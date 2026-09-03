@@ -740,6 +740,17 @@ var sprVine = []string{ // 4×6
 	".gGE",
 }
 
+// Bullet Bill (world 5): SMB's black shell — round nose, fierce eye,
+// stub arms. Flipped by drawBullets when flying left.
+var sprBullet = []string{ // 7×6
+	".DDDDD.",
+	"DDWWDDD",
+	"DWDDWWD",
+	"DDWWDDD",
+	"DDDDDDD",
+	".DDDDD.",
+}
+
 // Lift platform art (S9): a fixed 4×2 mushroom-platform chunk, tiled
 // across the lift's width by drawLifts. The flimsy variant's pale plank
 // reads as the cheaper platform that falls out from under you.
@@ -779,6 +790,18 @@ func drawBrick(f *Frame, p *Palette, x, y, tx int) {
 	f.Fill(x+j1, y, 1, 2, p.BrickDark)   // upper head joint
 	f.Fill(x+j2, y+3, 1, 2, p.BrickDark) // lower head joint
 	f.Set(x, y, p.QuestionHi)            // top-left highlight
+}
+
+// drawBlaster paints a bullet-bill cannon cell: dark iron with a
+// mortar rim, and the muzzle ring on the run's outer end (cap).
+func drawBlaster(f *Frame, p *Palette, x, y int, cap bool) {
+	f.Fill(x, y, Pix, Pix, p.Dark)
+	f.Fill(x, y, Pix, 1, p.BrickDark)
+	f.Fill(x, y+Pix-1, Pix, 1, p.BrickDark)
+	f.Fill(x+2, y+2, Pix-4, 2, p.Goomba)
+	if cap {
+		f.Fill(x, y+1, 1, Pix-2, p.Goomba)
+	}
 }
 
 // drawQuestion paints a ? block. The '?' is an asymmetric stroke with true

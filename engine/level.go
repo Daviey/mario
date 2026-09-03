@@ -38,15 +38,16 @@ const (
 	HiddenLife // invisible block: only bumps from below, pays a 1-UP
 	FlagPole
 	FlagTop
-	TileBridge // castle boss bridge: solid plank over the lava pool
-	BrickCoin  // multi-coin brick: pays per bump until count or clock runs out
-	BrickVine  // vine brick: bump spends it and sprouts the beanstalk ('J')
+	TileBridge  // castle boss bridge: solid plank over the lava pool
+	BrickCoin   // multi-coin brick: pays per bump until count or clock runs out
+	BrickVine   // vine brick: bump spends it and sprouts the beanstalk ('J')
+	BlasterTile // bullet-bill cannon ('N'): solid; fires toward the player
 )
 
 // Solid reports whether bodies collide with the tile.
 func (t Tile) Solid() bool {
 	switch t {
-	case Ground, Brick, BrickCoin, BrickVine, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge:
+	case Ground, Brick, BrickCoin, BrickVine, Question, QuestionMush, QuestionFire, QuestionStar, Used, Pipe, TileBridge, BlasterTile:
 		return true
 	}
 	return false
@@ -108,6 +109,10 @@ type Level struct {
 	// on room levels — the fall-out exit column. Both optional.
 	VineRoom  *Level // 1-1's Coin Heaven; nil = the stalk tops out bare
 	DropExitX int    // room-only: falling out below the room returns to the main level at this X
+
+	// Bullet-bill cannons (bullet.go): the firing state of the 'N' tile
+	// runs — X is the run's centre, Y the cannon row.
+	BlasterSpawns []Vec
 }
 
 // CurrentZone is one of 2-2's downward currents: a column span that
@@ -187,6 +192,7 @@ var tileChars = map[byte]Tile{
 	'B': Brick,
 	'C': BrickCoin,
 	'J': BrickVine,
+	'N': BlasterTile,
 	'?': Question,
 	'U': QuestionMush,
 	'f': QuestionFire,
@@ -213,6 +219,7 @@ var tileChars = map[byte]Tile{
 //	'V' piranha plant (on the pipe below its cell)
 //	'h' fire-bar hub (rotating hazard anchored at the cell centre)
 //	'Z' Bowser (feet planted on the row below the marker)
+//	'N' bullet-bill cannon (solid; fires toward the player — bullet.go)
 //	'x' axe — the boss arena's goal (one per level; last one wins)
 //	't' toad retainer / 'p' princess: the castle cutscene after the walk
 //
@@ -298,6 +305,25 @@ func ParseLevel(name string, rows []string) (*Level, error) {
 					return nil, fmt.Errorf("level %q: unknown tile %q at (%d,%d)", name, ch, x, y)
 				}
 				l.Tiles[y*w+x] = t
+			}
+		}
+	}
+
+	// Bullet-bill cannons: each horizontal run of cannon tiles is one
+	// blaster, firing from the run's centre (bullet.go).
+	for y := range l.Height {
+		run := 0
+		for x := 0; x <= w; x++ {
+			if x < w && l.Tiles[y*w+x] == BlasterTile {
+				run++
+				continue
+			}
+			if run > 0 {
+				l.BlasterSpawns = append(l.BlasterSpawns, Vec{
+					X: float64(x) - float64(run)/2,
+					Y: float64(y),
+				})
+				run = 0
 			}
 		}
 	}
