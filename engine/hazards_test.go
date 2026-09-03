@@ -122,12 +122,13 @@ func TestParaStompDemotesToKoopa(t *testing.T) {
 
 func TestWorldTwoThemes(t *testing.T) {
 	levels := DefaultLevels()
-	if len(levels) != 20 {
-		t.Fatalf("default levels = %d, want 20", len(levels))
+	if len(levels) != 24 {
+		t.Fatalf("default levels = %d, want 24", len(levels))
 	}
 	for i, want := range []Theme{ThemeOverworld, ThemeUnderground, ThemeOverworld, ThemeCastle,
 		ThemeOverworld, ThemeUnderwater, ThemeSky, ThemeCastle,
 		ThemeOverworld, ThemeOverworld, ThemeSky, ThemeCastle,
+		ThemeOverworld, ThemeUnderground, ThemeSky, ThemeCastle,
 		ThemeOverworld, ThemeUnderground, ThemeSky, ThemeCastle,
 		ThemeOverworld, ThemeUnderground, ThemeSky, ThemeCastle} {
 		if levels[i].Theme != want {
@@ -135,7 +136,8 @@ func TestWorldTwoThemes(t *testing.T) {
 		}
 	}
 	if levels[7].BarSpawns == nil || levels[11].BarSpawns == nil ||
-		levels[15].BarSpawns == nil || levels[19].BarSpawns == nil {
+		levels[15].BarSpawns == nil || levels[19].BarSpawns == nil ||
+		levels[23].BarSpawns == nil {
 		t.Error("castle levels have no fire bars")
 	}
 }

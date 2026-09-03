@@ -221,8 +221,8 @@ func level19() *Level {
 
 // level20 is the world-5 castle: the fire-bar hall doubles down —
 // pillar pairs and lava between every stretch — before the fake Bowser
-// (a koopa again) on his bridge, the axe, and the princess, who ends
-// the quest (4-4 fields the toad now that world 5 exists).
+// (a koopa again) on his bridge and the axe. Toad waits behind the
+// arena: the princess is in another castle (6-4, since world 6 exists).
 func level20() *Level {
 	b := NewBuilder(180, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -295,7 +295,7 @@ func level20() *Level {
 	}
 	b.Set(158, 12, 'Z') // fake Bowser (koopa), on the bridge
 	b.Set(165, 12, 'x') // the axe
-	b.Set(174, 12, 'p') // the princess: the quest's true end
+	b.Set(174, 12, 't') // the toad — the princess is in another castle (6-4)
 	l := mustLevel("5-4", b)
 	l.Time = 300
 	l.BowserDisguise = KindKoopa
