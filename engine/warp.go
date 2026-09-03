@@ -208,7 +208,7 @@ func (g *Game) roomFor(t *Level) *worldState {
 		bullets:    nil,
 		checkpoint: -1,
 	}
-	w.enemies = buildEnemies(lvl)
+	w.enemies = g.questSwap(buildEnemies(lvl))
 	w.plants = nil
 	for _, s := range lvl.PlantSpawns {
 		w.plants = append(w.plants, newPlant(s))

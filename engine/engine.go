@@ -140,7 +140,12 @@ type Game struct {
 	// Flow and feel state (all deterministic).
 	Best  int  // local best score; hydrated by the host, kept live
 	Daily bool // daily-challenge run (card title + leaderboard mode)
-	Demo  bool // attract mode: title art is drawn over live play
+	// SecondQuest is the original's harder replay, entered from the win
+	// screen: goombas march as buzzy beetles and the walkers quicken
+	// (QuestSpeed). Runs stay local — the host refuses to record them
+	// (the cheats contract), so no leaderboard row can leave.
+	SecondQuest bool
+	Demo        bool // attract mode: title art is drawn over live play
 	// Cheat mode. Engine-side it lifts only the fireball cap; the rest
 	// of the contract lives in the host: mario.go refuses to record a
 	// cheat run (App.Step gates the Recorder on !Cheats), so the UI
@@ -248,6 +253,8 @@ func (g *Game) CardName() string {
 
 // Reset starts a brand new game (used by the restart key).
 func (g *Game) Reset() {
+	// Mode flags survive the pause-restart (the cheats contract):
+	// clearing SecondQuest here would arm the recorder mid-quest.
 	g.newRun()
 }
 
@@ -345,6 +352,18 @@ func (g *Game) Update(in Input) {
 		if in.Restart {
 			g.Reset()
 		}
+		// The win screen's any key begins the second quest (the
+		// original loops the quest harder after the princess).
+		if g.State == StateWin && in.AnyKey && !g.prevIn.AnyKey {
+			g.beginSecondQuest()
+		}
+		// Continue, the original's hold-A-press-Start: at game over a
+		// held jump key plus any unmapped press resumes the quest at
+		// the current world's first level (Continue below). The R
+		// restart stays the fresh-run path.
+		if g.State == StateGameOver && in.Up && in.AnyKey && !g.prevIn.AnyKey {
+			g.Continue()
+		}
 	}
 	if g.Score > g.Best {
 		g.Best = g.Score
@@ -352,11 +371,53 @@ func (g *Game) Update(in Input) {
 	g.prevIn = in
 }
 
+// beginSecondQuest arms the harder replay and deals a fresh run.
+func (g *Game) beginSecondQuest() {
+	g.SecondQuest = true
+	g.newRun()
+}
+
+// questSwap re-skins this world's goombas as buzzy beetles: fireproof,
+// shell-stompable — the original's second-quest substitution.
+func (g *Game) questSwap(es []*Enemy) []*Enemy {
+	if !g.SecondQuest {
+		return es
+	}
+	for _, e := range es {
+		if e.Kind == KindGoomba && e.State == EnemyWalking {
+			e.Kind = KindBuzzy
+		}
+	}
+	return es
+}
+
+// enemySpeed is the walker pace: the second quest quickens it.
+func (g *Game) enemySpeed() float64 {
+	if g.SecondQuest {
+		return EnemyWalk * QuestSpeed
+	}
+	return EnemyWalk
+}
+
+// Continue is the original's game-over continue: score zeroed (the
+// original clears it), three lives back, and the quest resumes at the
+// first level of the world where the last life fell. The world card
+// arms a fresh recording, exactly like any new run.
+func (g *Game) Continue() {
+	g.Score = 0
+	g.CoinCount = 0
+	g.Lives = StartLives
+	g.loadLevel((g.levelIndex/4)*4, PowerSmall)
+	g.State = StateWorldCard
+	g.stateTimer = WorldCardTicks
+}
+
 // BeginDaily resets into a daily-challenge run: the host has already
 // swapped in the challenge level (Levels[0]); this arms the flag, resets
 // the run and starts from the world card.
 func (g *Game) BeginDaily() {
 	g.Daily = true
+	g.SecondQuest = false
 	g.newRun()
 }
 
@@ -906,7 +967,7 @@ func instantiate(src *Level) *Level {
 
 // spawnEntities builds the live entity sets from a level's spawn lists.
 func (g *Game) spawnEntities(lvl *Level) {
-	g.Enemies = buildEnemies(lvl)
+	g.Enemies = g.questSwap(buildEnemies(lvl))
 	g.Plants = nil
 	for _, s := range lvl.PlantSpawns {
 		g.Plants = append(g.Plants, newPlant(s))

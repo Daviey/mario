@@ -641,6 +641,9 @@ func drawSprings(f *Frame, g *engine.Game, p *Palette, rc map[rune]Color, camX, 
 // drawWorldCard paints the "WORLD 1-2  x3" interstitial over black.
 func drawWorldCard(f *Frame, g *engine.Game, p *Palette) {
 	f.Fill(0, 0, f.W, f.H, Color{})
+	if g.SecondQuest {
+		drawCenterPx(f, f.H/2-14, "2ND QUEST", p.White, 1)
+	}
 	drawCenterPx(f, f.H/2-6, g.CardName(), p.White, 1)
 	rc := runeColors(p)
 	cx := f.W/2 - 16

@@ -47,6 +47,7 @@ const (
 	JumpBufferTicks = 5
 
 	EnemyWalk           = 0.030
+	QuestSpeed          = 1.2 // second-quest walker quickening
 	ShellSpeed          = 0.22
 	MushroomWalk        = 0.035
 	MushroomEmergeTicks = 26

@@ -453,3 +453,26 @@ func TestDeclineThenBannerRestartRearmsAsk(t *testing.T) {
 		t.Fatalf("ask was not re-offered after banner restart, got %+v", ui)
 	}
 }
+
+func TestSecondQuestDisableRecording(t *testing.T) {
+	// Second-quest runs share the cheats contract: the recorder must
+	// never arm, so no quest row can reach the leaderboard.
+	a := New(&Options{})
+	a.Game.SecondQuest = true
+	a.Feed([]byte("\r")) // title → world card
+	for range 600 {
+		a.Step()
+		if a.Game.State == engine.StatePlaying {
+			break
+		}
+	}
+	if a.Game.State != engine.StatePlaying {
+		t.Fatalf("never reached playing: %v", a.Game.State)
+	}
+	for range 30 {
+		a.Step()
+	}
+	if a.rec.Live() || a.rec.Shippable() {
+		t.Fatal("second-quest run must not be recorded")
+	}
+}

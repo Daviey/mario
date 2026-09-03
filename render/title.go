@@ -25,9 +25,11 @@ func drawOverlayPx(f *Frame, g *engine.Game, p *Palette, titleEls []titleText) {
 	case g.State == engine.StateGameOver:
 		drawBannerPx(f, mid-4, "GAME OVER", p.OverlayFG, p.OverlayBG, p)
 		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
+		drawCenterPx(f, mid+10, "HOLD JUMP: CONTINUE", p.White, 1)
 	case g.State == engine.StateWin:
 		drawBannerPx(f, mid-4, "YOU WIN!", p.OverlayFG, p.OverlayBG, p)
 		drawCenterPx(f, mid+4, "PRESS R TO RESTART", p.White, 1)
+		drawCenterPx(f, mid+10, "ANY KEY: 2ND QUEST", p.White, 1)
 	}
 }
 

@@ -47,7 +47,7 @@ func (g *Game) updateEnemies() {
 			var vx float64
 			switch e.State {
 			case EnemyWalking:
-				vx = float64(e.Dir) * EnemyWalk
+				vx = float64(e.Dir) * g.enemySpeed()
 				// A red koopa never walks off a ledge: grounded,
 				// it probes the ground ahead of its leading foot
 				// and turns before the drop (green koopas march

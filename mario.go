@@ -256,7 +256,7 @@ func (a *App) Step() {
 	// Cheat runs are deliberately unrecorded: without a shippable
 	// recording the UI refuses to submit (UNRECORDED) and the server's
 	// require_replay trigger would reject the row anyway.
-	if !g.Demo && !g.Cheats {
+	if !g.Demo && !g.Cheats && !g.SecondQuest {
 		switch g.State {
 		case engine.StateWorldCard:
 			// A fresh run begins at a card — unless the card follows a
