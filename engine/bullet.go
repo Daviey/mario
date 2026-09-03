@@ -19,6 +19,12 @@ const (
 	BulletW         = 0.75
 	BulletH         = 0.7
 	BlasterRange    = 26 // the player must be inside this span to draw fire
+
+	// BulletCardSpan is how far one card-window of flight reaches —
+	// the berth a respawn column must keep from a ground-row cannon
+	// (spawnThreatNear mirrors it; the respawn grace silences the
+	// shots themselves, like 2-3's leaper spawner).
+	BulletCardSpan = BulletSpeed * WorldCardTicks
 )
 
 // Bullet is one flying shell.
@@ -30,6 +36,9 @@ type Bullet struct {
 // updateBlasters fires each cannon on its hashed cadence while the
 // player is in range; every shot leaves toward the player's side.
 func (g *Game) updateBlasters() {
+	if g.respawnGrace > 0 {
+		return // the respawn card-window: no shots at a fresh respawner
+	}
 	if len(g.Level.BlasterSpawns) == 0 || len(g.Bullets) >= MaxBullets {
 		return
 	}

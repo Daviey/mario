@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // respawnAt drives a real death-and-respawn on one level and returns the
 // game parked in Playing at the checkpoint (card consumed).
@@ -124,6 +127,69 @@ func TestRespawnClearsNewHazards(t *testing.T) {
 			if !o.Gone && overlap(o.Pos.X, o.Pos.Y, o.W, o.H, px, py, SmallW, SmallH) {
 				t.Errorf("%s: podoboo survived the respawn wipe", plant.name)
 			}
+		}
+	}
+}
+
+// TestRespawnGraceSilencesBlasters: the card-window after a respawn
+// must spawn no bullets at all — a fresh respawner standing inside a
+// cannon's span (forced checkpoint, bypassing the picker) would take a
+// muzzle-point shot with no input to dodge with (2026-09-03: the
+// blaster debut predates the grace gate by one commit).
+func TestRespawnGraceSilencesBlasters(t *testing.T) {
+	l := buildLevel(t, 80, func(b *Builder) {
+		b.Fill(28, 12, 29, 12, 'N') // the muzzle spans the checkpoint
+	})
+	l.CheckpointX = 30 // hand-forced: the picker would refuse this column
+	g := respawnAt(t, l)
+	if g.respawnGrace <= 0 {
+		t.Fatal("setup: the grace window is already consumed")
+	}
+	// Deterministic, not cadence-lucky: park the clock one tick before
+	// this cannon's firing tick (the phase is a pure function of its
+	// muzzle column), so the shot WOULD leave on the next Update.
+	phase := int(bowserHash(int(g.Level.BlasterSpawns[0].X), 3))
+	for (g.Tick+1+phase)%BulletFireEvery != 0 {
+		g.Tick++
+	}
+	g.Update(Input{})
+	if len(g.Bullets) != 0 {
+		t.Fatal("blaster fired inside the respawn grace window")
+	}
+	if g.State == StateDying || g.State == StateGameOver {
+		t.Fatal("idle respawner died beside the cannon inside the grace")
+	}
+	// Past the grace, the same alignment speaks again — the silence is
+	// a window, not a broken spawner.
+	for g.respawnGrace > 0 {
+		g.Update(Input{})
+	}
+	for (g.Tick+1+phase)%BulletFireEvery != 0 {
+		g.Tick++
+	}
+	g.Update(Input{})
+	if len(g.Bullets) == 0 {
+		t.Fatal("blasters stayed silent after the grace window expired")
+	}
+}
+
+// TestCheckpointAvoidsBlasterColumns: the auto-checkpoint must keep a
+// ground-row cannon's card-window of bullet travel clear (the span
+// mirrors BulletCardSpan; high shelf cannons are exempt).
+func TestCheckpointAvoidsBlasterColumns(t *testing.T) {
+	l := buildLevel(t, 120, func(b *Builder) {
+		b.Fill(56, 12, 57, 12, 'N') // ground row, dead centre
+		b.Fill(64, 9, 65, 9, 'B')   // a shelf...
+		b.Fill(64, 8, 65, 8, 'N')   // ...whose cannon fires high
+	})
+	mid := l.CheckpointX
+	for _, s := range l.BlasterSpawns {
+		high := s.Y+0.85 <= float64(GroundTop)-SmallH
+		if high {
+			continue
+		}
+		if math.Abs(s.X-(mid+SmallW/2)) < BulletCardSpan+SmallW {
+			t.Fatalf("checkpoint %.0f sits inside the ground cannon at %.1f's flight span", mid, s.X)
 		}
 	}
 }

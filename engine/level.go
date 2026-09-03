@@ -455,6 +455,19 @@ func (l *Level) spawnThreatNear(colX float64, ground int) bool {
 			}
 		}
 	}
+	// A ground-row cannon fires into the respawn body band (bullet
+	// flight is terrain-blind, so nothing between the muzzle and the
+	// column helps): the berth is one card-window of bullet travel.
+	// High cannons (5-1's shelf pair) fire over an idle respawner's
+	// head and are not threats.
+	for _, s := range l.BlasterSpawns {
+		if s.Y+0.15 >= float64(ground) || s.Y+0.85 <= float64(ground)-SmallH {
+			continue // the shell's flight band misses the body band
+		}
+		if math.Abs(s.X-(colX+SmallW/2)) < BulletCardSpan+SmallW {
+			return true
+		}
+	}
 	// A fire bar sweeps a full disc around its hub: MaxReach (entity.go)
 	// is the far edge of the outermost ball's collision box, the exact
 	// law the sweep guard must mirror — counting only FireBarLen-1
