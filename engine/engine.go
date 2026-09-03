@@ -549,6 +549,7 @@ func (g *Game) updatePlaying(in Input) {
 	g.updateBloopers()
 	g.updateBlasters()
 	g.updateBullets()
+	g.updateMaze()
 	g.updateHammerBros()
 	g.updateHammers()
 	g.playerEnemyInteractions()
@@ -899,6 +900,7 @@ func instantiate(src *Level) *Level {
 	lvl.VineRoom = src.VineRoom
 	lvl.DropExitX = src.DropExitX
 	lvl.BlasterSpawns = append([]Vec(nil), src.BlasterSpawns...)
+	lvl.MazeZones = append([]MazeZone(nil), src.MazeZones...)
 	return lvl
 }
 

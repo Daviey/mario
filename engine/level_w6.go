@@ -197,8 +197,8 @@ func level23() *Level {
 
 // level24 is world 6's castle: the pillar gauntlet deepens — fire bars
 // in threes between the pools — before the fake Bowser (a buzzy in the
-// suit) on his bridge, the axe, and the princess, who ends the quest
-// while world 6 is the last world.
+// suit) on his bridge and the axe. Toad waits behind the arena: the
+// princess is in another castle (7-4, since world 7 exists).
 func level24() *Level {
 	b := NewBuilder(180, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -274,7 +274,7 @@ func level24() *Level {
 	}
 	b.Set(158, 12, 'Z') // fake Bowser (buzzy), on the bridge
 	b.Set(165, 12, 'x') // the axe
-	b.Set(174, 12, 'p') // the princess: the quest's end (while 6 is last)
+	b.Set(174, 12, 't') // the toad — the princess is in another castle (7-4)
 	l := mustLevel("6-4", b)
 	l.Time = 300
 	l.BowserDisguise = KindBuzzy

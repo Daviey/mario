@@ -34,6 +34,7 @@ type Builder struct {
 	lifts    []LiftSpawn
 	springs  []Vec
 	currents []CurrentZone
+	mazes    []MazeZone
 }
 
 // NewBuilder returns a blank (all empty) builder.
@@ -117,6 +118,17 @@ func (b *Builder) Coins(y int, xs ...int) {
 	}
 }
 
+// Maze bakes one castle-maze corridor (maze.go): the blocking wall,
+// the low tier and the high tier, and the invisible routing rule.
+// upperOK picks which tier carries the way out — the other loops the
+// corridor back to its entry.
+func (b *Builder) Maze(x0, x1 int, upperOK bool) {
+	b.Fill(x0+4, 10, x0+6, 12, 'B') // the blocking wall
+	b.Fill(x0+2, 9, x1+1, 9, 'B')   // the low tier: landable from the ground
+	b.Fill(x0+7, 6, x1+1, 6, 'B')   // the high tier: one jump up from the low
+	b.mazes = append(b.mazes, MazeZone{X0: x0, X1: x1, UpperOK: upperOK})
+}
+
 // Flag places the goal flagpole at column x, finial at FlagTopRow.
 func (b *Builder) Flag(x int) {
 	b.Set(x, FlagTopRow, 'T')
@@ -160,23 +172,27 @@ func mustLevel(name string, b *Builder) *Level {
 	l.LiftSpawns = b.lifts
 	l.SpringSpawns = b.springs
 	l.Currents = b.currents
+	l.MazeZones = b.mazes
 	return l
 }
 
-// DefaultLevels returns the twenty-four built-in levels (worlds 1-6):
+// DefaultLevels returns the twenty-eight built-in levels (worlds 1-7):
 // 1-1, 1-2, 1-3, 1-4 (castle), 2-1, 2-2 (underwater), 2-3 (bridge),
 // 2-4 (castle), 3-1, 3-2, 3-3 (world-3 night), 3-4 (castle, toad),
 // 4-1, 4-2 (underground vine cellar), 4-3 (athletic), 4-4 (castle,
-// toad), 5-1 (bullet-bill blasters), 5-2 (underground, flooded
+// toad, maze), 5-1 (bullet-bill blasters), 5-2 (underground, flooded
 // middle), 5-3 (elevator flight), 5-4 (castle, toad), 6-1 (plant
-// gauntlet), 6-2 (lift cave), 6-3 (short hop chain) and 6-4 (final
-// castle, the princess ends the quest).
+// gauntlet), 6-2 (lift cave), 6-3 (short hop chain), 6-4 (castle,
+// toad), 7-1 (springboard shelf), 7-2 (underground, second flooded
+// middle), 7-3 (lift chain) and 7-4 (the maze castle, the princess
+// ends the quest).
 func DefaultLevels() []*Level {
 	return []*Level{level1(), level2(), level3(), level4(), level5(), level6(),
 		level7(), level8(), level9(), level10(), level11(), level12(),
 		level13(), level14(), level15(), level16(),
 		level17(), level18(), level19(), level20(),
-		level21(), level22(), level23(), level24()}
+		level21(), level22(), level23(), level24(),
+		level25(), level26(), level27(), level28()}
 }
 
 func level1() *Level {

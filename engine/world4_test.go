@@ -53,8 +53,14 @@ func TestEndingLadder(t *testing.T) {
 	if got := levels[23].Name; got != "6-4" {
 		t.Fatalf("level 23 = %q, want 6-4", got)
 	}
-	if levels[23].Retainer != 2 {
-		t.Errorf("6-4 retainer = %d, want 2 (the princess ends the quest)", levels[23].Retainer)
+	if levels[23].Retainer != 1 {
+		t.Errorf("6-4 retainer = %d, want 1 (the toad — another castle, since world 7 exists)", levels[23].Retainer)
+	}
+	if got := levels[27].Name; got != "7-4" {
+		t.Fatalf("level 27 = %q, want 7-4", got)
+	}
+	if levels[27].Retainer != 2 {
+		t.Errorf("7-4 retainer = %d, want 2 (the princess ends the quest)", levels[27].Retainer)
 	}
 }
 

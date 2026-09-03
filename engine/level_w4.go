@@ -256,10 +256,10 @@ func level15() *Level {
 	return l
 }
 
-// level16 is world 4's castle: the fire-bar gauntlet tightens — pillar
-// pairs between every pool — before the fake Bowser (a goomba, as at
-// the quest's start) on his bridge and the axe. Toad waits behind the
-// arena: the princess is in another castle (5-4, since world 5 exists).
+// level16 is world 4's castle: the fire-bar gauntlet with the original's
+// repeating maze corridor restored mid-hall (maze.go) — before the fake
+// Bowser (a goomba, as at the quest's start) on his bridge and the axe.
+// Toad waits behind the arena: the princess is in another castle.
 func level16() *Level {
 	b := NewBuilder(180, LevelHeight)
 	b.Theme(ThemeCastle)
@@ -312,10 +312,11 @@ func level16() *Level {
 	b.Set(76, 9, 'U')
 	b.Coins(8, 74, 75, 76, 77, 78)
 	b.Set(82, 12, 'K')
-	pillar(94)
-	pillar(99)
+	// The maze retrofit (2026-09-03): the mid-hall pillar pair became
+	// a looping corridor — the low way out, the high way back to its
+	// entry (maze.go; the original 4-4's repeating maze, restored).
+	b.Maze(92, 114, false)
 	b.Set(104, 12, 'W')
-	b.Coins(9, 108, 109, 110)
 	b.Set(112, 12, 'K')
 	pillar(123)
 	pillar(128)

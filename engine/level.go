@@ -113,6 +113,10 @@ type Level struct {
 	// Bullet-bill cannons (bullet.go): the firing state of the 'N' tile
 	// runs — X is the run's centre, Y the cannon row.
 	BlasterSpawns []Vec
+
+	// Castle maze corridors (maze.go): Builder.Maze bakes each zone's
+	// wall and tiers; the zone carries only the routing rule.
+	MazeZones []MazeZone
 }
 
 // CurrentZone is one of 2-2's downward currents: a column span that
