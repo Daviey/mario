@@ -68,3 +68,29 @@ func TestBeginDailyClearsSecondQuest(t *testing.T) {
 		t.Fatal("daily pace must be the classic pace")
 	}
 }
+
+func TestContinueKeepsSecondQuest(t *testing.T) {
+	// A quest run that continues stays a quest run: the flag must
+	// survive Continue (like Reset — the cheats contract) so the
+	// recorder gate holds and the swapped, quickened world stays.
+	g := NewGame(DefaultLevels(), 40, LevelHeight)
+	g.beginSecondQuest()
+	g.loadLevel(5, PowerSmall)
+	g.Lives = 1
+	g.State = StatePlaying
+	g.Update(Input{Suicide: true})
+	for g.State == StateDying {
+		g.Update(Input{})
+	}
+	if g.State != StateGameOver {
+		t.Fatalf("setup: state %v", g.State)
+	}
+	g.Update(Input{})
+	g.Update(Input{Up: true, AnyKey: true})
+	if !g.SecondQuest {
+		t.Fatal("Continue must keep the second-quest flag (unrecorded, quickened)")
+	}
+	if g.enemySpeed() != EnemyWalk*QuestSpeed {
+		t.Fatal("the continued run must keep the quest pace")
+	}
+}

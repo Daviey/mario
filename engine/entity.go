@@ -418,10 +418,13 @@ type Bowser struct {
 	Flipped  bool // killed by fireballs/star: render upside down
 	Gone     bool
 
-	// Disguise is the impostor's true form (worlds 1-4/2-4/3-4 field a
-	// goomba, koopa or buzzy in a Bowser suit). KindGoomba (0) means a
-	// real boss; anything else reveals a flipped corpse of that species
-	// when a combat kill lands (killBowser).
+	// Disguise is the impostor's true form: koopa and buzzy fakes
+	// reveal a flipped corpse of that species on a combat kill
+	// (killBowser). KindGoomba — explicitly set for the goomba fakes
+	// (1-4, 4-4, 7-4) and the zero value an unset boss carries (8-4's
+	// real one) — presents no corpse: the suit falls. The goomba fakes
+	// are deliberately quiet; the ending retainer is the only tell
+	// between them and the real boss.
 	Disguise EnemyKind
 }
 

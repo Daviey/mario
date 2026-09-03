@@ -406,6 +406,66 @@
     if (ac) { try { play(); } catch {} }
   };
 
+  // ---- BGM: window.marioMusic(info) — the wasm bridges the live game
+  // state as {"theme":...,"hurry":bool,"star":bool,"playing":bool}
+  // whenever it changes. Original chiptune loops, one per world
+  // flavour, composed for this game (NOT the Nintendo melodies — the
+  // repo is public MIT). Rides the same lazy AudioContext as the SFX;
+  // the terminal has no music channel, this is the web/APK surface. ----
+  const MF = (m) => 440 * Math.pow(2, (m - 69) / 12); // midi → Hz
+  const THEMES = {
+    overworld: { bpm: 150,
+      lead: [76,79,81,79, 76,72,74,76, 74,72,69,72, 74,76,74,72],
+      bass: [48,55, 45,52, 41,48, 43,50] },
+    underground: { bpm: 110,
+      lead: [64,0,67,0, 64,0,62,0, 60,0,62,0, 64,0,0,0],
+      bass: [40,0, 43,0, 36,0, 40,0] },
+    sky: { bpm: 140,
+      lead: [79,0,83,0, 86,0,83,0, 81,84,88,84, 86,0,0,0],
+      bass: [48,55, 50,57, 52,59, 55,62] },
+    castle: { bpm: 120,
+      lead: [57,58,57,0, 60,59,60,0, 57,58,60,62, 61,60,58,57],
+      bass: [33,0, 36,0, 32,0, 33,0] },
+    underwater: { bpm: 100,
+      lead: [72,76,79,0, 77,74,71,0, 72,76,79,0, 84,81,77,0],
+      bass: [48,0,43,0, 41,0,43,0] },
+    star: { bpm: 180,
+      lead: [72,76,79,84, 79,76,72,76, 74,77,81,86, 81,77,74,77],
+      bass: [48,52, 50,53, 52,55, 53,57] },
+  };
+  const bgm = { key: null, theme: null, hurry: false, star: false,
+                 playing: false, timer: null, nextT: 0, step: 0 };
+  window.marioBgm = bgm; // introspection: tests and curious players
+  const bgmTick = () => {
+    if (!ac || !bgm.playing || muted) return;
+    const th = THEMES[bgm.star ? 'star' : (THEMES[bgm.theme] ? bgm.theme : 'overworld')];
+    const eighth = 60 / (th.bpm * (bgm.hurry ? 1.25 : 1)) / 2;
+    while (bgm.nextT < ac.currentTime + 0.25) {
+      const i = bgm.step % th.lead.length;
+      const m = th.lead[i];
+      if (m) note('square', MF(m), MF(m), eighth * 0.9, bgm.nextT, 0.10);
+      if ((bgm.step & 1) === 0) {
+        const b = th.bass[(bgm.step >> 1) % th.bass.length];
+        if (b) note('triangle', MF(b), MF(b), eighth * 1.8, bgm.nextT, 0.14);
+      }
+      bgm.step++; bgm.nextT += eighth;
+    }
+  };
+  window.marioMusic = (raw) => {
+    let info = raw;
+    try { if (typeof raw === 'string') info = JSON.parse(raw); } catch { return; }
+    if (!info) return;
+    bgm.theme = info.theme; bgm.hurry = !!info.hurry; bgm.star = !!info.star;
+    bgm.playing = !!info.playing;
+    const key = bgm.playing ? (bgm.star ? 'star' : bgm.theme) + (bgm.hurry ? '!' : '') : 'off';
+    if (key !== bgm.key) { // a fresh groove starts from its first beat
+      bgm.key = key;
+      bgm.step = 0;
+      if (ac) bgm.nextT = ac.currentTime + 0.05;
+    }
+    if (bgm.playing && !bgm.timer) bgm.timer = setInterval(bgmTick, 80);
+  };
+
   // Top-bar controls: mute (persisted) and fullscreen + landscape lock.
   // tabindex=-1 + blur() keeps game keys off the buttons.
   const muteBtn = document.getElementById('mute-btn');

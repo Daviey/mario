@@ -26,6 +26,7 @@ import (
 	"strings"
 	"syscall/js"
 
+	"fmt"
 	"github.com/Daviey/mario"
 	"github.com/Daviey/mario/engine"
 	"github.com/Daviey/mario/render"
@@ -113,9 +114,15 @@ func main() {
 	// button only there).
 	sfx := js.Global().Get("marioSfx")
 	titleFn := js.Global().Get("marioTitle")
+	musicFn := js.Global().Get("marioMusic")
 	lastTitle := true
 	if titleFn.Truthy() {
 		titleFn.Invoke(true)
+	}
+	lastMusic := ""
+	if musicFn.Truthy() {
+		lastMusic = musicState(g)
+		musicFn.Invoke(lastMusic)
 	}
 
 	draw := func() { jsFrameSink.deliver(g, pal) }
@@ -139,10 +146,42 @@ func main() {
 				titleFn.Invoke(at)
 			}
 		}
+		if musicFn.Truthy() {
+			if m := musicState(g); m != lastMusic {
+				lastMusic = m
+				musicFn.Invoke(m)
+			}
+		}
 		if app.Quit() {
 			app.ResetToTitle()
 		}
 	}
+}
+
+// musicState renders the BGM state the page's marioMusic consumes:
+// the live level's theme (rooms included — 5-2's dive switches the
+// tune mid-level), the hurry quickening, the star override, and
+// whether play is live (title, pause, game-over and win fall silent).
+func musicState(g *engine.Game) string {
+	theme := "overworld"
+	switch g.Level.Theme {
+	case engine.ThemeUnderground:
+		theme = "underground"
+	case engine.ThemeSky:
+		theme = "sky"
+	case engine.ThemeCastle:
+		theme = "castle"
+	case engine.ThemeUnderwater:
+		theme = "underwater"
+	}
+	playing := true
+	switch {
+	case g.Demo, g.Paused, g.State == engine.StateTitle,
+		g.State == engine.StateGameOver, g.State == engine.StateWin:
+		playing = false
+	}
+	return fmt.Sprintf(`{"theme":%q,"hurry":%t,"star":%t,"playing":%t}`,
+		theme, g.Hurry, g.Player.Star > 0, playing)
 }
 
 // ticker bridges the Go ticker to the browser event loop: each wait yields
